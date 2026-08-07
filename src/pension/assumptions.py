@@ -28,9 +28,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+from .formula import Formula, FormulaError
 from .normalize import Gender, text
 
 __all__ = [
+    "BENEFIT_MODES",
+    "CUMULATIVE",
+    "FORMULA",
+    "PROGRESSIVE",
     "STATUTORY_RULE",
     "Assumptions",
     "BenefitScale",
@@ -57,6 +62,8 @@ WITHDRAWAL_SHEET: Final = "퇴직률"
 MORTALITY_SHEET: Final = "사망률"
 BENEFIT_SHEET: Final = "지급률"
 LONGTERM_SHEET: Final = "장기급여지급률"
+BENEFIT_RULE_SHEET: Final = "지급률규정"
+"""규정별 방식(누적/누진/수식)과 수식 코드를 적는 시트."""
 
 
 @dataclass(slots=True)
@@ -189,22 +196,91 @@ class SalaryScale:
         return SalaryScale(base_up=self.base_up.shifted(delta), promotion=self.promotion)
 
 
+CUMULATIVE: Final = "누적"
+"""지급률 방식 — 표 값이 해당 근속연수의 **누적** 배수 그 자체."""
+
+PROGRESSIVE: Final = "누진"
+"""지급률 방식 — 표 값이 **그 구간에서만** 적용되는 배수. 구간별로 쌓아 합산한다."""
+
+FORMULA: Final = "수식"
+"""지급률 방식 — 배수를 수식으로 직접 계산."""
+
+BENEFIT_MODES: Final = (CUMULATIVE, PROGRESSIVE, FORMULA)
+
+
+def _progressive_multiple(curve: RateCurve, service: float) -> float:
+    """누진 구간표의 누적 배수.
+
+    표가 ``{0: 1.0, 5: 1.5, 10: 2.0}`` 이면 "0~5년 구간은 연 1.0배, 5~10년 구간은
+    연 1.5배, 10년 이후는 연 2.0배" 라는 뜻이다. 근속 12년이면::
+
+        5 × 1.0  +  5 × 1.5  +  2 × 2.0  =  16.5
+
+    누진제 퇴직금 규정을 표만으로 적을 수 있어, 수식을 쓰지 않아도 되는 경우가
+    대부분이다.
+    """
+    if service <= 0 or not curve.points:
+        return 0.0
+
+    bounds = sorted(curve.points)
+    total = 0.0
+    for index, start in enumerate(bounds):
+        if service <= start:
+            break
+        end = bounds[index + 1] if index + 1 < len(bounds) else service
+        span = min(service, end) - start
+        if span > 0:
+            total += span * curve.points[start]
+    return total
+
+
 @dataclass(slots=True)
 class BenefitScale:
-    """지급률 표.
+    """지급률 규정 묶음.
 
     퇴직급여는 근속연수에 대한 **월평균임금 배수**(법정이면 근속연수와 동일),
     장기급여는 **일 기본급 대비 지급일수** 를 담는다.
+
+    규정마다 세 가지 방식 중 하나를 쓴다.
+
+    ``누적``
+        표 값이 그대로 누적 배수. 계단식 조회를 한다(기본값).
+    ``누진``
+        표 값이 구간별 연 배수. :func:`_progressive_multiple` 로 합산한다.
+    ``수식``
+        :class:`~pension.formula.Formula` 로 계산한다.
     """
 
     curves: dict[str, RateCurve] = field(default_factory=dict)
     statutory_when_missing: bool = True
     """규정을 못 찾으면 법정 퇴직금(배수 = 근속연수)으로 볼지."""
 
-    def multiple(self, rule: str, service: float) -> float:
-        curve = self.curves.get(text(rule))
+    modes: dict[str, str] = field(default_factory=dict)
+    """규정명 → 방식. 없으면 ``누적``."""
+
+    formulas: dict[str, Any] = field(default_factory=dict)
+    """규정명 → :class:`Formula`. ``수식`` 방식일 때 쓴다."""
+
+    def mode(self, rule: str) -> str:
+        return self.modes.get(text(rule), CUMULATIVE)
+
+    def multiple(self, rule: str, service: float, **context: Any) -> float:
+        """근속 ``service`` 년의 지급 배수.
+
+        :param context: 수식 방식에서 쓸 추가 변수(``x``, ``N``, ``S``, ``제도`` 등).
+            표 방식에서는 무시된다.
+        """
+        name = text(rule)
+
+        formula = self.formulas.get(name)
+        if formula is not None:
+            return formula.evaluate(t=service, **context)
+
+        curve = self.curves.get(name)
         if curve is None:
             return service if self.statutory_when_missing else 0.0
+        if self.mode(name) == PROGRESSIVE:
+            return _progressive_multiple(curve, service)
         return curve.rate(service)
 
     def milestones(self, rule: str) -> list[tuple[int, float]]:
@@ -215,7 +291,8 @@ class BenefitScale:
         return sorted(curve.points.items())
 
     def has_rule(self, rule: str) -> bool:
-        return text(rule) in self.curves
+        name = text(rule)
+        return name in self.curves or name in self.formulas
 
 
 @dataclass(slots=True)
@@ -336,10 +413,68 @@ def _read_rate_table(wb, sheet_name: str, *, as_rate: bool = True) -> RateTable:
     return table
 
 
-def _read_benefit_scale(wb, sheet_name: str, *, statutory: bool) -> BenefitScale:
+def _read_rule_modes(wb) -> tuple[dict[str, str], dict[str, Formula], list[str]]:
+    """``지급률규정`` 시트에서 규정별 방식과 수식을 읽는다.
+
+    시트가 없으면 전부 ``누적`` 방식으로 본다(기존 파일과 호환).
+
+    :returns: (방식 표, 수식 표, 오류 메시지 목록)
+    """
+    modes: dict[str, str] = {}
+    formulas: dict[str, Formula] = {}
+    problems: list[str] = []
+
+    if BENEFIT_RULE_SHEET not in wb.sheetnames:
+        return modes, formulas, problems
+
+    ws = wb[BENEFIT_RULE_SHEET]
+    for row, _ in _rows(ws):
+        name = text(ws.cell(row, 1).value)
+        if not name:
+            continue
+        mode = text(ws.cell(row, 2).value) or CUMULATIVE
+        if mode not in BENEFIT_MODES:
+            problems.append(
+                f"{BENEFIT_RULE_SHEET}!B{row}: 방식 '{mode}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(BENEFIT_MODES)} 중 하나)"
+            )
+            continue
+        modes[name] = mode
+
+        source = text(ws.cell(row, 3).value)
+        if mode == FORMULA:
+            if not source:
+                problems.append(f"{BENEFIT_RULE_SHEET}!C{row}: '{name}' 은 수식 방식인데 수식이 비어 있습니다")
+                continue
+            try:
+                formulas[name] = Formula(source)
+            except FormulaError as exc:
+                problems.append(f"{BENEFIT_RULE_SHEET}!C{row}: {exc}")
+        elif source:
+            problems.append(
+                f"{BENEFIT_RULE_SHEET}!C{row}: '{name}' 은 {mode} 방식이라 수식을 쓰지 않습니다"
+                " (방식을 '수식'으로 바꾸거나 수식을 비우세요)"
+            )
+
+    return modes, formulas, problems
+
+
+def _read_benefit_scale(
+    wb,
+    sheet_name: str,
+    *,
+    statutory: bool,
+    modes: dict[str, str] | None = None,
+    formulas: dict[str, Formula] | None = None,
+) -> BenefitScale:
     """지급률 표. 값은 배수·일수이므로 비율 환산을 하지 않는다."""
     table = _read_rate_table(wb, sheet_name, as_rate=False)
-    return BenefitScale(curves=dict(table.curves), statutory_when_missing=statutory)
+    return BenefitScale(
+        curves=dict(table.curves),
+        statutory_when_missing=statutory,
+        modes=dict(modes or {}),
+        formulas=dict(formulas or {}),
+    )
 
 
 def _read_single_curve(wb, sheet_name: str) -> RateCurve:
@@ -397,6 +532,12 @@ def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assum
             )
         flat = next(iter(spot.points.values())) if len(spot.points) == 1 else None
 
+        modes, formulas, problems = _read_rule_modes(wb)
+        if problems:
+            raise ValueError(
+                "지급률 규정을 읽지 못했습니다:\n  · " + "\n  · ".join(problems)
+            )
+
         return Assumptions(
             discount=DiscountCurve(spot=spot, flat=flat),
             salary=SalaryScale(
@@ -405,12 +546,83 @@ def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assum
             ),
             withdrawal=_read_rate_table(wb, WITHDRAWAL_SHEET),
             mortality=_read_mortality(wb),
-            severance_benefit=_read_benefit_scale(wb, BENEFIT_SHEET, statutory=True),
+            severance_benefit=_read_benefit_scale(
+                wb, BENEFIT_SHEET, statutory=True, modes=modes, formulas=formulas
+            ),
             longterm_benefit=_read_benefit_scale(wb, LONGTERM_SHEET, statutory=False),
             label=label,
         )
     finally:
         wb.close()
+
+
+def _as_stored_formula(source: str) -> str:
+    """지급률 수식을 셀에 저장할 형태로.
+
+    앞의 ``=`` 를 떼고 저장한다. 두 가지 이유가 있다.
+
+    1. ``=`` 로 시작하는 문자열을 셀에 넣으면 엑셀 수식 셀이 된다. 그러면
+       ``data_only=True`` 로 읽을 때 계산된 값(없으므로 ``None``)이 돌아와,
+       수식 규정이 통째로 사라진다.
+    2. 엑셀에서 그 파일을 열면 ``t`` 를 모르는 함수로 보고 ``#NAME?`` 를 띄운다.
+
+    :func:`Formula` 는 ``=`` 가 있든 없든 받으므로 읽을 때는 문제가 없다.
+    """
+    text_value = text(source)
+    return text_value[1:].strip() if text_value.startswith("=") else text_value
+
+
+def write_assumptions(
+    path: str | Path,
+    sheets: dict[str, tuple[list[str], list[list[Any]]]],
+    rules: dict[str, tuple[str, str]] | None = None,
+) -> Path:
+    """기초율 워크북을 쓴다.
+
+    가정 입력 화면이 모은 값을 파일로 떨구는 통로다. 화면 위젯과 분리해 두어야
+    파일 서식을 화면 없이도 검증할 수 있다.
+
+    :param sheets: 시트명 → (머리글 목록, 행 목록).
+    :param rules: 규정명 → (방식, 수식). ``지급률규정`` 시트로 나간다.
+    """
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    path = Path(path)
+    wb = openpyxl.Workbook()
+    del wb["Sheet"]
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="44546A")
+
+    def write_sheet(name: str, headers: list[str], rows: list[list[Any]]) -> None:
+        ws = wb.create_sheet(name)
+        for col, title in enumerate(headers, start=1):
+            cell = ws.cell(1, col, title)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
+            ws.column_dimensions[cell.column_letter].width = max(12, len(str(title)) + 4)
+        for offset, values in enumerate(rows, start=2):
+            for col, value in enumerate(values, start=1):
+                ws.cell(offset, col, value)
+        ws.freeze_panes = "A2"
+
+    for name, (headers, rows) in sheets.items():
+        write_sheet(name, headers, rows)
+
+    if rules is not None:
+        write_sheet(
+            BENEFIT_RULE_SHEET,
+            ["규정명", "방식", "수식", "설명"],
+            [
+                [name, mode, _as_stored_formula(source), ""]
+                for name, (mode, source) in rules.items()
+            ],
+        )
+
+    wb.save(path)
+    return path
 
 
 def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
@@ -470,8 +682,19 @@ def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
     )
     make(
         BENEFIT_SHEET, ["근속연수", *rules],
-        "· 30일 평균임금 대비 누적 지급배수입니다. 비워 두면 법정 퇴직금(배수 = 근속연수)으로 봅니다.",
+        "· 30일 평균임금 대비 지급배수입니다. 비워 두면 법정 퇴직금(배수 = 근속연수)으로 봅니다."
+        "\n· 값의 의미는 '지급률규정' 시트의 방식에 따라 달라집니다."
+        " 누적=그 근속연수의 누적 배수, 누진=그 구간에서만 적용할 연 배수.",
         [[1, *[1.0] * len(rules)], [10, *[10.0] * len(rules)], [20, *[20.0] * len(rules)]],
+    )
+    make(
+        BENEFIT_RULE_SHEET, ["규정명", "방식", "수식", "설명"],
+        "· 방식: 누적(표 값이 누적 배수) / 누진(표 값이 구간별 연 배수) / 수식(아래 수식으로 계산)"
+        "\n· 수식 변수: t=근속연수, x=연령, N=정년연령, S=30일 평균임금, 제도, 직군"
+        "\n· 수식 함수: IF AND OR NOT MIN MAX ABS ROUND ROUNDDOWN ROUNDUP FLOOR CEILING TRUNC"
+        "\n· 수식 예시: =IF(t<10, t*1.0, 10 + (t-10)*2.0)"
+        "\n· 되도록 누진 방식(표)을 쓰세요. 수식은 표로 담기 어려운 규정에만 씁니다.",
+        [[rule, CUMULATIVE, "", ""] for rule in rules],
     )
     make(
         LONGTERM_SHEET, ["근속연수", *rules],

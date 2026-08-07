@@ -42,6 +42,7 @@ pip install -e .
 python -m pension
 
 # 배치
+python -m pension assumptions --roster 명부.xlsm            # 산출 가정 입력 화면
 python -m pension template 기초율.xlsx --roster 명부.xlsm   # 기초율 양식 생성
 python -m pension check 명부.xlsm                            # 검증만
 python -m pension calc 명부.xlsm 기초율.xlsx -o 산출결과.xlsx
@@ -66,7 +67,8 @@ python -m pension calc 명부.xlsm 기초율.xlsx -o 산출결과.xlsx
 
 ### 2. 기초율 워크북
 
-`pension template` 또는 GUI의 **[기초율 양식 새로 만들기]** 로 양식을 만든 뒤 채웁니다.
+GUI의 **[산출 가정 입력]** 화면에서 채우거나, `pension template` 로 양식을 만들어
+엑셀에서 채웁니다.
 
 | 시트 | A열 | B열 이후 |
 |---|---|---|
@@ -76,7 +78,12 @@ python -m pension calc 명부.xlsm 기초율.xlsx -o 산출결과.xlsx
 | `퇴직률` | 연령 또는 근속 | 규정명별 연간 중도퇴직률 |
 | `사망률` | 연령 | 남자 / 여자 |
 | `지급률` | 근속연수 | 규정명별 월평균임금 대비 배수 — **비우면 법정 퇴직금** |
+| `지급률규정` | 규정명 | 방식(누적/누진/수식) · 수식 |
 | `장기급여지급률` | 근속연수 | 규정명별 지급일수 (일 기본급 × 일수) |
+
+지급률은 세 가지 방식으로 적을 수 있습니다 — **누적**(표 값이 누적 배수), **누진**
+(표 값이 구간별 연 배수), **수식**(엑셀 문법의 조건부 계산식).
+자세한 내용은 [지급률 규정 작성법](docs/지급률규정-작성법.md)을 보십시오.
 
 모든 표는 **계단식 조회** 입니다. 20·25·30세 행만 있으면 27세는 25세 행 값을 씁니다.
 A1 셀을 `연령` ↔ `근속` 으로 바꾸면 조회 기준이 바뀝니다.
@@ -134,6 +141,8 @@ src/pension/
   validation.py    검증 (오류 일괄 수집)
   upload.py        UpLoad_Jae / UpLoad_Toi 생성
   assumptions.py   기초율 로딩 및 양식 생성
+  editor.py        산출 가정 입력 화면
+  formula.py       지급률 규정 수식 (안전한 엑셀형 표현식)
   actuarial.py     연령·근속·정년연령
   valuation.py     PUC 확정급여채무
   longterm.py      기타장기종업원급여

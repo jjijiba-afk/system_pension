@@ -56,7 +56,7 @@ class TestCommands:
         wb = openpyxl.load_workbook(out)
         assert set(wb.sheetnames) == {
             "할인율", "임금상승률", "승급률", "퇴직률",
-            "사망률", "지급률", "장기급여지급률",
+            "사망률", "지급률", "지급률규정", "장기급여지급률",
         }
 
     def test_template_uses_rule_names_from_the_roster(
