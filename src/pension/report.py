@@ -44,6 +44,7 @@ def _styles():
         "total_fill": PatternFill("solid", fgColor="FFF2CC"),
         "error_fill": PatternFill("solid", fgColor="FCE4E4"),
         "warn_fill": PatternFill("solid", fgColor="FFF6E0"),
+        "info_fill": PatternFill("solid", fgColor="EEF3F8"),
         "center": Alignment(horizontal="center", vertical="center", wrap_text=True),
         "border": Border(left=thin, right=thin, top=thin, bottom=thin),
     }
@@ -308,12 +309,21 @@ def _issues_sheet(wb, run: PensionRun) -> None:
 
     next_row = _write_table(ws, headers, rows, widths={8: 60, 9: 20})
 
+    fills = {
+        Severity.ERROR: st["error_fill"],
+        Severity.WARNING: st["warn_fill"],
+        Severity.INFO: st["info_fill"],
+    }
     for offset, issue in enumerate(run.issues, start=2):
-        fill = st["error_fill"] if issue.severity is Severity.ERROR else st["warn_fill"]
+        fill = fills[issue.severity]
         for col in range(1, len(headers) + 1):
             ws.cell(offset, col).fill = fill
 
-    ws.cell(next_row + 1, 1, f"오류 {len(run.issues.errors)}건 / 경고 {len(run.issues.warnings)}건")
+    ws.cell(
+        next_row + 1, 1,
+        f"오류 {len(run.issues.errors)}건 / 경고 {len(run.issues.warnings)}건 "
+        f"/ 안내 {len(run.issues.notices)}건",
+    )
     ws.auto_filter.ref = f"A1:I{max(2, len(rows) + 1)}"
 
 

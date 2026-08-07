@@ -17,7 +17,7 @@ from collections import defaultdict
 
 from .actuarial import attained_age
 from .config import CalculationConfig
-from .errors import IssueLog
+from .errors import IssueLog, Severity
 from .models import ActiveMember, RetiredMember, Roster
 from .normalize import BenefitPlan, EmployeeType, RetirementReason, is_ambiguous_reason
 from .readers import ACTIVE_COLUMNS, ACTIVE_SHEET, RETIRED_COLUMNS, RETIRED_SHEET
@@ -28,6 +28,70 @@ __all__ = ["validate_active", "validate_retired", "validate_roster"]
 def _col(sheet: str, key: str) -> str:
     table = ACTIVE_COLUMNS if sheet == ACTIVE_SHEET else RETIRED_COLUMNS
     return table[key].letter
+
+
+def _report_gap(
+    members,
+    missing,
+    sheet: str,
+    field_name: str,
+    log: IssueLog,
+    code: str,
+    *,
+    each: str,
+    whole: str,
+    severity: Severity = Severity.WARNING,
+    whole_severity: Severity | None = None,
+) -> bool:
+    """한 열이 **통째로** 비었으면 한 줄로, 일부만 비었으면 사람마다 보고한다.
+
+    같은 말을 수백 번 반복하면 정작 봐야 할 항목이 묻힌다. 실제 케이스 6건에서
+    경고 1,452건 중 1,211건이 '성명이 비어 있습니다' 였고, 여섯 파일 모두 성명이
+    한 명도 없었다 — 개인정보를 지우고 보낸 것이지 누락이 아니다. 케이스 10 은
+    퇴직사유 24건이 전부 비어 한 가지 사실이 24번 보고됐다.
+
+    열 전체가 비었다는 것은 사람별 누락이 아니라 **회사가 그 칸을 채우지 않았다**
+    는 한 가지 사실이므로, 한 줄로 말하는 편이 조치하기 쉽다.
+
+    :param each: 일부만 빈 경우 사람별 메시지.
+    :param whole: 열 전체가 빈 경우의 메시지. ``{n}`` 에 인원수가 들어간다.
+    :param whole_severity: 열 전체가 빈 경우의 심각도. 생략하면 ``severity``.
+    :returns: 열 전체가 비어 한 줄로 보고했는지.
+    """
+    missing = list(missing)
+    if not members or not missing:
+        return False
+
+    column = _col(sheet, field_name)
+    if len(missing) == len(members):
+        log.add(
+            whole_severity or severity, code, whole.format(n=len(members)),
+            sheet=sheet, column=column,
+        )
+        return True
+
+    for member in missing:
+        log.add(
+            severity, code, each,
+            sheet=sheet, row=member.row, seq=member.seq,
+            employee_id=member.employee_id, column=column,
+        )
+    return False
+
+
+def _check_names(members, sheet: str, log: IssueLog, code: str) -> bool:
+    """성명 누락 검사. 시트 전체가 비었으면 개인정보 마스킹으로 본다.
+
+    계리법인에 명부를 보낼 때 성명을 지우고 사번만 남기는 것이 표준 관행이다.
+    산출은 사번으로 하므로 지장이 없어 경고가 아니라 안내로 남긴다.
+    """
+    return _report_gap(
+        members, [m for m in members if not m.name], sheet, "name", log, code,
+        each="성명이 비어 있습니다",
+        whole=f"{sheet}의 성명이 전부 비어 있습니다({{n}}명). "
+              "개인정보를 지우고 보낸 명부로 보고 사번으로 식별합니다",
+        whole_severity=Severity.INFO,
+    )
 
 
 def _check_duplicate_ids(members, sheet: str, log: IssueLog, code: str) -> None:
@@ -63,13 +127,10 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
     """재직자명부 검증 및 파생값(연령·정년연령) 채우기."""
     sheet = ACTIVE_SHEET
     _check_duplicate_ids(members, sheet, log, "JAE_DUP_ID")
+    _check_names(members, sheet, log, "JAE_NAME_MISSING")
 
     for member in members:
         kw = dict(sheet=sheet, row=member.row, seq=member.seq, employee_id=member.employee_id)
-
-        if not member.name:
-            log.warning("JAE_NAME_MISSING", "성명이 비어 있습니다",
-                        column=_col(sheet, "name"), **kw)
 
         # ── 직군 매칭 (종전 규칙: 미매칭이면 산출 중단) ──────────────────
         rule = None
@@ -157,8 +218,14 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
 
         # ── 제도구분 (종전 규칙: 공란이면 산출 중단) ─────────────────────
         if member.plan is None:
-            log.error("JAE_PLAN_MISSING", "퇴직급여 제도구분이 비었거나 알 수 없는 값입니다",
-                      column=_col(sheet, "plan"), **kw)
+            detail = (
+                f"'{member.plan_raw}' 은(는) 해석할 수 없는 값입니다"
+                if member.plan_raw else "비어 있습니다"
+            )
+            log.error("JAE_PLAN_MISSING",
+                      f"퇴직급여 제도구분이 {detail} "
+                      "(DB / DC / 퇴직금제도 중 하나로 적어 주세요)",
+                      column=_col(sheet, "plan"), value=member.plan_raw, **kw)
 
         if member.accrued_benefit < 0:
             log.warning("JAE_ACCRUED_NEGATIVE", "퇴직급여추계액이 음수입니다",
@@ -202,13 +269,24 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
     """퇴직자명부 검증 및 파생값 채우기."""
     sheet = RETIRED_SHEET
     _check_duplicate_ids(members, sheet, log, "TOI_DUP_ID")
+    _check_names(members, sheet, log, "TOI_NAME_MISSING")
+
+    # 퇴직사유는 경험퇴직률과 지급액 집계(중간정산·전출 분리)에 쓰이므로 오류다.
+    # 다만 열이 통째로 비면 사람별 누락이 아니라 회사가 그 칸을 안 채운 것이라
+    # 한 줄로 말한다. 케이스 10 은 24건이 전부 비어 있었다.
+    _report_gap(
+        members, [m for m in members if m.reason is None], sheet, "reason", log,
+        "TOI_REASON_MISSING",
+        each="지급(퇴직)사유 구분을 1~6 중 하나로 입력하세요 "
+             "(1:중도 2:사망 3:DC전환 4:정년 5:계열사전출 6:사업처분/분할)",
+        whole=f"{sheet}의 지급(퇴직)사유 구분이 전부 비어 있습니다({{n}}명). "
+              "중간정산·계열사 전출을 가려낼 수 없어 당기 퇴직급여 지급액이 "
+              "과대계상됩니다. 1~6 중 하나로 채워 주세요",
+        severity=Severity.ERROR,
+    )
 
     for member in members:
         kw = dict(sheet=sheet, row=member.row, seq=member.seq, employee_id=member.employee_id)
-
-        if not member.name:
-            log.warning("TOI_NAME_MISSING", "성명이 비어 있습니다",
-                        column=_col(sheet, "name"), **kw)
 
         if member.job_group_index is None:
             if not config.job_group_rules:
@@ -222,14 +300,6 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
                     f"직군 '{member.job_group_raw}' 이(가) Input 시트에 없습니다 (등록된 직군: {known})",
                     column=_col(sheet, "job_group"), value=member.job_group_raw, **kw,
                 )
-
-        if member.reason is None:
-            log.error(
-                "TOI_REASON_MISSING",
-                "지급(퇴직)사유 구분을 1~6 중 하나로 입력하세요 "
-                "(1:중도 2:사망 3:DC전환 4:정년 5:계열사전출 6:사업처분/분할)",
-                column=_col(sheet, "reason"), **kw,
-            )
 
         # 근로자퇴직급여보장법 제4조 단서: 계속근로기간 1년 미만은 퇴직급여
         # 지급 대상이 아니다. 그런 퇴직자는 제도구분·지급액이 비어 있는 것이
@@ -246,8 +316,14 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
                     column=_col(sheet, "plan"), **kw,
                 )
             else:
-                log.error("TOI_PLAN_MISSING", "퇴직급여 제도구분이 비었거나 알 수 없는 값입니다",
-                          column=_col(sheet, "plan"), **kw)
+                detail = (
+                    f"'{member.plan_raw}' 은(는) 해석할 수 없는 값입니다"
+                    if member.plan_raw else "비어 있습니다"
+                )
+                log.error("TOI_PLAN_MISSING",
+                          f"퇴직급여 제도구분이 {detail} "
+                          "(DB / DC / 퇴직금제도 중 하나로 적어 주세요)",
+                          column=_col(sheet, "plan"), value=member.plan_raw, **kw)
 
         if member.birth_date and member.hire_date and member.birth_date >= member.hire_date:
             log.error("TOI_BIRTH_AFTER_HIRE", "생년월일이 입사일보다 늦거나 같습니다",
@@ -306,6 +382,17 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
                     "TOI_TOTAL_MISSING_SHORT",
                     f"퇴직급여 총지급금액이 없습니다 (근속 {member.service_years():.2f}년으로 "
                     "1년 미만이라 지급 대상이 아닙니다)",
+                    column=_col(sheet, "total_payment"), **kw,
+                )
+            elif member.plan is BenefitPlan.DC:
+                # DC 는 회사가 매년 부담금을 납입하는 것으로 의무가 끝나고, 퇴직할
+                # 때의 급여는 운용사가 가입자 계좌에서 지급한다. 회사 명부의
+                # 지급금액이 0 인 것이 오히려 정상이다. 실제 케이스 6건에서
+                # 이 오류 39건 중 31건이 DC 가입자였다.
+                log.warning(
+                    "TOI_TOTAL_MISSING_DC",
+                    "퇴직급여 총지급금액이 없습니다 (DC 가입자는 운용사가 계좌에서 "
+                    "지급하므로 회사 지급액이 0 일 수 있습니다)",
                     column=_col(sheet, "total_payment"), **kw,
                 )
             else:

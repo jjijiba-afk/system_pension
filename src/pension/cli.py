@@ -111,12 +111,17 @@ def _print_issue_list(issues: list, limit: int = 30) -> None:
     """이슈 목록을 오류 먼저, 최대 ``limit`` 건까지 출력한다."""
     errors = [i for i in issues if i.severity is Severity.ERROR]
     warnings = [i for i in issues if i.severity is Severity.WARNING]
+    notices = [i for i in issues if i.severity is Severity.INFO]
     for issue in (errors + warnings)[:limit]:
         print(f"  {issue}")
     total = len(errors) + len(warnings)
     if total > limit:
         print(f"  … 외 {total - limit}건")
-    print(f"\n오류 {len(errors)}건 / 경고 {len(warnings)}건")
+
+    # 안내는 확인할 것이 없으므로 잘라내지 않고 끝에 모아 보여 준다.
+    for issue in notices:
+        print(f"  {issue}")
+    print(f"\n오류 {len(errors)}건 / 경고 {len(warnings)}건 / 안내 {len(notices)}건")
 
 
 def _print_issues(log, limit: int = 30) -> None:
