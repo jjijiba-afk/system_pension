@@ -316,10 +316,16 @@ def _issues_sheet(wb, run: PensionRun) -> None:
 
 def _upload_sheet(wb, title: str, headers: tuple[str, ...], rows: list[list[Any]]) -> None:
     ws = wb.create_sheet(title)
-    date_cols = {7, 8, 9, 10, 20, 33} if "Jae" in title else {7, 8, 9, 10}
-    money_cols = (
-        {10, 11, 12, 13, 17, 21, 22, 34} if "Jae" in title else {13, 14, 15, 16, 17, 18}
-    )
+    if "Jae" in title:
+        # 생년월일·입사일자·중간정산일 / 전입일 / 추가지급 기준일
+        date_cols = {7, 8, 9, 20, 33}
+        # 평균임금·명퇴임금·추계액·일기본급 / 중간정산금액 / 장기급여·전입액 / 추가지급 기본급
+        money_cols = {10, 11, 12, 13, 17, 21, 22, 34}
+    else:
+        # 생년월일·입사일·퇴사일·사외자산 지급일 / 총지급 ~ 전출지급
+        date_cols = {7, 8, 9, 10}
+        money_cols = {13, 14, 15, 16, 17, 18}
+
     formats = dict.fromkeys(date_cols, _DATE)
     formats.update(dict.fromkeys(money_cols, _MONEY))
     _write_table(ws, headers, rows or [[""] * len(headers)], formats=formats)
