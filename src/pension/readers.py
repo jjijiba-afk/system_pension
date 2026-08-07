@@ -378,7 +378,8 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.extra_rate = _number(get("extra_rate"))
         member.extra_pay_base_wage = _number(get("extra_pay_base_wage"))
 
-        member.plan = normalize_benefit_plan(get("plan"))
+        member.plan_raw = text(get("plan"))
+        member.plan = normalize_benefit_plan(member.plan_raw)
         member.longterm_target = normalize_yes_no(get("longterm_target"))
         member.wage_peak_age = _optional_int(get("wage_peak_age"))
         member.payout_multiple = _multiple(get("payout_multiple"))
@@ -473,7 +474,8 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
 
         member.reason_raw = text(get("reason"))
         member.reason = normalize_retirement_reason(get("reason"))
-        member.plan = normalize_benefit_plan(get("plan"))
+        member.plan_raw = text(get("plan"))
+        member.plan = normalize_benefit_plan(member.plan_raw)
 
         member.total_payment = _number(get("total_payment"))
         member.fund_payment = _number(get("fund_payment"))

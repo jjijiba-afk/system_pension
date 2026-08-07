@@ -212,3 +212,112 @@ def test_roster_with_mixed_issues_still_produces_a_roster(config) -> None:
     validate_retired(roster.retired, config, log)
     assert len(roster.active) == 2
     assert len(roster.retired) == 2
+
+
+class TestNoiseReduction:
+    """같은 말을 수백 번 반복하면 정작 봐야 할 항목이 묻힌다.
+
+    실제 케이스 6건에서 경고 1,452건 중 1,211건이 '성명이 비어 있습니다' 였다.
+    여섯 파일 모두 성명이 **한 명도** 없었다 — 개인정보를 지우고 사번만 남겨
+    보내는 표준 관행이지 누락이 아니다.
+    """
+
+    def test_fully_masked_names_collapse_to_one_notice(self, config) -> None:
+        from pension.errors import Severity
+
+        log = IssueLog()
+        members = [_active(seq=i, employee_id=f"A{i}", name="") for i in range(1, 51)]
+        validate_active(members, config, log)
+
+        named = [i for i in log if i.code == "JAE_NAME_MISSING"]
+        assert len(named) == 1
+        assert named[0].severity is Severity.INFO
+        assert "50명" in named[0].message
+        assert not log.warnings
+
+    def test_partial_blanks_are_still_reported_per_person(self, config) -> None:
+        """일부만 비었으면 진짜 누락일 수 있다."""
+        log = IssueLog()
+        members = [_active(seq=i, employee_id=f"A{i}") for i in range(1, 6)]
+        members[2].name = ""
+        validate_active(members, config, log)
+
+        named = [i for i in log if i.code == "JAE_NAME_MISSING"]
+        assert len(named) == 1
+        assert named[0].seq == 3
+        assert named[0] in log.warnings
+
+    def test_notices_are_not_counted_as_warnings(self, config) -> None:
+        log = IssueLog()
+        validate_active([_active(name="")], config, log)
+        assert log.notices and not log.warnings and not log.has_errors()
+
+
+class TestRetirementReasonColumn:
+    """퇴직사유는 경험퇴직률과 지급액 집계에 쓰이므로 비면 오류다.
+
+    다만 케이스 10 은 24명 전부 비어 있었다. 사람별 누락이 아니라 회사가 그
+    칸을 안 채운 것이므로 한 줄로 말한다.
+    """
+
+    def test_whole_column_blank_is_one_error(self, config) -> None:
+        log = IssueLog()
+        members = [
+            _retired(seq=i, employee_id=f"T{i}", reason=None) for i in range(1, 25)
+        ]
+        validate_retired(members, config, log)
+
+        found = [i for i in log if i.code == "TOI_REASON_MISSING"]
+        assert len(found) == 1
+        assert found[0] in log.errors
+        assert "24명" in found[0].message
+
+    def test_partial_blanks_are_reported_per_person(self, config) -> None:
+        log = IssueLog()
+        members = [_retired(seq=i, employee_id=f"T{i}") for i in range(1, 5)]
+        members[1].reason = None
+        validate_retired(members, config, log)
+
+        found = [i for i in log if i.code == "TOI_REASON_MISSING"]
+        assert len(found) == 1
+        assert found[0].seq == 2
+
+
+class TestDcRetiredPayment:
+    """DC 는 회사가 부담금 납입으로 의무가 끝나고, 퇴직급여는 운용사가 지급한다.
+
+    회사 명부의 지급액이 0 인 것이 정상이다. 실제 케이스에서 이 오류 39건 중
+    31건이 DC 가입자였다.
+    """
+
+    def test_zero_payment_is_only_a_warning_for_dc(self, config) -> None:
+        log = IssueLog()
+        validate_retired([_retired(plan=BenefitPlan.DC, total_payment=0)], config, log)
+        assert not log.has_errors()
+        assert any(i.code == "TOI_TOTAL_MISSING_DC" for i in log.warnings)
+
+    def test_zero_payment_is_still_an_error_for_db(self, config) -> None:
+        log = IssueLog()
+        validate_retired([_retired(plan=BenefitPlan.DB, total_payment=0)], config, log)
+        assert any(i.code == "TOI_TOTAL_MISSING" for i in log.errors)
+
+
+class TestUnknownPlanValue:
+    """'퇴직금 예외' 처럼 해석할 수 없는 값이 실제로 들어온다.
+
+    무엇이 적혀 있었는지 보여 주지 않으면 담당자가 고칠 수 없다.
+    """
+
+    def test_message_shows_what_was_written(self, config) -> None:
+        log = IssueLog()
+        validate_active([_active(plan=None, plan_raw="퇴직금 예외")], config, log)
+
+        found = [i for i in log.errors if i.code == "JAE_PLAN_MISSING"]
+        assert len(found) == 1
+        assert "퇴직금 예외" in found[0].message
+        assert found[0].value == "퇴직금 예외"
+
+    def test_blank_says_blank(self, config) -> None:
+        log = IssueLog()
+        validate_active([_active(plan=None, plan_raw="")], config, log)
+        assert "비어 있습니다" in log.errors[0].message

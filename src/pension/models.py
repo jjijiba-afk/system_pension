@@ -82,6 +82,8 @@ class ActiveMember:
     """차감 근속연수(양수로 입력)."""
 
     plan: BenefitPlan | None = None
+    plan_raw: str = ""
+    """명부에 적힌 제도구분 원문. 해석하지 못했을 때 무엇이 적혀 있었는지 알려야 한다."""
     settlement_amount: float = 0.0
     """중간정산 지급금액."""
     longterm_target: str = ""
@@ -182,6 +184,7 @@ class RetiredMember:
     reason_raw: str = ""
     """지급사유 원문. 정규화 규칙이 갈리는 값(예: '임금피크...')을 짚기 위해 남긴다."""
     plan: BenefitPlan | None = None
+    plan_raw: str = ""
 
     total_payment: float = 0.0
     """퇴직급여 총지급금액."""

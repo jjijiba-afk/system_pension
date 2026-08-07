@@ -22,6 +22,15 @@ class Severity(str, Enum):
     WARNING = "WARNING"
     """산출은 가능하지만 담당자가 확인해야 하는 사항."""
 
+    INFO = "INFO"
+    """확인할 것이 없는 안내.
+
+    검증 결과를 읽는 시간은 한정돼 있다. 확인이 필요 없는 항목이 목록을 채우면
+    정작 봐야 할 경고가 묻힌다. 실제 명부 6건에서 경고 1,452건 중 1,211건이
+    '성명이 비어 있습니다' 였는데, 여섯 파일 모두 성명이 **한 명도** 없었다.
+    개인정보를 지우고 사번으로만 보내 온 것이지 누락이 아니다.
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class Issue:
@@ -98,6 +107,9 @@ class IssueLog:
     def warning(self, code: str, message: str, **kw: object) -> Issue:
         return self.add(Severity.WARNING, code, message, **kw)  # type: ignore[arg-type]
 
+    def info(self, code: str, message: str, **kw: object) -> Issue:
+        return self.add(Severity.INFO, code, message, **kw)  # type: ignore[arg-type]
+
     def extend(self, issues: list[Issue]) -> None:
         self.issues.extend(issues)
 
@@ -108,6 +120,10 @@ class IssueLog:
     @property
     def warnings(self) -> list[Issue]:
         return [i for i in self.issues if i.severity is Severity.WARNING]
+
+    @property
+    def notices(self) -> list[Issue]:
+        return [i for i in self.issues if i.severity is Severity.INFO]
 
     def has_errors(self) -> bool:
         return any(i.severity is Severity.ERROR for i in self.issues)
