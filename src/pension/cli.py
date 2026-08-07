@@ -86,6 +86,14 @@ def _build_parser() -> argparse.ArgumentParser:
     upload.add_argument("--force", action="store_true", help="검증 오류가 있어도 생성")
 
     sub.add_parser("gui", help="GUI 실행")
+
+    editor = sub.add_parser("assumptions", help="산출 가정 입력 화면 실행")
+    editor.add_argument(
+        "--roster", type=Path, help="직군명을 미리 채워 올 명부 워크북"
+    )
+    editor.add_argument(
+        "--open", type=Path, dest="existing", help="열어 둘 기초율 파일"
+    )
     return parser
 
 
@@ -192,21 +200,31 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 1 if log.has_errors() else 0
 
 
+def _job_groups_from_roster(roster: Path | None) -> list[str]:
+    """명부 ``Input`` 시트가 참조하는 규정명. 읽지 못하면 빈 목록."""
+    if not roster or not roster.exists():
+        return []
+
+    import openpyxl
+
+    from .config import read_config
+
+    try:
+        wb = openpyxl.load_workbook(roster, data_only=True)
+    except (OSError, ValueError, KeyError):
+        return []
+    try:
+        return read_config(wb).referenced_rule_names()
+    except (ValueError, KeyError):
+        return []
+    finally:
+        wb.close()
+
+
 def _cmd_template(args: argparse.Namespace) -> int:
     from .assumptions import write_template
 
-    groups: list[str] = []
-    if args.roster and args.roster.exists():
-        import openpyxl
-
-        from .config import read_config
-
-        wb = openpyxl.load_workbook(args.roster, data_only=True)
-        try:
-            groups = read_config(wb).referenced_rule_names()
-        finally:
-            wb.close()
-
+    groups = _job_groups_from_roster(args.roster)
     path = write_template(args.output, job_groups=groups)
     print(f"기초율 양식을 만들었습니다: {path}")
     if groups:
@@ -257,6 +275,30 @@ def _cmd_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_assumptions(args: argparse.Namespace) -> int:
+    """산출 가정 입력 화면을 띄운다."""
+    import tkinter as tk
+
+    from .editor import AssumptionsEditor
+
+    groups = None
+    if args.roster:
+        groups = _job_groups_from_roster(args.roster) or None
+
+    root = tk.Tk()
+    root.withdraw()
+    window = AssumptionsEditor(root, job_groups=groups, on_close=lambda _e: root.destroy())
+    if args.existing:
+        try:
+            window.load_workbook(args.existing)
+            window.path = args.existing
+            window.status.configure(text=f"불러왔습니다: {args.existing.name}")
+        except (OSError, ValueError) as exc:
+            print(f"기초율 파일을 읽지 못했습니다: {exc}")
+    root.mainloop()
+    return 0
+
+
 def _cmd_gui(_args: argparse.Namespace) -> int:
     from .gui import main as gui_main
 
@@ -277,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         "calc": _cmd_calc,
         "check": _cmd_check,
         "template": _cmd_template,
+        "assumptions": _cmd_assumptions,
         "upload": _cmd_upload,
         "gui": _cmd_gui,
     }

@@ -162,9 +162,14 @@ class PensionApp(tk.Tk):
             self._pick_output,
         )
 
+        buttons = ttk.Frame(box)
+        buttons.grid(row=6, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
         ttk.Button(
-            box, text="기초율 양식 새로 만들기", command=self._make_template
-        ).grid(row=6, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
+            buttons, text="산출 가정 입력", command=self._open_editor
+        ).pack(side="left")
+        ttk.Button(
+            buttons, text="기초율 양식 새로 만들기", command=self._make_template
+        ).pack(side="left", padx=(6, 0))
 
     def _build_option_section(self, parent, row: int) -> None:
         box = ttk.Labelframe(parent, text=" 2. 산출 옵션 ", padding=(14, 8, 14, 10))
@@ -285,6 +290,29 @@ class PensionApp(tk.Tk):
         )
         if path:
             self.output_path.set(path)
+
+    def _open_editor(self) -> None:
+        """산출 가정 입력 창. 명부를 골라 두었으면 직군을 미리 채운다."""
+        from .editor import open_editor
+
+        def adopt(editor) -> None:
+            """창을 닫을 때 방금 저장한 기초율 파일을 이어받는다."""
+            if editor.path is not None:
+                self.assumptions_path.set(str(editor.path))
+                self._write(f"기초율 파일을 지정했습니다: {editor.path.name}")
+
+        editor = open_editor(
+            self, job_groups=self._job_groups_from_roster() or None, on_close=adopt
+        )
+
+        current = self.assumptions_path.get()
+        if current and Path(current).exists():
+            try:
+                editor.load_workbook(Path(current))
+                editor.path = Path(current)
+                editor.status.configure(text=f"불러왔습니다: {Path(current).name}")
+            except Exception as exc:  # 양식이 다른 파일이면 빈 화면에서 시작한다
+                editor.status.configure(text=f"기존 파일을 읽지 못했습니다 ({exc})")
 
     def _make_template(self) -> None:
         path = filedialog.asksaveasfilename(

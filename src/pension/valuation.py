@@ -178,9 +178,20 @@ def value_member(
     years = _projection_years(member, assumptions)
     result.projection_years = years
 
+    # 수식 방식 지급률 규정이 참조하는 변수들. 표 방식이면 무시된다.
+    context = {
+        "N": float(member.severance_nra),
+        "S": member.monthly_wage,
+        "직군": member.job_group,
+        "제도": member.plan.value if member.plan else "",
+    }
+
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
     result.accrued_benefit = (
-        assumptions.severance_benefit.multiple(rule, past_service) * member.monthly_wage
+        assumptions.severance_benefit.multiple(
+            rule, past_service, x=float(member.age), **context
+        )
+        * member.monthly_wage
     )
 
     survival = 1.0  # 기준일부터 t년 초까지 재직해 있을 확률
@@ -217,7 +228,14 @@ def value_member(
             total_service = past_service + t - 0.5
 
         if exit_probability > 0.0:
-            benefit = assumptions.severance_benefit.multiple(rule, total_service) * wage
+            # 퇴직 시점의 연령·근속으로 평가한다. 정년 임박자 감액 같은 규정이
+            # 기준일이 아니라 실제 퇴직 시점을 보고 판단해야 하기 때문이다.
+            benefit = (
+                assumptions.severance_benefit.multiple(
+                    rule, total_service, x=member.age + timing, **context
+                )
+                * wage
+            )
             discount = assumptions.discount.discount_factor(timing)
             attribution = min(1.0, past_service / total_service) if total_service > 0 else 0.0
             # 근무원가는 "1년치 근속이 더 쌓이는 몫". 총근속이 0 이면 귀속할 것이 없다.
