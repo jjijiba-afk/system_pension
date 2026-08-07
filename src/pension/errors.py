@@ -1,0 +1,143 @@
+"""검증 이슈 표현 및 수집.
+
+원본 종전 규칙는 오류를 만나면 ``메시지`` 를 띄우고 ``GoTo 산출중단`` 로 산출 전체를
+중단한다. 담당자는 오류 하나를 고치고 다시 돌리는 일을 반복해야 한다.
+
+여기서는 같은 검증을 수행하되 중단하지 않고 모두 수집한다. 치명적 오류(ERROR)가
+하나라도 있으면 업로드 명부를 생성하지 않는다는 점은 동일하다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class Severity(str, Enum):
+    """이슈 심각도."""
+
+    ERROR = "ERROR"
+    """업로드 명부를 만들 수 없는 오류. 종전 규칙 의 ``check = 1`` 에 해당한다."""
+
+    WARNING = "WARNING"
+    """산출은 가능하지만 담당자가 확인해야 하는 사항."""
+
+
+@dataclass(frozen=True, slots=True)
+class Issue:
+    """명부 한 건에 대한 검증 결과."""
+
+    severity: Severity
+    code: str
+    """``JAE_BIRTH_INVALID`` 같은 안정적인 식별자. 리포트 집계 키로 쓴다."""
+
+    message: str
+    sheet: str = ""
+    row: int | None = None
+    """엑셀 시트 기준 실제 행 번호(1-based). 담당자가 바로 찾아갈 수 있게 한다."""
+
+    seq: int | None = None
+    """명부 내 순번. 종전 규칙 메시지의 "N 번째 임직원" 과 같은 값."""
+
+    employee_id: str = ""
+    column: str = ""
+    """엑셀 열 문자(예: ``H``). 비어 있으면 행 전체에 대한 이슈."""
+
+    value: str = ""
+
+    def location(self) -> str:
+        parts = [p for p in (self.sheet, f"{self.column}{self.row}" if self.column and self.row else (str(self.row) if self.row else ""))if p]
+        return "!".join(parts)
+
+    def __str__(self) -> str:
+        loc = self.location()
+        head = f"[{self.severity.value}] {self.code}"
+        if loc:
+            head += f" ({loc})"
+        if self.employee_id:
+            head += f" 사번={self.employee_id}"
+        return f"{head}: {self.message}"
+
+
+@dataclass(slots=True)
+class IssueLog:
+    """이슈 수집기."""
+
+    issues: list[Issue] = field(default_factory=list)
+
+    def add(
+        self,
+        severity: Severity,
+        code: str,
+        message: str,
+        *,
+        sheet: str = "",
+        row: int | None = None,
+        seq: int | None = None,
+        employee_id: str = "",
+        column: str = "",
+        value: object = "",
+    ) -> Issue:
+        issue = Issue(
+            severity=severity,
+            code=code,
+            message=message,
+            sheet=sheet,
+            row=row,
+            seq=seq,
+            employee_id=employee_id,
+            column=column,
+            value="" if value is None else str(value),
+        )
+        self.issues.append(issue)
+        return issue
+
+    def error(self, code: str, message: str, **kw: object) -> Issue:
+        return self.add(Severity.ERROR, code, message, **kw)  # type: ignore[arg-type]
+
+    def warning(self, code: str, message: str, **kw: object) -> Issue:
+        return self.add(Severity.WARNING, code, message, **kw)  # type: ignore[arg-type]
+
+    def extend(self, issues: list[Issue]) -> None:
+        self.issues.extend(issues)
+
+    @property
+    def errors(self) -> list[Issue]:
+        return [i for i in self.issues if i.severity is Severity.ERROR]
+
+    @property
+    def warnings(self) -> list[Issue]:
+        return [i for i in self.issues if i.severity is Severity.WARNING]
+
+    def has_errors(self) -> bool:
+        return any(i.severity is Severity.ERROR for i in self.issues)
+
+    def count_by_code(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for issue in self.issues:
+            counts[issue.code] = counts.get(issue.code, 0) + 1
+        return counts
+
+    def __len__(self) -> int:
+        return len(self.issues)
+
+    def __iter__(self):
+        return iter(self.issues)
+
+
+class PensionDataError(ValueError):
+    """명부 데이터가 산출 불가능한 상태일 때 발생."""
+
+    def __init__(self, message: str, issues: list[Issue] | None = None) -> None:
+        super().__init__(message)
+        self.issues = issues or []
+
+
+class DateParseError(ValueError):
+    """날짜 문자열을 어떤 형식으로도 해석할 수 없을 때 발생."""
+
+    def __init__(self, raw: str, reason: str = "") -> None:
+        self.raw = raw
+        self.reason = reason
+        detail = f": {reason}" if reason else ""
+        super().__init__(f"날짜를 해석할 수 없습니다: {raw!r}{detail}")
