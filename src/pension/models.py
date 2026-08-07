@@ -87,6 +87,12 @@ class ActiveMember:
     longterm_amount: float = 0.0
     """장기종업원급여 지급금액."""
     note: str = ""
+    payout_multiple: float = 1.0
+    """퇴직금 지급배수. 임원 누진배수처럼 개인별로 다른 배수를 담는다.
+
+    명부에 ``2배`` / ``현재 3배`` 처럼 글자가 섞여 들어오므로 숫자만 뽑아 쓴다.
+    비어 있으면 1배. 지급률 수식에서 ``배수`` 변수로 참조한다.
+    """
     extra_rate: float = 0.0
     """가산(감소) 지급률."""
     extra_pay_base_date: _dt.date | None = None

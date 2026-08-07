@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -145,6 +146,26 @@ def _number(value: object) -> float:
         return float(token)
     except ValueError:
         return 0.0
+
+
+def _multiple(value: object) -> float:
+    """퇴직금 지급배수 셀.
+
+    실제 명부에는 ``2배``, ``현재 3배``, ``3.0`` 처럼 글자와 숫자가 섞여 들어온다.
+    숫자만 뽑아 쓰고, 숫자가 없으면 1배(법정)로 본다.
+    """
+    if value is None or value == "":
+        return 1.0
+    if isinstance(value, bool):
+        return 1.0
+    if isinstance(value, (int, float)):
+        return float(value) if value > 0 else 1.0
+
+    found = re.search(r"\d+(?:\.\d+)?", text(value))
+    if found is None:
+        return 1.0
+    number = float(found.group())
+    return number if number > 0 else 1.0
 
 
 def _optional_int(value: object) -> int | None:
@@ -292,6 +313,7 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.plan = normalize_benefit_plan(get("plan"))
         member.longterm_target = normalize_yes_no(get("longterm_target"))
         member.wage_peak_age = _optional_int(get("wage_peak_age"))
+        member.payout_multiple = _multiple(get("payout_multiple"))
         member.note = text(get("note"))
         member.cost_code = text(get("cost_code"))
 
