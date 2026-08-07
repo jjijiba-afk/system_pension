@@ -212,6 +212,8 @@ def value_member(
         "S": member.monthly_wage,
         "직군": member.job_group,
         "제도": member.plan.value if member.plan else "",
+        "임직원": member.employee_type.value,
+        "배수": member.payout_multiple,
     }
 
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.

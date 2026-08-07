@@ -32,6 +32,8 @@
     ``S``   30일 평균임금
     ``직군`` 변환 직군명(문자열)
     ``제도`` ``"DB"`` / ``"DC"`` / ``"퇴직금제도"``
+    ``임직원`` ``"임원"`` / ``"직원"``
+    ``배수`` 명부의 퇴직금 지급배수(비어 있으면 1)
 
 사용 가능한 함수
     ``IF`` ``AND`` ``OR`` ``NOT`` ``MIN`` ``MAX`` ``ABS``
@@ -64,7 +66,12 @@ VARIABLES: Final[dict[str, str]] = {
     "S": "30일 평균임금",
     "직군": "변환 직군명",
     "제도": "퇴직급여 제도구분 (DB / DC / 퇴직금제도)",
+    "임직원": "임직원구분 (임원 / 직원)",
+    "배수": "명부의 퇴직금 지급배수 (비어 있으면 1)",
 }
+
+#: 값이 문자열인 변수. 나머지는 숫자로 본다.
+_TEXT_VARIABLES: Final[frozenset[str]] = frozenset({"직군", "제도", "임직원"})
 
 #: 엑셀 이름 → 구현. 인자를 모두 계산한 뒤 호출하는 일반 함수들.
 _EAGER: Final[dict[str, Any]] = {
@@ -291,7 +298,10 @@ class Formula:
             변수는 빈 문자열)으로 본다.
         :raises FormulaError: 계산 중 오류가 났을 때.
         """
-        env = {name: (0.0 if name not in ("직군", "제도") else "") for name in VARIABLES}
+        env = {
+            name: ("" if name in _TEXT_VARIABLES else 0.0)
+            for name in VARIABLES
+        }
         env.update({k: v for k, v in variables.items() if k in VARIABLES})
         try:
             value = self._eval(self._tree, env)

@@ -1,0 +1,214 @@
+"""실제 명부에서 드러난 사례들.
+
+290명 재직·28명 퇴직 규모의 실제 명부를 돌려 보고 고친 것들이다. 샘플 명부로는
+나오지 않던 형태라, 같은 오탐이 되살아나지 않도록 여기에 고정해 둔다.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+
+import pytest
+
+from pension.actuarial import attained_age
+from pension.config import CalculationConfig, JobGroupRule
+from pension.errors import IssueLog
+from pension.models import ActiveMember, RetiredMember, Roster
+from pension.normalize import BenefitPlan, EmployeeType, RetirementReason
+from pension.readers import _multiple
+from pension.validation import validate_active, validate_retired
+
+BASE = _dt.date(2025, 12, 31)
+
+
+@pytest.fixture
+def config() -> CalculationConfig:
+    return CalculationConfig(
+        base_date=BASE,
+        job_group_rules=[JobGroupRule("정규직", "정규직", 60, 60, 2)],
+    )
+
+
+def _active(**kw) -> ActiveMember:
+    member = ActiveMember(seq=1, row=26)
+    member.employee_id = "A1"
+    member.name = "홍길동"
+    member.job_group_raw = "정규직"
+    member.job_group = "정규직"
+    member.job_group_index = 0
+    member.birth_date = _dt.date(1985, 5, 1)
+    member.hire_date = _dt.date(2010, 3, 1)
+    member.settlement_date = member.hire_date
+    member.monthly_wage = 5_000_000
+    member.plan = BenefitPlan.DB
+    for key, value in kw.items():
+        setattr(member, key, value)
+    return member
+
+
+def _retired(**kw) -> RetiredMember:
+    member = RetiredMember(seq=1, row=22)
+    member.employee_id = "T1"
+    member.name = "홍길동"
+    member.job_group_raw = "정규직"
+    member.job_group = "정규직"
+    member.job_group_index = 0
+    member.birth_date = _dt.date(1985, 5, 1)
+    member.hire_date = _dt.date(2015, 1, 1)
+    member.exit_date = _dt.date(2025, 6, 30)
+    member.reason = RetirementReason.VOLUNTARY
+    member.plan = BenefitPlan.DB
+    member.total_payment = 30_000_000
+    for key, value in kw.items():
+        setattr(member, key, value)
+    return member
+
+
+class TestDcMemberWage:
+    """DC 가입자는 평균임금란을 비워 오는 일이 흔하다.
+
+    확정기여제도는 확정급여채무가 생기지 않으므로 임금이 없어도 산출에 지장이
+    없다. 오류로 막으면 명부 전체가 산출되지 않는다.
+    """
+
+    def test_blank_wage_is_only_a_warning_for_dc(self, config) -> None:
+        log = IssueLog()
+        validate_active([_active(plan=BenefitPlan.DC, monthly_wage=0)], config, log)
+        assert not log.has_errors()
+        assert any(i.code == "JAE_WAGE_MISSING_DC" for i in log.warnings)
+
+    def test_blank_wage_is_still_an_error_for_db(self, config) -> None:
+        log = IssueLog()
+        validate_active([_active(plan=BenefitPlan.DB, monthly_wage=0)], config, log)
+        assert any(i.code == "JAE_WAGE_MISSING" for i in log.errors)
+
+
+class TestShortServiceRetiree:
+    """근로자퇴직급여보장법 제4조 단서 — 계속근로 1년 미만은 지급 대상이 아니다.
+
+    명부 작성요령도 "1년 미만 근무 후 퇴직자도 포함" 이라고 안내하므로, 지급액과
+    제도구분이 비어 있는 것이 정상이다.
+    """
+
+    def test_missing_amount_is_a_warning_under_one_year(self, config) -> None:
+        log = IssueLog()
+        validate_retired(
+            [_retired(hire_date=_dt.date(2025, 3, 1), exit_date=_dt.date(2025, 9, 1),
+                      total_payment=0, plan=None)],
+            config, log,
+        )
+        assert not log.has_errors()
+        codes = {i.code for i in log.warnings}
+        assert "TOI_TOTAL_MISSING_SHORT" in codes
+        assert "TOI_PLAN_MISSING_SHORT" in codes
+
+    def test_missing_amount_is_an_error_over_one_year(self, config) -> None:
+        log = IssueLog()
+        validate_retired([_retired(total_payment=0)], config, log)
+        assert any(i.code == "TOI_TOTAL_MISSING" for i in log.errors)
+
+
+class TestTransferAndDisposal:
+    """전출·사업처분에서는 적립자산이 통째로 승계된다."""
+
+    def test_fund_over_total_is_a_warning_on_disposal(self, config) -> None:
+        log = IssueLog()
+        validate_retired(
+            [_retired(reason=RetirementReason.DISPOSAL,
+                      total_payment=383_166_670, fund_payment=430_843_575,
+                      transfer_out_payment=383_166_670)],
+            config, log,
+        )
+        assert not log.has_errors()
+        assert any(i.code == "TOI_FUND_OVER_TOTAL_TRANSFER" for i in log.warnings)
+
+    def test_fund_over_total_is_an_error_on_ordinary_exit(self, config) -> None:
+        log = IssueLog()
+        validate_retired(
+            [_retired(total_payment=30_000_000, fund_payment=40_000_000)], config, log
+        )
+        assert any(i.code == "TOI_FUND_OVER_TOTAL" for i in log.errors)
+
+    def test_zero_payment_is_fine_when_paid_as_transfer(self, config) -> None:
+        log = IssueLog()
+        validate_retired(
+            [_retired(reason=RetirementReason.DISPOSAL, total_payment=0,
+                      transfer_out_payment=50_000_000)],
+            config, log,
+        )
+        assert not any(i.code == "TOI_TOTAL_MISSING" for i in log.errors)
+
+
+class TestPayoutMultiple:
+    """임원 누진배수는 명부에 '2배' / '현재 3배' 처럼 글자로 적혀 온다."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("2배", 2.0),
+            ("현재 3배", 3.0),
+            ("1.5배", 1.5),
+            (3, 3.0),
+            (3.0, 3.0),
+            ("", 1.0),
+            (None, 1.0),
+            ("배수적용", 1.0),
+            (0, 1.0),
+        ],
+    )
+    def test_parses_a_number_out_of_the_cell(self, raw, expected) -> None:
+        assert _multiple(raw) == expected
+
+    def test_formula_can_use_the_multiple(self) -> None:
+        from pension.assumptions import FORMULA, BenefitScale
+        from pension.formula import Formula
+
+        scale = BenefitScale(
+            formulas={"정규직": Formula("=t * 배수")}, modes={"정규직": FORMULA}
+        )
+        assert scale.multiple("정규직", 20, 배수=1.0) == 20.0
+        assert scale.multiple("정규직", 20, 배수=3.0) == 60.0
+
+    def test_formula_can_branch_on_employee_type(self) -> None:
+        from pension.assumptions import FORMULA, BenefitScale
+        from pension.formula import Formula
+
+        scale = BenefitScale(
+            formulas={"정규직": Formula('=IF(임직원="임원", t*3, t)')},
+            modes={"정규직": FORMULA},
+        )
+        assert scale.multiple("정규직", 10, 임직원="임원") == 30.0
+        assert scale.multiple("정규직", 10, 임직원="직원") == 10.0
+
+
+class TestWagePeakRetirementAge:
+    """임금피크 연령이 정년보다 앞서면 그 나이를 정년으로 본다(종전 규칙 동일)."""
+
+    def test_wage_peak_age_wins_when_it_is_ahead(self, config) -> None:
+        log = IssueLog()
+        member = _active(wage_peak_age=58)
+        validate_active([member], config, log)
+        assert member.age == attained_age(member.birth_date, BASE)
+        assert member.severance_nra == 58
+
+    def test_falls_back_to_group_nra_when_already_past_peak(self, config) -> None:
+        log = IssueLog()
+        member = _active(birth_date=_dt.date(1960, 5, 1), wage_peak_age=58)
+        validate_active([member], config, log)
+        # 65세는 정년(60)도 임금피크(58)도 지났으므로 현재 연령 + 가산연수
+        assert member.severance_nra == member.age + 2
+
+
+def test_roster_with_mixed_issues_still_produces_a_roster(config) -> None:
+    """오류가 섞여 있어도 명부 객체 자체는 만들어져야 검증 결과를 모두 볼 수 있다."""
+    log = IssueLog()
+    roster = Roster(
+        active=[_active(), _active(plan=BenefitPlan.DC, monthly_wage=0)],
+        retired=[_retired(), _retired(total_payment=0)],
+    )
+    for member in roster.active:
+        member.employee_type = EmployeeType.STAFF
+    validate_active(roster.active, config, log)
+    validate_retired(roster.retired, config, log)
+    assert len(roster.active) == 2
+    assert len(roster.retired) == 2

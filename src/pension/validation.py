@@ -134,8 +134,19 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
 
         # ── 임금 (종전 규칙: 체크금액 미만이거나 0 이면 산출 중단) ───────
         if member.monthly_wage <= 0:
-            log.error("JAE_WAGE_MISSING", "30일 평균임금이 비었거나 0 이하입니다",
-                      column=_col(sheet, "monthly_wage"), value=member.monthly_wage, **kw)
+            if member.plan is BenefitPlan.DC:
+                # DC 가입자는 확정급여채무가 생기지 않으므로 평균임금이 없어도
+                # 산출에 지장이 없다. 실제 명부에서 DC 가입자 임금란을 비우는 일이
+                # 흔한데, 이를 오류로 막으면 명부 전체가 산출되지 않는다.
+                log.warning(
+                    "JAE_WAGE_MISSING_DC",
+                    "30일 평균임금이 없습니다 (DC 가입자라 퇴직급여채무 산출에는 "
+                    "영향이 없으나, 장기급여 대상이면 일 기본급이 필요합니다)",
+                    column=_col(sheet, "monthly_wage"), **kw,
+                )
+            else:
+                log.error("JAE_WAGE_MISSING", "30일 평균임금이 비었거나 0 이하입니다",
+                          column=_col(sheet, "monthly_wage"), value=member.monthly_wage, **kw)
         elif member.monthly_wage < config.wage_check_amount:
             log.error(
                 "JAE_WAGE_BELOW_CHECK",
@@ -214,9 +225,23 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
                 column=_col(sheet, "reason"), **kw,
             )
 
+        # 근로자퇴직급여보장법 제4조 단서: 계속근로기간 1년 미만은 퇴직급여
+        # 지급 대상이 아니다. 그런 퇴직자는 제도구분·지급액이 비어 있는 것이
+        # 정상이므로 오류로 막지 않는다. 퇴직자명부의 본래 용도가 경험퇴직률
+        # 산출(인원 기준)이라 금액이 없어도 쓸 수 있다.
+        short_service = 0.0 < member.service_years() < 1.0
+
         if member.plan is None:
-            log.error("TOI_PLAN_MISSING", "퇴직급여 제도구분이 비었거나 알 수 없는 값입니다",
-                      column=_col(sheet, "plan"), **kw)
+            if short_service:
+                log.warning(
+                    "TOI_PLAN_MISSING_SHORT",
+                    f"제도구분이 없습니다 (근속 {member.service_years():.2f}년으로 "
+                    "1년 미만이라 퇴직급여 지급 대상이 아닙니다)",
+                    column=_col(sheet, "plan"), **kw,
+                )
+            else:
+                log.error("TOI_PLAN_MISSING", "퇴직급여 제도구분이 비었거나 알 수 없는 값입니다",
+                          column=_col(sheet, "plan"), **kw)
 
         if member.birth_date and member.hire_date and member.birth_date >= member.hire_date:
             log.error("TOI_BIRTH_AFTER_HIRE", "생년월일이 입사일보다 늦거나 같습니다",
@@ -262,17 +287,43 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
                 )
 
         # ── 금액 정합성 ────────────────────────────────────────────
-        if member.total_payment <= 0 and member.reason is not RetirementReason.TRANSFER_OUT:
-            log.error("TOI_TOTAL_MISSING", "퇴직급여 총지급금액이 비었거나 0 이하입니다",
-                      column=_col(sheet, "total_payment"), value=member.total_payment, **kw)
+        # 전출·사업처분으로 나간 사람은 퇴직급여가 아니라 전출지급금액으로
+        # 정산된다. 그쪽에 금액이 있으면 총지급금액이 0인 것이 정상이다.
+        paid_as_transfer = (
+            member.reason in (RetirementReason.TRANSFER_OUT, RetirementReason.DISPOSAL)
+            and member.transfer_out_payment > 0
+        )
+
+        if member.total_payment <= 0 and not paid_as_transfer:
+            if short_service:
+                log.warning(
+                    "TOI_TOTAL_MISSING_SHORT",
+                    f"퇴직급여 총지급금액이 없습니다 (근속 {member.service_years():.2f}년으로 "
+                    "1년 미만이라 지급 대상이 아닙니다)",
+                    column=_col(sheet, "total_payment"), **kw,
+                )
+            else:
+                log.error("TOI_TOTAL_MISSING", "퇴직급여 총지급금액이 비었거나 0 이하입니다",
+                          column=_col(sheet, "total_payment"), value=member.total_payment, **kw)
 
         if member.fund_payment > member.total_payment > 0:
-            log.error(
-                "TOI_FUND_OVER_TOTAL",
-                f"사외자산 지급금액({member.fund_payment:,.0f}원)이 "
-                f"총지급금액({member.total_payment:,.0f}원)보다 큽니다",
-                column=_col(sheet, "fund_payment"), value=member.fund_payment, **kw,
-            )
+            if member.reason in (RetirementReason.TRANSFER_OUT, RetirementReason.DISPOSAL):
+                # 전출·사업처분에서는 적립되어 있던 사외자산이 통째로 승계되므로
+                # 당기 퇴직급여 지급액보다 클 수 있다. 오류가 아니다.
+                log.warning(
+                    "TOI_FUND_OVER_TOTAL_TRANSFER",
+                    f"사외자산 지급금액({member.fund_payment:,.0f}원)이 "
+                    f"총지급금액({member.total_payment:,.0f}원)보다 큽니다 "
+                    f"({member.reason.label}이라 적립자산 승계로 보입니다)",
+                    column=_col(sheet, "fund_payment"), value=member.fund_payment, **kw,
+                )
+            else:
+                log.error(
+                    "TOI_FUND_OVER_TOTAL",
+                    f"사외자산 지급금액({member.fund_payment:,.0f}원)이 "
+                    f"총지급금액({member.total_payment:,.0f}원)보다 큽니다",
+                    column=_col(sheet, "fund_payment"), value=member.fund_payment, **kw,
+                )
 
         if member.reason is RetirementReason.TRANSFER_OUT and member.transfer_out_payment <= 0:
             log.warning("TOI_TRANSFER_OUT_ZERO", "계열사 전출인데 전출지급금액이 0 입니다",
