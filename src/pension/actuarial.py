@@ -13,6 +13,7 @@ from .config import JobGroupRule
 __all__ = [
     "FRACTION_MODES",
     "SERVICE_BASES",
+    "apply_fraction",
     "attained_age",
     "longterm_retirement_age",
     "normal_retirement_age",
@@ -29,10 +30,20 @@ SERVICE_DAILY = "일할"
 """근속일수 ÷ 365. 근로자퇴직급여보장법의 법정 산식과 같다."""
 SERVICE_MONTHLY = "월할"
 """근속개월수 ÷ 12."""
+SERVICE_QUARTERLY = "분기할"
+"""완성 분기수 ÷ 4."""
+SERVICE_SEMIANNUAL = "반기할"
+"""완성 반기수 ÷ 2."""
 SERVICE_ANNUAL = "연할"
 """완성된 해만 센다(단수 개월 버림)."""
 
-SERVICE_BASES = (SERVICE_DAILY, SERVICE_MONTHLY, SERVICE_ANNUAL)
+SERVICE_BASES = (
+    SERVICE_DAILY,
+    SERVICE_MONTHLY,
+    SERVICE_QUARTERLY,
+    SERVICE_SEMIANNUAL,
+    SERVICE_ANNUAL,
+)
 
 DAYS_PER_YEAR = 365.0
 """일할 계산의 분모. 근로기준법 산식이 365 를 쓴다."""
@@ -102,7 +113,7 @@ def service_years(
 ) -> float:
     """근속연수(년).
 
-    :param basis: ``일할`` / ``월할`` / ``연할``.
+    :param basis: ``일할`` / ``월할`` / ``분기할`` / ``반기할`` / ``연할``.
     :param fraction: 단수 처리 — ``그대로`` / ``절사`` / ``절상`` / ``반올림``.
         가산·차감 연수를 더한 **뒤** 적용한다. 군경력 가산이 단수에 영향을 주기
         때문이다.
@@ -112,6 +123,10 @@ def service_years(
 
     if basis == SERVICE_MONTHLY:
         raw = _completed_months(start, end) / 12.0
+    elif basis == SERVICE_QUARTERLY:
+        raw = (_completed_months(start, end) // 3) / 4.0
+    elif basis == SERVICE_SEMIANNUAL:
+        raw = (_completed_months(start, end) // 6) / 2.0
     elif basis == SERVICE_ANNUAL:
         raw = float(_completed_years(start, end))
     else:

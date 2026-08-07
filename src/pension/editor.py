@@ -16,6 +16,13 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
+from .actuarial import (
+    FRACTION_HALF,
+    FRACTION_KEEP,
+    FRACTION_MODES,
+    SERVICE_BASES,
+    SERVICE_DAILY,
+)
 from .assumptions import (
     BENEFIT_MODES,
     BENEFIT_RULE_SHEET,
@@ -37,6 +44,22 @@ __all__ = ["AssumptionsEditor", "open_editor"]
 
 _PAD = 8
 _DEFAULT_ROWS = 12
+
+#: 지급액 반올림 단위 선택지. 화면에 보이는 글자 → 원 단위 값.
+_ROUNDING_UNITS = ("없음", "1원", "10원", "100원", "1,000원")
+_ROUNDING_VALUES = {"없음": 0, "1원": 1, "10원": 10, "100원": 100, "1,000원": 1000}
+_UNIT_LABELS = {v: k for k, v in _ROUNDING_VALUES.items()}
+
+#: 지급규정을 담는 시트. ``Input`` 시트와 열 배치가 같아 그대로 읽힌다.
+PAYOUT_SHEET = "지급규정"
+_PAYOUT_HEADERS = (
+    "명부직군", "변환직군명", "퇴직급여 정년연령", "장기급여 정년연령",
+    "정년초과 가산연령", "퇴직급여 지급률 규정", "장기급여 지급률 규정",
+    "퇴직급여 퇴직률 규정", "퇴직급여 승급률 규정", "장기급여 퇴직률 규정",
+    "장기급여 승급률 규정", "퇴직자 퇴직급여 퇴직률 규정", "퇴직자 장기급여 퇴직률 규정",
+    "가입자격(최소근속)", "임원 정년연령", "임원 정년초과 가산연령", "산출 제외",
+    "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식",
+)
 
 
 @dataclass(slots=True)
@@ -433,6 +456,189 @@ def _short(exc: Exception, limit: int = 60) -> str:
     return message if len(message) <= limit else message[: limit - 1] + "…"
 
 
+class _PayoutRuleTab(ttk.Frame):
+    """회사 지급규정 탭 — 직군별 가입자격·정년·근속 산정방법·반올림.
+
+    자료요청서 `1)일반사항` 6번 항목에 자유서술로 적혀 오는 내용을 산출 설정으로
+    옮기는 자리다. 문구가 회사마다 달라(‘월할 계산’, ‘근로기준법 일수’,
+    ‘단수개월 절사’) 자유입력으로 두면 오타 하나가 채무를 바꾼다. 그래서 고를 수
+    있는 것만 버튼으로 두었다.
+    """
+
+    def __init__(self, parent, job_groups: list[str]) -> None:
+        super().__init__(parent, padding=_PAD)
+        self.job_groups = list(job_groups)
+        self._rows: dict[str, dict[str, Any]] = {}
+
+        ttk.Label(
+            self,
+            text="자료요청서 '1)일반사항' 6번(퇴직금 지급규정)을 여기에 옮깁니다. "
+                 "규정 문구가 애매하면 담당자에게 확인하세요.",
+            style="Hint.TLabel", wraplength=840, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", pady=(0, 6))
+        ttk.Button(
+            bar, text="명부 일반사항에서 규정 읽어오기", command=self._load_from_general_info
+        ).pack(side="left")
+        self.evidence = ttk.Label(bar, text="", style="Hint.TLabel", wraplength=560,
+                                  justify="left")
+        self.evidence.pack(side="left", padx=(10, 0))
+
+        self._body = ttk.Frame(self)
+        self._body.pack(fill="both", expand=True)
+        self.rebuild(self.job_groups)
+
+    def _load_from_general_info(self) -> None:
+        """자료요청서 `1)일반사항` 6번을 읽어 초안을 채운다.
+
+        기계가 확정할 수 없는 자유서술이므로 **초안** 만 채우고 근거 문구를
+        보여 준다. 읽지 못한 항목은 손대지 않고 그대로 둔다.
+        """
+        path = filedialog.askopenfilename(
+            title="명부 파일 선택", parent=self,
+            filetypes=[("엑셀 파일", "*.xls *.xlsm *.xlsx"), ("모든 파일", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            from .general_info import read_general_info
+            from .workbook import open_workbook
+
+            book = open_workbook(path)
+            try:
+                info = read_general_info(book)
+            finally:
+                book.close()
+        except Exception as exc:
+            messagebox.showerror("일반사항", f"읽지 못했습니다.\n\n{exc}", parent=self)
+            return
+
+        draft = info.draft
+        applied = {}
+        for group in self.job_groups:
+            item: dict[str, Any] = {}
+            if draft.min_service_years is not None:
+                item["min_service"] = f"{draft.min_service_years:g}"
+            if draft.staff_nra is not None:
+                item["nra"] = str(draft.staff_nra)
+            if draft.executive_nra is not None:
+                item["executive_nra"] = str(draft.executive_nra)
+            if draft.service_basis is not None:
+                item["basis"] = draft.service_basis
+            if draft.service_fraction is not None:
+                item["fraction"] = draft.service_fraction
+            if draft.rounding_unit is not None:
+                item["unit"] = _UNIT_LABELS.get(draft.rounding_unit, "없음")
+            applied[group] = item
+        self.set_values(applied)
+
+        lines = [f"{k}: {v}" for k, v in draft.evidence.items()]
+        if draft.unread:
+            lines.append("확인 필요: " + ", ".join(draft.unread))
+        self.evidence.configure(text="  |  ".join(lines) or "읽어낸 항목이 없습니다.")
+
+        if draft.unread:
+            messagebox.showwarning(
+                "확인 필요",
+                "규정에서 읽지 못한 항목이 있습니다. 직접 채워 주세요.\n\n· "
+                + "\n· ".join(draft.unread),
+                parent=self,
+            )
+
+    def rebuild(self, job_groups: list[str]) -> None:
+        previous = self.get_values()
+        for child in self._body.winfo_children():
+            child.destroy()
+        self._rows.clear()
+        self.job_groups = list(job_groups)
+
+        headers = (
+            "직군", "산출\n제외", "가입자격\n(최소근속·년)", "정년\n(직원)",
+            "정년\n(임원)", "정년초과\n가산연령", "근속 산정방법", "단수 처리",
+            "지급액 반올림",
+        )
+        for col, title in enumerate(headers):
+            ttk.Label(self._body, text=title, style="Col.TLabel", justify="center").grid(
+                row=0, column=col, padx=3, pady=(0, 6)
+            )
+
+        for index, group in enumerate(self.job_groups, start=1):
+            saved = previous.get(group, {})
+            row: dict[str, Any] = {
+                "excluded": tk.BooleanVar(value=saved.get("excluded", False)),
+                "min_service": tk.StringVar(value=saved.get("min_service", "1")),
+                "nra": tk.StringVar(value=saved.get("nra", "60")),
+                "executive_nra": tk.StringVar(value=saved.get("executive_nra", "60")),
+                "add_age": tk.StringVar(value=saved.get("add_age", "2")),
+                "basis": tk.StringVar(value=saved.get("basis", SERVICE_DAILY)),
+                "fraction": tk.StringVar(value=saved.get("fraction", FRACTION_KEEP)),
+                "unit": tk.StringVar(value=saved.get("unit", "없음")),
+            }
+
+            ttk.Label(self._body, text=group).grid(row=index, column=0, sticky="w", padx=3)
+            ttk.Checkbutton(self._body, variable=row["excluded"]).grid(row=index, column=1)
+            for col, key in enumerate(
+                ("min_service", "nra", "executive_nra", "add_age"), start=2
+            ):
+                ttk.Entry(self._body, textvariable=row[key], width=8, justify="center").grid(
+                    row=index, column=col, padx=3, pady=1
+                )
+
+            ttk.Combobox(
+                self._body, textvariable=row["basis"], values=list(SERVICE_BASES),
+                state="readonly", width=8,
+            ).grid(row=index, column=6, padx=3)
+            ttk.Combobox(
+                self._body, textvariable=row["fraction"], values=list(FRACTION_MODES),
+                state="readonly", width=8,
+            ).grid(row=index, column=7, padx=3)
+            ttk.Combobox(
+                self._body, textvariable=row["unit"], values=list(_ROUNDING_UNITS),
+                state="readonly", width=8,
+            ).grid(row=index, column=8, padx=3)
+
+            self._rows[group] = row
+
+        note = ttk.Frame(self._body)
+        note.grid(row=len(self.job_groups) + 1, column=0, columnspan=9, sticky="w", pady=(10, 0))
+        ttk.Label(
+            note,
+            text="근속 산정방법  일할=근속일수÷365(근로기준법)  ·  월할=완성 개월÷12  ·  "
+                 "분기할=완성 분기÷4  ·  반기할=완성 반기÷2  ·  연할=완성 햇수\n"
+                 "단수 처리  가산연수를 더한 뒤 적용합니다. '절사'는 "
+                 "'1년이 되지 않는 단수개월은 버림' 규정에 해당합니다.\n"
+                 "정년(임원)  규정에 '없음'으로 적혀 오면 직원 정년과 같게 두세요. "
+                 "이미 정년을 넘긴 사람은 현재연령 + 가산연령으로 처리됩니다.",
+            style="Hint.TLabel", justify="left",
+        ).pack(anchor="w")
+
+    def get_values(self) -> dict[str, dict[str, Any]]:
+        return {
+            group: {
+                "excluded": row["excluded"].get(),
+                "min_service": row["min_service"].get(),
+                "nra": row["nra"].get(),
+                "executive_nra": row["executive_nra"].get(),
+                "add_age": row["add_age"].get(),
+                "basis": row["basis"].get(),
+                "fraction": row["fraction"].get(),
+                "unit": row["unit"].get(),
+            }
+            for group, row in self._rows.items()
+        }
+
+    def set_values(self, values: dict[str, dict[str, Any]]) -> None:
+        for group, item in values.items():
+            row = self._rows.get(group)
+            if row is None:
+                continue
+            for key, var in row.items():
+                if key in item:
+                    var.set(item[key])
+
+
 class AssumptionsEditor(tk.Toplevel):
     """산출 가정 입력 창."""
 
@@ -504,6 +710,7 @@ class AssumptionsEditor(tk.Toplevel):
         self.job_group_var.set(", ".join(names))
         for grid in self._grids.values():
             grid.rebuild_columns(names)
+        self._payout_tab.rebuild(names)
         self._rule_tab.rebuild(names)
 
     def _load_from_roster(self) -> None:
@@ -544,6 +751,9 @@ class AssumptionsEditor(tk.Toplevel):
             grid = _Grid(book, spec, self.job_groups)
             book.add(grid, text=spec.tab)
             self._grids[spec.sheet] = grid
+
+        self._payout_tab = _PayoutRuleTab(book, self.job_groups)
+        book.add(self._payout_tab, text="지급규정")
 
         self._rule_tab = _BenefitRuleTab(book, self.job_groups)
         book.add(self._rule_tab, text="지급률 규정")
@@ -638,6 +848,26 @@ class AssumptionsEditor(tk.Toplevel):
                         rows.append(values)
                 grid.set_rows(rows)
 
+            if PAYOUT_SHEET in wb.sheetnames:
+                ws = wb[PAYOUT_SHEET]
+                payout: dict[str, dict[str, Any]] = {}
+                for row in range(2, ws.max_row + 1):
+                    name = text(ws.cell(row, 1).value)
+                    if not name:
+                        continue
+                    unit = _as_int(_cell_text(ws.cell(row, 20).value), 0)
+                    payout[name] = {
+                        "nra": _cell_text(ws.cell(row, 3).value) or "60",
+                        "add_age": _cell_text(ws.cell(row, 5).value) or "2",
+                        "min_service": _cell_text(ws.cell(row, 14).value) or "0",
+                        "executive_nra": _cell_text(ws.cell(row, 15).value) or "60",
+                        "excluded": text(ws.cell(row, 17).value).upper() in ("Y", "제외"),
+                        "basis": text(ws.cell(row, 18).value) or SERVICE_DAILY,
+                        "fraction": text(ws.cell(row, 19).value) or FRACTION_KEEP,
+                        "unit": _UNIT_LABELS.get(unit, "없음"),
+                    }
+                self._payout_tab.set_values(payout)
+
             if BENEFIT_RULE_SHEET in wb.sheetnames:
                 ws = wb[BENEFIT_RULE_SHEET]
                 values: dict[str, dict[str, str]] = {}
@@ -701,6 +931,25 @@ class AssumptionsEditor(tk.Toplevel):
             group: (item["mode"], item["formula"])
             for group, item in self._rule_tab.get_values().items()
         }
+
+        # 지급규정 탭 → 'Input' 시트와 같은 배치로 한 장 더 만든다. 산출 때
+        # 그대로 읽히도록 열 순서를 맞춘다.
+        payout = self._payout_tab.get_values()
+        rows: list[list[Any]] = []
+        for group, item in payout.items():
+            rows.append([
+                group, group,
+                _as_int(item["nra"], 60), _as_int(item["nra"], 60),
+                _as_int(item["add_age"], 2),
+                "", "", "", "", "", "", "", "",
+                _as_float(item["min_service"], 0.0),
+                _as_int(item["executive_nra"], 0),
+                _as_int(item["add_age"], 2),
+                "Y" if item["excluded"] else "",
+                item["basis"], item["fraction"],
+                _ROUNDING_VALUES.get(item["unit"], 0), FRACTION_HALF,
+            ])
+        sheets[PAYOUT_SHEET] = (list(_PAYOUT_HEADERS), rows)
         return sheets, rules
 
     def write(self, path: Path) -> Path:
@@ -714,6 +963,20 @@ class AssumptionsEditor(tk.Toplevel):
         if self._on_close is not None:
             self._on_close(self)
         self.destroy()
+
+
+def _as_int(token: str, default: int) -> int:
+    try:
+        return int(float(str(token).strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(token: str, default: float) -> float:
+    try:
+        return float(str(token).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def _cell_text(value: object) -> str:

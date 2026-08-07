@@ -152,6 +152,55 @@ class CalculationConfig:
         return self._by_source.get(text(source_name))
 
 
+PAYOUT_SHEET = "지급규정"
+"""가정 입력 화면이 저장하는 지급규정 시트. ``Input`` 과 열 배치가 같다."""
+
+
+def read_payout_rules(workbook) -> list[JobGroupRule]:
+    """기초율 워크북의 ``지급규정`` 시트를 직군 규칙으로 읽는다.
+
+    명부의 ``Input`` 시트가 비어 있거나 없을 때, 가정 입력 화면에서 저장한
+    규정을 그대로 쓸 수 있게 한다. 머리글 한 줄 아래부터 데이터다.
+    """
+    from .workbook import find_sheet
+
+    ws = find_sheet(workbook, PAYOUT_SHEET)
+    if ws is None:
+        return []
+
+    rules: list[JobGroupRule] = []
+    for row in range(2, ws.max_row + 1):
+        source_name = text(ws.cell(row, 1).value)
+        if not source_name:
+            continue
+        rules.append(
+            JobGroupRule(
+                source_name=source_name,
+                mapped_name=text(ws.cell(row, 2).value) or source_name,
+                severance_nra=_int(ws.cell(row, 3).value),
+                longterm_nra=_int(ws.cell(row, 4).value),
+                over_nra_add_age=_int(ws.cell(row, 5).value),
+                severance_benefit=text(ws.cell(row, 6).value),
+                longterm_benefit=text(ws.cell(row, 7).value),
+                severance_withdrawal=text(ws.cell(row, 8).value),
+                severance_salary_increase=text(ws.cell(row, 9).value),
+                longterm_withdrawal=text(ws.cell(row, 10).value),
+                longterm_salary_increase=text(ws.cell(row, 11).value),
+                retired_severance_withdrawal=text(ws.cell(row, 12).value),
+                retired_longterm_withdrawal=text(ws.cell(row, 13).value),
+                min_service_years=_float(ws.cell(row, 14).value),
+                executive_nra=_int(ws.cell(row, 15).value),
+                executive_over_nra_add_age=_int(ws.cell(row, 16).value),
+                excluded=text(ws.cell(row, 17).value).upper() in ("Y", "제외", "TRUE", "1"),
+                service_basis=text(ws.cell(row, 18).value) or "일할",
+                service_fraction=text(ws.cell(row, 19).value) or "그대로",
+                benefit_rounding_unit=_int(ws.cell(row, 20).value),
+                benefit_rounding_mode=text(ws.cell(row, 21).value) or "반올림",
+            )
+        )
+    return rules
+
+
 def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
     """``Input`` 시트를 :class:`CalculationConfig` 로 읽는다.
 
