@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 
 from pension.samples import (
@@ -136,10 +138,32 @@ class TestMortality:
             survival *= 1.0 - rates[age]
         assert survival == pytest.approx(expected, abs=0.005)
 
-    def test_no_discontinuity_where_the_two_curves_join(self) -> None:
-        """80세에서 두 구간이 이어 붙는다. 표에 단절이 보이면 안 된다."""
+    @pytest.mark.parametrize(
+        ("column", "age", "expected"),
+        [
+            # 통계청 완전생명표의 해당 연령대와 사실상 같아야 한다.
+            (1, 40, 0.0014), (1, 60, 0.0056),
+            (2, 40, 0.0006), (2, 60, 0.0020),
+        ],
+    )
+    def test_working_age_rates_are_realistic(
+        self, column: int, age: int, expected: float
+    ) -> None:
+        """채무는 40~70세 구간에서 거의 다 만들어진다. 거기가 맞아야 한다.
+
+        상수항 없이 ``B·c^x`` 만 쓰면 두 기준점을 맞추는 대신 이 구간이 30%
+        가까이 낮아진다. 젊은 층의 사망은 노화가 아니라 사고·재해가 대부분이라
+        연령에 따라 지수적으로 늘지 않기 때문이다.
+        """
+        rates = {row[0]: row[column] for row in mortality_table()}
+        assert rates[age] == pytest.approx(expected, rel=0.15)
+
+    def test_curve_is_smooth(self) -> None:
+        """단일 곡선이므로 증가율이 갑자기 꺾이는 지점이 없어야 한다."""
         rates = {row[0]: (row[1], row[2]) for row in mortality_table()}
         for column in (0, 1):
-            step_before = rates[79][column] / rates[78][column]
-            step_across = rates[80][column] / rates[79][column]
-            assert step_across == pytest.approx(step_before, rel=0.06)
+            steps = [
+                rates[age + 1][column] / rates[age][column]
+                for age in range(40, 100)
+            ]
+            assert all(a <= b for a, b in pairwise(steps))
