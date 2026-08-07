@@ -1,0 +1,74 @@
+name: Windows 실행파일 빌드
+
+# 윈도우 러너에서 EXE 를 만들어 아티팩트로 올린다. 개발환경 없이도
+# Actions 탭에서 내려받아 바로 쓸 수 있다.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: 테스트 (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: pytest
+        run: python -m pytest -q
+
+  build:
+    name: EXE 빌드 (Windows)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build,dev]"
+
+      - name: 테스트 (Windows)
+        run: python -m pytest -q
+
+      - name: 실행파일 빌드
+        run: python -m PyInstaller pension.spec --noconfirm --clean
+
+      - name: 실행 확인
+        run: |
+          dist\pension-cli.exe --version
+          dist\pension-cli.exe template dist\기초율_샘플.xlsx
+
+      - name: 아티팩트 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: 연금계리산출-windows
+          path: |
+            dist/연금계리산출.exe
+            dist/pension-cli.exe
+            dist/기초율_샘플.xlsx
+            docs/사용설명서.md
+          retention-days: 90
+
+      - name: 릴리스에 첨부 (태그 푸시 시)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/연금계리산출.exe
+            dist/pension-cli.exe

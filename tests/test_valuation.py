@@ -1,0 +1,292 @@
+"""PUC 산출 엔진.
+
+해석적으로 답을 알 수 있는 단순한 가정을 넣어, 엔진이 교과서 공식과 맞는지
+확인한다.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+import pytest
+
+from pension.assumptions import (
+    Assumptions,
+    BenefitScale,
+    DiscountCurve,
+    MortalityTable,
+    RateCurve,
+    RateTable,
+    SalaryScale,
+)
+from pension.config import CalculationConfig, JobGroupRule
+from pension.models import ActiveMember, RateRules, Roster
+from pension.normalize import BenefitPlan, Gender
+from pension.rollforward import build_rollforward, initial_period
+from pension.sensitivity import DEFAULT_SHOCKS, run_sensitivity
+from pension.valuation import value_member, value_roster
+
+BASE_DATE = dt.date(2025, 12, 31)
+
+
+@pytest.fixture
+def config() -> CalculationConfig:
+    return CalculationConfig(
+        base_date=BASE_DATE,
+        job_group_rules=[
+            JobGroupRule("정규직", "정규직", severance_nra=60, longterm_nra=60, over_nra_add_age=2)
+        ],
+    )
+
+
+def make_assumptions(
+    *, discount: float = 0.05, salary: float = 0.0,
+    withdrawal: float = 0.0, mortality: float = 0.0,
+) -> Assumptions:
+    """모든 연령·근속에 같은 값이 적용되는 평탄한 가정."""
+    return Assumptions(
+        discount=DiscountCurve(spot=RateCurve({1: discount}), flat=discount),
+        salary=SalaryScale(base_up=RateCurve({1: salary})),
+        withdrawal=RateTable(curves={"기본": RateCurve({0: withdrawal})}, default_rule="기본"),
+        mortality=MortalityTable(RateCurve({0: mortality}), RateCurve({0: mortality})),
+        severance_benefit=BenefitScale(statutory_when_missing=True),
+    )
+
+
+def make_member(*, age: int = 50, past_service: float = 10.0, wage: float = 1_000_000,
+                nra: int = 60) -> ActiveMember:
+    """지정한 연령·근속을 갖도록 생년월일과 중간정산일을 역산한 재직자."""
+    birth = dt.date(BASE_DATE.year - age, BASE_DATE.month, BASE_DATE.day)
+    start = BASE_DATE - dt.timedelta(days=round(past_service * 365.25))
+    member = ActiveMember(seq=1, row=26)
+    member.employee_id = "T001"
+    member.name = "테스트"
+    member.gender = Gender.MALE
+    member.birth_date = birth
+    member.hire_date = start
+    member.settlement_date = start
+    member.monthly_wage = wage
+    member.plan = BenefitPlan.DB
+    member.job_group = "정규직"
+    member.job_group_index = 0
+    member.age = age
+    member.severance_nra = nra
+    member.longterm_nra = nra
+    member.rules = RateRules(severance_withdrawal="기본", severance_salary_increase="기본")
+    return member
+
+
+class TestSingleDecrementCase:
+    """탈퇴가 정년 하나뿐이면 손으로 검산할 수 있다."""
+
+    def test_dbo_equals_discounted_attributed_benefit(self, config: CalculationConfig) -> None:
+        # 50세, 근속 10년, 정년 60세 → 10년 뒤 정년퇴직만 발생.
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        assumptions = make_assumptions(discount=0.05, salary=0.0)
+
+        result = value_member(member, config, assumptions)
+
+        # 정년 시 총근속 = 과거근속 + 10년. 법정 지급률이므로 급여 = 총근속 × 임금,
+        # 귀속비율은 과거근속 / 총근속이다.
+        past = result.past_service
+        total = past + 10
+        expected = total * 1_000_000 * (past / total) / (1.05**10)
+        assert result.dbo == pytest.approx(expected, rel=1e-9)
+
+    def test_service_cost_is_one_years_worth_of_the_same_benefit(
+        self, config: CalculationConfig
+    ) -> None:
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        result = value_member(member, config, make_assumptions(discount=0.05))
+
+        total = result.past_service + 10
+        expected = total * 1_000_000 * (1 / total) / (1.05**10)
+        assert result.service_cost == pytest.approx(expected, rel=1e-9)
+
+    def test_service_cost_times_past_service_equals_dbo(self, config: CalculationConfig) -> None:
+        """귀속비율이 PS/TS 와 1/TS 이므로 DBO = 근무원가 × 과거근속이다."""
+        member = make_member(age=50, past_service=10.0, nra=60)
+        result = value_member(member, config, make_assumptions())
+        assert result.dbo == pytest.approx(result.service_cost * result.past_service, rel=1e-9)
+
+    def test_salary_growth_compounds_into_the_benefit(self, config: CalculationConfig) -> None:
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        assumptions = make_assumptions(discount=0.05, salary=0.03)
+
+        result = value_member(member, config, assumptions)
+
+        past = result.past_service
+        total = past + 10
+        expected = total * 1_000_000 * (1.03**10) * (past / total) / (1.05**10)
+        assert result.dbo == pytest.approx(expected, rel=1e-9)
+
+    def test_interest_cost_is_dbo_times_discount_rate(self, config: CalculationConfig) -> None:
+        member = make_member()
+        result = value_member(member, config, make_assumptions(discount=0.05))
+        assert result.interest_cost == pytest.approx(result.dbo * 0.05, rel=1e-12)
+
+
+class TestDecrements:
+    def test_decrements_pull_payment_forward_and_raise_the_obligation(
+        self, config: CalculationConfig
+    ) -> None:
+        """법정 지급률 + 임금상승 0 이면 탈퇴가 채무를 **키운다**.
+
+        급여는 ``총근속 × 임금``, 귀속비율은 ``과거근속 / 총근속`` 이므로 귀속된
+        급여액은 언제 나가든 ``과거근속 × 임금`` 으로 같다. 그러면 남는 차이는
+        시점뿐이고, 일찍 나갈수록 덜 할인되어 현가가 커진다.
+        """
+        member = make_member(age=40, past_service=10.0, nra=60)
+        without = value_member(member, config, make_assumptions(withdrawal=0.0)).dbo
+        with_withdrawal = value_member(member, config, make_assumptions(withdrawal=0.10)).dbo
+        assert with_withdrawal > without
+
+    def test_mortality_behaves_like_withdrawal(self, config: CalculationConfig) -> None:
+        member = make_member(age=40, past_service=10.0, nra=60)
+        without = value_member(member, config, make_assumptions(mortality=0.0)).dbo
+        with_mortality = value_member(member, config, make_assumptions(mortality=0.02)).dbo
+        assert with_mortality > without
+
+    def test_decrements_lower_the_obligation_when_salary_outpaces_the_discount(
+        self, config: CalculationConfig
+    ) -> None:
+        """임금상승률이 할인율보다 높으면 반대로 뒤집힌다.
+
+        오래 남을수록 급여 기준임금이 더 크게 오르므로, 일찍 나가는 것이 채무를
+        줄인다. 부호가 가정에 따라 갈린다는 사실 자체가 중요하다.
+        """
+        assumptions_kw = {"discount": 0.03, "salary": 0.06}
+        member = make_member(age=40, past_service=10.0, nra=60)
+        without = value_member(member, config, make_assumptions(**assumptions_kw)).dbo
+        with_withdrawal = value_member(
+            member, config, make_assumptions(**assumptions_kw, withdrawal=0.10)
+        ).dbo
+        assert with_withdrawal < without
+
+    def test_attributed_benefit_is_invariant_to_exit_timing(
+        self, config: CalculationConfig
+    ) -> None:
+        """할인율 0 이면 탈퇴율과 무관하게 DBO = 과거근속 × 임금 이어야 한다."""
+        member = make_member(age=40, past_service=10.0, wage=1_000_000, nra=60)
+        result = value_member(
+            member, config, make_assumptions(discount=0.0, withdrawal=0.10)
+        )
+        assert result.dbo == pytest.approx(result.past_service * 1_000_000, rel=1e-9)
+
+    def test_exit_probabilities_sum_to_one(self, config: CalculationConfig) -> None:
+        """탈퇴확률 합이 1 이어야 급여가 새거나 이중계상되지 않는다.
+
+        지급률을 근속과 무관한 상수로 두고 할인·임금상승을 끄면, 미래급여
+        현가는 급여액 그 자체와 같아야 한다.
+        """
+        member = make_member(age=55, past_service=10.0, wage=1_000_000, nra=60)
+        assumptions = make_assumptions(discount=0.0, withdrawal=0.10, mortality=0.01)
+        assumptions.severance_benefit = BenefitScale(
+            curves={"고정": RateCurve({0: 5.0})}, statutory_when_missing=False
+        )
+        member.rules.severance_benefit = "고정"
+
+        result = value_member(member, config, assumptions)
+        assert result.expected_benefit_pv == pytest.approx(5.0 * 1_000_000, rel=1e-9)
+
+
+class TestExclusions:
+    def test_dc_members_carry_no_defined_benefit_obligation(
+        self, config: CalculationConfig
+    ) -> None:
+        member = make_member()
+        member.plan = BenefitPlan.DC
+        result = value_member(member, config, make_assumptions())
+        assert result.dbo == 0.0
+        assert "DC" in result.excluded_reason
+
+    def test_members_without_a_wage_are_excluded(self, config: CalculationConfig) -> None:
+        member = make_member(wage=0)
+        result = value_member(member, config, make_assumptions())
+        assert result.dbo == 0.0
+        assert result.excluded_reason
+
+
+class TestRosterTotals:
+    def test_totals_add_up_across_members(self, config: CalculationConfig) -> None:
+        roster = Roster(active=[make_member(age=40), make_member(age=50), make_member(age=55)])
+        result = value_roster(roster, config, make_assumptions())
+        assert result.dbo == pytest.approx(sum(m.dbo for m in result.members))
+        assert result.headcount == 3
+
+    def test_members_hired_after_the_base_date_are_skipped(
+        self, config: CalculationConfig
+    ) -> None:
+        future = make_member()
+        future.hire_date = BASE_DATE + dt.timedelta(days=30)
+        roster = Roster(active=[make_member(), future])
+        assert value_roster(roster, config, make_assumptions()).headcount == 1
+
+
+class TestSensitivity:
+    def test_discount_rate_moves_the_obligation_inversely(
+        self, config: CalculationConfig
+    ) -> None:
+        roster = Roster(active=[make_member(age=45, past_service=15.0)])
+        assumptions = make_assumptions(discount=0.05)
+        base = value_roster(roster, config, assumptions).dbo
+
+        result = run_sensitivity(roster, config, assumptions, base_dbo=base)
+        cases = {c.name: c for c in result.cases}
+
+        assert cases["할인율 +0.5%p"].change < 0
+        assert cases["할인율 -0.5%p"].change > 0
+
+    def test_salary_growth_moves_the_obligation_directly(
+        self, config: CalculationConfig
+    ) -> None:
+        roster = Roster(active=[make_member(age=45, past_service=15.0)])
+        assumptions = make_assumptions(discount=0.05, salary=0.03)
+        result = run_sensitivity(roster, config, assumptions)
+        cases = {c.name: c for c in result.cases}
+
+        assert cases["임금상승률 +0.5%p"].change > 0
+        assert cases["임금상승률 -0.5%p"].change < 0
+
+    def test_every_default_shock_produces_a_case(self, config: CalculationConfig) -> None:
+        roster = Roster(active=[make_member()])
+        result = run_sensitivity(roster, config, make_assumptions())
+        assert len(result.cases) == len(DEFAULT_SHOCKS)
+
+
+class TestRollForward:
+    def test_components_reconcile_to_the_closing_balance(self) -> None:
+        roll = build_rollforward(
+            opening_dbo=1_000_000,
+            service_cost=100_000,
+            interest_cost=50_000,
+            benefits_paid=80_000,
+            closing_dbo=1_120_000,
+        )
+        assert roll.expected_closing_dbo == pytest.approx(1_070_000)
+        assert roll.actuarial_gain_loss == pytest.approx(50_000)
+        assert roll.closing_dbo == pytest.approx(1_120_000)
+
+    def test_prior_assumption_run_splits_experience_from_assumption_change(self) -> None:
+        roll = build_rollforward(
+            opening_dbo=1_000_000,
+            service_cost=100_000,
+            interest_cost=50_000,
+            benefits_paid=80_000,
+            closing_dbo=1_120_000,
+            dbo_with_prior_assumptions=1_090_000,
+        )
+        assert roll.experience_adjustment == pytest.approx(20_000)   # 1,090,000 - 1,070,000
+        assert roll.assumption_change == pytest.approx(30_000)       # 1,120,000 - 1,090,000
+        assert roll.closing_dbo == pytest.approx(1_120_000)
+
+    def test_initial_period_starts_from_zero(self) -> None:
+        roll = initial_period(closing_dbo=500_000, service_cost=40_000)
+        assert roll.opening_dbo == 0.0
+        assert roll.closing_dbo == pytest.approx(500_000)
+
+    def test_rows_are_ordered_for_disclosure(self) -> None:
+        roll = initial_period(500_000, 40_000)
+        labels = [label for label, _ in roll.as_rows()]
+        assert labels[0] == "기초 확정급여채무"
+        assert labels[-1] == "기말 확정급여채무"
