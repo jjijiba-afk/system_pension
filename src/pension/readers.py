@@ -332,7 +332,8 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
 
         member = ActiveMember(seq=seq, row=row)
         member.employee_id = employee_id
-        member.employee_type = normalize_employee_type(get("employee_type"))
+        member.employee_type_raw = text(get("employee_type"))
+        member.employee_type = normalize_employee_type(member.employee_type_raw)
         member.job_group_raw = text(get("job_group"))
         member.name = text(get("name"))
         member.gender = normalize_gender(get("gender"))
@@ -384,7 +385,9 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.note = text(get("note"))
         member.cost_code = text(get("cost_code"))
 
-        found = config.find_job_group(member.job_group_raw)
+        found = config.find_job_group(
+            member.job_group_raw, member.employee_type.value, member.employee_type_raw
+        )
         if found is not None:
             index, rule = found
             member.job_group_index = index
@@ -440,7 +443,8 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
 
         member = RetiredMember(seq=seq, row=row)
         member.employee_id = employee_id
-        member.employee_type = normalize_employee_type(get("employee_type"))
+        member.employee_type_raw = text(get("employee_type"))
+        member.employee_type = normalize_employee_type(member.employee_type_raw)
         member.job_group_raw = text(get("job_group"))
         member.name = text(get("name"))
         member.gender = normalize_gender(get("gender"))
@@ -482,7 +486,9 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
         member.note = text(get("note"))
         member.cost_code = text(get("cost_code"))
 
-        found = config.find_job_group(member.job_group_raw)
+        found = config.find_job_group(
+            member.job_group_raw, member.employee_type.value, member.employee_type_raw
+        )
         if found is not None:
             index, rule = found
             member.job_group_index = index

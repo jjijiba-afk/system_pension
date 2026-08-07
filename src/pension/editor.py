@@ -42,6 +42,7 @@ from .assumptions import (
     write_assumptions,
 )
 from .formula import FUNCTIONS, VARIABLES, Formula, FormulaError
+from .jobgroup import DEFAULT_GROUPS
 from .normalize import text
 
 __all__ = ["AssumptionsEditor", "open_editor"]
@@ -62,7 +63,7 @@ _PAYOUT_HEADERS = (
     "퇴직급여 퇴직률 규정", "퇴직급여 승급률 규정", "장기급여 퇴직률 규정",
     "장기급여 승급률 규정", "퇴직자 퇴직급여 퇴직률 규정", "퇴직자 장기급여 퇴직률 규정",
     "가입자격(최소근속)", "임원 정년연령", "임원 정년초과 가산연령", "산출 제외",
-    "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식",
+    "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식", "임직원구분",
 )
 
 
@@ -460,6 +461,194 @@ def _short(exc: Exception, limit: int = 60) -> str:
     return message if len(message) <= limit else message[: limit - 1] + "…"
 
 
+class _JobGroupMapTab(ttk.Frame):
+    """명부 직급·직군을 산출 직군으로 묶는 탭.
+
+    명부의 `직군` 열에 무엇이 들어올지는 회사가 정한다. 실제 파일에서는
+    `정규직/계약직` 같은 고용형태가 오기도 하고, `사원/과장/대표이사` 처럼
+    **직급** 이 그대로 오기도 하며, 직군은 비고 `임직원구분` 에만
+    `정사원/촉탁사원/임원（주재원）` 이 적혀 오기도 한다.
+
+    산출 가정은 이 낱낱의 직급마다 세우지 않는다. 비슷한 것끼리 묶어 그 단위로
+    기초율을 만든다. 기본 묶음은 정규직 / 계약직 / 임원이지만, **묶음 이름
+    자체를 여기서 바꿀 수 있다.** 생산직과 관리직의 퇴직률이 확연히 다른
+    회사라면 정규직을 다시 갈라야 하고, 그때 칸이 셋뿐이면 쓸 수 없기 때문이다.
+
+    배정은 제안만 하고 확정하지 않는다. 같은 '촉탁사원' 이라도 정년 후 재고용은
+    계약직, 임원 예우 재고용은 임원인 회사가 있어 규정을 봐야 갈린다.
+    """
+
+    def __init__(self, parent, job_groups: list[str]) -> None:
+        super().__init__(parent, padding=_PAD)
+        self.job_groups = list(job_groups)
+        self._rows: list[dict[str, Any]] = []
+
+        ttk.Label(
+            self,
+            text="명부의 직급·직군을 산출에 쓸 묶음으로 배정합니다. 묶음 이름은 위 "
+                 "'직군별 규정' 칸에서 바꾸세요. 저장하면 '지급규정' 시트에 "
+                 "명부직군·임직원구분·변환직군명 세 열로 적힙니다.",
+            style="Hint.TLabel", wraplength=840, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", pady=(0, 6))
+        ttk.Button(bar, text="명부에서 직군 읽어오기", command=self._load_from_roster).pack(
+            side="left"
+        )
+        ttk.Button(bar, text="제안대로 채우기", command=self.apply_suggestions).pack(
+            side="left", padx=(4, 0)
+        )
+
+        self.summary = ttk.Label(self, text="명부를 읽으면 조합이 나타납니다.",
+                                 style="Hint.TLabel")
+        self.summary.pack(anchor="w", pady=(0, 4))
+
+        wrapper = ttk.Frame(self)
+        wrapper.pack(fill="both", expand=True)
+        self._canvas = tk.Canvas(wrapper, highlightthickness=0, height=260)
+        scroll = ttk.Scrollbar(wrapper, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=scroll.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        self._table = ttk.Frame(self._canvas)
+        window = self._canvas.create_window((0, 0), window=self._table, anchor="nw")
+        self._table.bind(
+            "<Configure>",
+            lambda _e: self._canvas.configure(scrollregion=self._canvas.bbox("all")),
+        )
+        self._canvas.bind(
+            "<Configure>", lambda e: self._canvas.itemconfigure(window, width=e.width)
+        )
+        self._draw()
+
+    def rebuild(self, job_groups: list[str]) -> None:
+        """묶음 이름이 바뀌면 배정 칸의 선택지를 갈아 끼운다.
+
+        없어진 이름에 배정돼 있던 조합은 제안값으로 되돌린다. 빈 값으로 두면
+        저장 때 소리 없이 빠져나가기 때문이다.
+        """
+        from .jobgroup import suggest_group
+
+        self.job_groups = list(job_groups)
+        for row in self._rows:
+            if row["target"].get() not in job_groups:
+                row["target"].set(
+                    suggest_group(row["source"], row["kind"], job_groups)
+                )
+        self._draw()
+
+    # ── 명부 읽기 ────────────────────────────────────────────────
+    def _load_from_roster(self) -> None:
+        path = filedialog.askopenfilename(
+            title="명부 파일 선택", parent=self,
+            filetypes=[("엑셀 파일", "*.xls *.xlsm *.xlsx"), ("모든 파일", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            from .jobgroup import scan_roster
+            from .workbook import open_workbook
+
+            book = open_workbook(path)
+            try:
+                found = scan_roster(book)
+            finally:
+                book.close()
+        except Exception as exc:
+            messagebox.showerror("명부 읽기", f"직군을 읽지 못했습니다.\n\n{exc}", parent=self)
+            return
+
+        if not found:
+            messagebox.showwarning(
+                "명부 읽기", "명부에서 직군·임직원구분을 찾지 못했습니다.", parent=self
+            )
+            return
+        self.set_found(found)
+
+    def set_found(self, found: list) -> None:
+        """스캔 결과로 표를 채운다. 이미 배정한 조합은 그대로 둔다."""
+        from .jobgroup import suggest_group
+
+        previous = {(r["source"], r["kind"]): r["target"].get() for r in self._rows}
+        self._rows = []
+        for group in found:
+            saved = previous.get(group.key)
+            target = saved if saved in self.job_groups else suggest_group(
+                group.source_name, group.employee_type, self.job_groups
+            )
+            self._rows.append({
+                "source": group.source_name,
+                "kind": group.employee_type,
+                "normalized": group.normalized_type,
+                "active": group.active,
+                "retired": group.retired,
+                "target": tk.StringVar(value=target),
+            })
+        self._draw()
+
+    def apply_suggestions(self) -> None:
+        from .jobgroup import suggest_group
+
+        for row in self._rows:
+            row["target"].set(suggest_group(row["source"], row["kind"], self.job_groups))
+
+    # ── 표 ───────────────────────────────────────────────────────
+    def _draw(self) -> None:
+        for child in self._table.winfo_children():
+            child.destroy()
+
+        headers = ("명부 직군", "임직원구분", "임원 판정", "재직", "퇴직", "계", "→ 변환 직군")
+        for col, title in enumerate(headers):
+            ttk.Label(self._table, text=title, style="Col.TLabel").grid(
+                row=0, column=col, sticky="w", padx=4, pady=(0, 6)
+            )
+
+        for index, row in enumerate(self._rows, start=1):
+            total = row["active"] + row["retired"]
+            cells = (
+                row["source"] or "(빈 값)",
+                row["kind"] or "(빈 값)",
+                row["normalized"],
+                f"{row['active']:,}",
+                f"{row['retired']:,}",
+                f"{total:,}",
+            )
+            for col, value in enumerate(cells):
+                ttk.Label(self._table, text=value).grid(
+                    row=index, column=col, sticky="e" if col >= 3 else "w", padx=4, pady=1
+                )
+            ttk.Combobox(
+                self._table, textvariable=row["target"], values=list(self.job_groups),
+                state="readonly", width=12,
+            ).grid(row=index, column=6, padx=4, pady=1)
+
+        if self._rows:
+            used = {r["target"].get() for r in self._rows}
+            people = sum(r["active"] + r["retired"] for r in self._rows)
+            self.summary.configure(
+                text=f"조합 {len(self._rows)}개 · 인원 {people:,}명 → 묶음 {len(used)}개 "
+                     f"({', '.join(g for g in self.job_groups if g in used)})"
+            )
+
+    # ── 값 ───────────────────────────────────────────────────────
+    def rows(self) -> list[tuple[str, str, str]]:
+        """(명부직군, 임직원구분, 변환직군명) 목록. 비어 있으면 매핑을 쓰지 않는다."""
+        return [(r["source"], r["kind"], r["target"].get()) for r in self._rows]
+
+    def set_rows(self, rows: list[tuple[str, str, str]]) -> None:
+        """저장된 `지급규정` 시트에서 되읽는다."""
+        self._rows = [
+            {
+                "source": source, "kind": kind, "normalized": "",
+                "active": 0, "retired": 0,
+                "target": tk.StringVar(value=target),
+            }
+            for source, kind, target in rows
+        ]
+        self._draw()
+
+
 class _PayoutRuleTab(ttk.Frame):
     """회사 지급규정 탭 — 직군별 가입자격·정년·근속 산정방법·반올림.
 
@@ -767,7 +956,7 @@ class AssumptionsEditor(tk.Toplevel):
         self.geometry("900x720")
         self.minsize(760, 600)
 
-        self.job_groups = list(job_groups or ["정규직", "임원"])
+        self.job_groups = list(job_groups or DEFAULT_GROUPS)
         self.path: Path | None = None
         """마지막으로 저장하거나 불러온 파일. 호출한 쪽이 이어받을 수 있다."""
 
@@ -791,8 +980,8 @@ class AssumptionsEditor(tk.Toplevel):
 
         ttk.Label(
             box,
-            text="여기 적은 직군 이름이 각 가정 표의 열 머리글이 됩니다. "
-                 "명부의 Input 시트 '변환 직군명' 과 글자까지 같아야 합니다.",
+            text="여기 적은 이름이 모든 가정 표의 열 머리글이 됩니다. 명부의 직급·직군을 "
+                 "어느 이름에 넣을지는 '직군 매핑' 탭에서 정합니다.",
             style="Hint.TLabel", wraplength=820, justify="left",
         ).pack(anchor="w", pady=(0, 6))
 
@@ -805,9 +994,20 @@ class AssumptionsEditor(tk.Toplevel):
         entry.bind("<Return>", lambda _e: self._apply_job_groups())
 
         ttk.Button(row, text="적용", command=self._apply_job_groups).pack(side="left", padx=(6, 0))
+        ttk.Button(row, text="기본값", command=self._reset_job_groups).pack(
+            side="left", padx=(4, 0)
+        )
         ttk.Button(row, text="명부에서 불러오기", command=self._load_from_roster).pack(
             side="left", padx=(4, 0)
         )
+
+        ttk.Label(
+            box,
+            text="예) 정규직, 계약직, 임원   ·   생산직, 관리직, 일반직, 계약직, 임원\n"
+                 "퇴직률·승급률·지급률이 실제로 다른 단위로만 나누세요. 잘게 나눌수록 "
+                 "구간별 인원이 줄어 기초율의 통계적 신뢰도가 떨어집니다.",
+            style="Hint.TLabel", justify="left",
+        ).pack(anchor="w", pady=(6, 0))
 
     def _apply_job_groups(self) -> None:
         names = [text(n) for n in self.job_group_var.get().split(",")]
@@ -818,11 +1018,21 @@ class AssumptionsEditor(tk.Toplevel):
         if len(set(names)) != len(names):
             messagebox.showwarning("직군", "같은 직군 이름이 두 번 들어갔습니다.", parent=self)
             return
+        self._set_job_groups(names)
 
-        self.job_groups = names
+    def _reset_job_groups(self) -> None:
+        self._set_job_groups(list(DEFAULT_GROUPS))
+
+    def _set_job_groups(self, names: list[str]) -> None:
+        """직군 묶음을 바꾸고 모든 탭의 열을 다시 만든다.
+
+        위쪽 입력줄과 '직군 매핑' 탭 두 곳에서 바꿀 수 있으므로 한 자리로 모은다.
+        """
+        self.job_groups = list(names)
         self.job_group_var.set(", ".join(names))
         for grid in self._grids.values():
             grid.rebuild_columns(names)
+        self._map_tab.rebuild(names)
         self._payout_tab.rebuild(names)
         self._rule_tab.rebuild(names)
         self._longterm_tab.rebuild(names)
@@ -859,6 +1069,10 @@ class AssumptionsEditor(tk.Toplevel):
     def _build_tabs(self) -> None:
         book = ttk.Notebook(self)
         book.pack(fill="both", expand=True, padx=_PAD, pady=4)
+
+        # 직군 묶음이 다른 모든 탭의 열 머리글을 정하므로 맨 앞에 둔다.
+        self._map_tab = _JobGroupMapTab(book, self.job_groups)
+        book.add(self._map_tab, text="직군 매핑")
 
         self._grids: dict[str, _Grid] = {}
         for spec in SPECS:
@@ -968,12 +1182,17 @@ class AssumptionsEditor(tk.Toplevel):
             if PAYOUT_SHEET in wb.sheetnames:
                 ws = wb[PAYOUT_SHEET]
                 payout: dict[str, dict[str, Any]] = {}
+                mapping: list[tuple[str, str, str]] = []
                 for row in range(2, ws.max_row + 1):
                     name = text(ws.cell(row, 1).value)
                     if not name:
                         continue
+                    # 규정 값은 변환 직군(2열) 단위로, 매핑은 행 단위로 되읽는다.
+                    target = text(ws.cell(row, 2).value) or name
+                    kind = text(ws.cell(row, 22).value)
+                    mapping.append((name, kind, target))
                     unit = _as_int(_cell_text(ws.cell(row, 20).value), 0)
-                    payout[name] = {
+                    payout[target] = {
                         "nra": _cell_text(ws.cell(row, 3).value) or "60",
                         "add_age": _cell_text(ws.cell(row, 5).value) or "2",
                         "min_service": _cell_text(ws.cell(row, 14).value) or "0",
@@ -984,6 +1203,9 @@ class AssumptionsEditor(tk.Toplevel):
                         "unit": _UNIT_LABELS.get(unit, "없음"),
                     }
                 self._payout_tab.set_values(payout)
+                # 명부 직군이 변환 직군과 다른 행이 하나라도 있으면 진짜 매핑이다.
+                if any(source != target or kind for source, kind, target in mapping):
+                    self._map_tab.set_rows(mapping)
 
             if LONGTERM_RULE_SHEET in wb.sheetnames:
                 ws = wb[LONGTERM_RULE_SHEET]
@@ -1070,11 +1292,25 @@ class AssumptionsEditor(tk.Toplevel):
 
         # 지급규정 탭 → 'Input' 시트와 같은 배치로 한 장 더 만든다. 산출 때
         # 그대로 읽히도록 열 순서를 맞춘다.
+        #
+        # 한 행이 곧 하나의 조회 키다. '직군 매핑' 탭이 채워져 있으면 명부에서
+        # 발견된 (직군, 임직원구분) 조합마다 한 행씩 쓰고, 규정 값은 배정된
+        # 묶음의 것을 그대로 복사한다. 매핑이 비어 있으면 묶음 이름을 그대로
+        # 명부 직군으로 본다(직군 열에 이미 정규직/계약직이 적혀 오는 명부).
         payout = self._payout_tab.get_values()
+        mapping = [
+            (source, kind, target)
+            for source, kind, target in self._map_tab.rows()
+            if target in payout
+        ]
+        if not mapping:
+            mapping = [(group, "", group) for group in payout]
+
         rows: list[list[Any]] = []
-        for group, item in payout.items():
+        for source, kind, target in mapping:
+            item = payout[target]
             rows.append([
-                group, group,
+                source, target,
                 _as_int(item["nra"], 60), _as_int(item["nra"], 60),
                 _as_int(item["add_age"], 2),
                 "", "", "", "", "", "", "", "",
@@ -1084,6 +1320,7 @@ class AssumptionsEditor(tk.Toplevel):
                 "Y" if item["excluded"] else "",
                 item["basis"], item["fraction"],
                 _ROUNDING_VALUES.get(item["unit"], 0), FRACTION_HALF,
+                kind,
             ])
         sheets[PAYOUT_SHEET] = (list(_PAYOUT_HEADERS), rows)
 

@@ -95,9 +95,20 @@ _FEMALE_TOKENS: Final[frozenset[str]] = frozenset({"녀", "여", "여자", "여�
 
 
 def normalize_employee_type(value: object) -> EmployeeType:
-    """임직원구분 정규화. 판정되지 않는 값은 VBA 와 같이 '직원' 으로 본다."""
+    """임직원구분 정규화. 판정되지 않는 값은 VBA 와 같이 '직원' 으로 본다.
+
+    실제 명부에는 ``임원（주재원）``, ``정사원``, ``촉탁사원`` 처럼 회사 나름의
+    표기가 들어온다. VBA 는 완전일치만 보아 ``임원（주재원）`` 을 직원으로
+    분류했는데, 임원은 정년·지급배수가 달라 그대로 두면 채무가 어긋난다.
+    그래서 ``임원`` 으로 **시작하는** 값도 임원으로 본다.
+    """
     token = text(value).lower()
-    return EmployeeType.EXECUTIVE if token in _EXECUTIVE_TOKENS else EmployeeType.STAFF
+    if token in _EXECUTIVE_TOKENS:
+        return EmployeeType.EXECUTIVE
+    # '임원(주재원)', '임원A' 처럼 뒤에 설명이 붙는 경우. '비임원' 은 걸리지 않는다.
+    if token.startswith("임원") or token.startswith("이사") or token.startswith("등기임원"):
+        return EmployeeType.EXECUTIVE
+    return EmployeeType.STAFF
 
 
 def normalize_gender(value: object) -> Gender:

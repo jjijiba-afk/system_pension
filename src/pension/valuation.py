@@ -245,7 +245,9 @@ def value_member(
     # 지급액 반올림 규칙(예: 10원 단위). 직군 규칙에서 받아 온다.
     rounding_unit = 0
     rounding_mode = FRACTION_HALF
-    found = config.find_job_group(member.job_group_raw)
+    found = config.find_job_group(
+        member.job_group_raw, member.employee_type.value, member.employee_type_raw
+    )
     if found is not None:
         rounding_unit = found[1].benefit_rounding_unit
         rounding_mode = found[1].benefit_rounding_mode
