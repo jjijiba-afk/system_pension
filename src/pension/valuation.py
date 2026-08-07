@@ -95,6 +95,8 @@ class MemberValuation:
 
     min_service_years: float = 0.0
     """적용한 가입자격(최소 근속연수). 0 이면 제한 없음."""
+    extra_payment: float = 0.0
+    """전별금·위로금 등 정액 추가지급액. 명부에 금액이 적힌 사람만 대상이다."""
 
     excluded_reason: str = ""
     """산출 대상에서 뺀 이유. 비어 있으면 정상 산출."""
@@ -141,6 +143,18 @@ class ValuationResult:
         if not total:
             return 0.0
         return sum(m.dbo * m.duration for m in self.members) / total
+
+    def exclusion_summary(self) -> dict[str, int]:
+        """산출에서 빠진 사유별 인원.
+
+        DC 전환을 마친 회사는 확정급여채무가 0 으로 나오는 것이 정상이다. 그때
+        이유를 함께 보여 주지 않으면 산출이 잘못된 것으로 오해하기 쉽다.
+        """
+        counts: dict[str, int] = {}
+        for m in self.members:
+            if m.excluded_reason:
+                counts[m.excluded_reason] = counts.get(m.excluded_reason, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
     def by_job_group(self) -> dict[str, tuple[int, float, float]]:
         """직군별 (인원, DBO, 당기근무원가)."""
@@ -191,6 +205,9 @@ def value_member(
         withdrawal_rule=member.rules.severance_withdrawal,
     )
 
+    if member.excluded_group:
+        result.excluded_reason = f"'{member.job_group}' 직군은 퇴직급여 대상이 아님 (규정상 제외)"
+        return result
     if member.plan is BenefitPlan.DC:
         result.excluded_reason = "DC 가입자 (확정기여제도는 확정급여채무 없음)"
         return result
@@ -222,6 +239,10 @@ def value_member(
     minimum = member.min_service_years
     result.min_service_years = minimum
 
+    # 명부의 추가지급 기본급. 값이 있으면 그 사람이 위로금 대상이라는 뜻이다.
+    extra_payment = max(0.0, member.extra_pay_base_wage)
+    result.extra_payment = extra_payment
+
     def benefit_at(service: float, age: float, wage: float) -> float:
         """퇴직 시점 지급액.
 
@@ -232,9 +253,11 @@ def value_member(
         """
         if minimum > 0 and service < minimum:
             return 0.0
-        return assumptions.severance_benefit.multiple(
+        amount = assumptions.severance_benefit.multiple(
             rule, service, x=age, **context
         ) * wage
+        # 전별금·위로금 등 정액 추가지급. 금액이 적힌 사람만 대상이다.
+        return amount + extra_payment
 
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
     result.accrued_benefit = benefit_at(past_service, float(member.age), member.monthly_wage)

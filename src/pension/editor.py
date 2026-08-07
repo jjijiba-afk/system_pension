@@ -515,11 +515,10 @@ class AssumptionsEditor(tk.Toplevel):
         if not path:
             return
         try:
-            import openpyxl
-
             from .config import read_config
+            from .workbook import open_workbook
 
-            wb = openpyxl.load_workbook(path, data_only=True)
+            wb = open_workbook(path)
             try:
                 config = read_config(wb)
             finally:
@@ -600,9 +599,9 @@ class AssumptionsEditor(tk.Toplevel):
         self.status.configure(text=f"불러왔습니다: {Path(path).name}")
 
     def load_workbook(self, path: Path) -> None:
-        import openpyxl
+        from .workbook import open_workbook
 
-        wb = openpyxl.load_workbook(path, data_only=True)
+        wb = open_workbook(path)
         try:
             # 직군은 지급률 시트의 열 머리글에서 가져온다.
             groups: list[str] = []

@@ -19,7 +19,7 @@ from .actuarial import attained_age
 from .config import CalculationConfig
 from .errors import IssueLog
 from .models import ActiveMember, RetiredMember, Roster
-from .normalize import BenefitPlan, RetirementReason, is_ambiguous_reason
+from .normalize import BenefitPlan, EmployeeType, RetirementReason, is_ambiguous_reason
 from .readers import ACTIVE_COLUMNS, ACTIVE_SHEET, RETIRED_COLUMNS, RETIRED_SHEET
 
 __all__ = ["validate_active", "validate_retired", "validate_roster"]
@@ -178,11 +178,17 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
             from .actuarial import longterm_retirement_age, normal_retirement_age
 
             member.severance_nra = normal_retirement_age(
-                member.age, rule, wage_peak_age=member.wage_peak_age
+                member.age, rule,
+                wage_peak_age=member.wage_peak_age,
+                is_executive=member.employee_type is EmployeeType.EXECUTIVE,
             )
             member.longterm_nra = longterm_retirement_age(member.age, rule)
 
-            if member.severance_nra <= member.age and member.plan is not BenefitPlan.DC:
+            if (
+                member.severance_nra <= member.age
+                and member.plan is not BenefitPlan.DC
+                and not rule.excluded
+            ):
                 log.warning(
                     "JAE_NRA_NOT_FUTURE",
                     f"확정된 퇴직급여 정년연령({member.severance_nra}세)이 "

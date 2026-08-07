@@ -113,6 +113,8 @@ class ActiveMember:
     """장기급여 정년연령."""
     min_service_years: float = 0.0
     """퇴직급여 지급 대상 최소 근속연수. 직군 규칙에서 받아 온다."""
+    excluded_group: bool = False
+    """직군 자체가 퇴직급여 대상이 아닌지. 직군 규칙에서 받아 온다."""
 
     def effective_daily_base_pay(self) -> float:
         """업로드 명부에 쓸 일 기본급.
