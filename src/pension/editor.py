@@ -30,7 +30,11 @@ from .assumptions import (
     CUMULATIVE,
     DISCOUNT_SHEET,
     FORMULA,
+    LONGTERM_RULE_SHEET,
     LONGTERM_SHEET,
+    LONGTERM_TYPES,
+    LT_IN_KIND,
+    LT_VACATION,
     MORTALITY_SHEET,
     PROMOTION_SHEET,
     SALARY_SHEET,
@@ -639,6 +643,115 @@ class _PayoutRuleTab(ttk.Frame):
                     var.set(item[key])
 
 
+class _LongTermRuleTab(ttk.Frame):
+    """장기급여 지급유형 탭.
+
+    근속 포상은 회사마다 주는 것이 다르다. 실제 규정에서 본 것만 해도
+    '휴가 10일', '순금 30돈 + 재직기념패', '평균임금의 500%', '100만원' 이다.
+    같은 표에 적힌 숫자가 유형에 따라 일수·배수·금액으로 달라지므로, 유형을
+    먼저 고르게 한다.
+
+    금·물품은 평가시점 시세가 매일 바뀌어 프로그램이 정할 수 없다. 담당자가
+    환산한 금액을 넣고, 미래분은 **현물 상승률** 로 올린다.
+    """
+
+    def __init__(self, parent, job_groups: list[str]) -> None:
+        super().__init__(parent, padding=_PAD)
+        self.job_groups = list(job_groups)
+        self._rows: dict[str, dict[str, Any]] = {}
+
+        box = ttk.LabelFrame(self, text="표 값의 뜻", padding=_PAD)
+        box.pack(fill="x")
+        ttk.Label(
+            box,
+            text="휴가        '장기급여' 탭의 값 = 지급일수     → 일 기본급 × 일수 (임금상승률 반영)\n"
+                 "평균임금    값 = 배수                          → 30일 평균임금 × 배수 (임금상승률 반영)\n"
+                 "현물        값 = 정액(원)                      → 평가시점 시세로 환산해 넣고 현물 상승률로 올림\n"
+                 "현금        값 = 정액(원)                      → 규정 금액이 고정이므로 올리지 않음",
+            style="Hint.TLabel", justify="left", font=("", 9),
+        ).pack(anchor="w")
+
+        self._body = ttk.Frame(self)
+        self._body.pack(fill="both", expand=True, pady=(8, 0))
+        self.rebuild(self.job_groups)
+
+    def rebuild(self, job_groups: list[str]) -> None:
+        previous = self.get_values()
+        for child in self._body.winfo_children():
+            child.destroy()
+        self._rows.clear()
+        self.job_groups = list(job_groups)
+
+        for col, title in enumerate(("규정명(직군)", "지급유형", "현물 상승률", "환산 근거")):
+            ttk.Label(self._body, text=title, style="Col.TLabel").grid(
+                row=0, column=col, sticky="w", padx=3, pady=(0, 6)
+            )
+        self._body.columnconfigure(3, weight=1)
+
+        for index, group in enumerate(self.job_groups, start=1):
+            saved = previous.get(group, {})
+            row = {
+                "kind": tk.StringVar(value=saved.get("kind", LT_VACATION)),
+                "escalation": tk.StringVar(value=saved.get("escalation", "")),
+                "note": tk.StringVar(value=saved.get("note", "")),
+            }
+            ttk.Label(self._body, text=group).grid(row=index, column=0, sticky="w", padx=3)
+
+            combo = ttk.Combobox(
+                self._body, textvariable=row["kind"], values=list(LONGTERM_TYPES),
+                state="readonly", width=9,
+            )
+            combo.grid(row=index, column=1, padx=3, pady=1)
+
+            entry = ttk.Entry(self._body, textvariable=row["escalation"], width=10,
+                              justify="right")
+            entry.grid(row=index, column=2, padx=3, pady=1)
+            row["entry"] = entry
+
+            ttk.Entry(self._body, textvariable=row["note"]).grid(
+                row=index, column=3, sticky="ew", padx=3, pady=1
+            )
+
+            self._rows[group] = row
+            combo.bind("<<ComboboxSelected>>", lambda _e, g=group: self._sync(g))
+            self._sync(group)
+
+        ttk.Label(
+            self._body,
+            text="현물 상승률은 '현물' 유형에만 씁니다. 환산 근거에는 "
+                 "'순금 30돈 @ 2025-12-31 시세' 처럼 남겨 두세요.",
+            style="Hint.TLabel", wraplength=780, justify="left",
+        ).grid(row=len(self.job_groups) + 1, column=0, columnspan=4, sticky="w", pady=(10, 0))
+
+    def _sync(self, group: str) -> None:
+        """현물이 아니면 상승률 칸을 잠근다."""
+        row = self._rows[group]
+        is_in_kind = row["kind"].get() == LT_IN_KIND
+        row["entry"].configure(state="normal" if is_in_kind else "disabled")
+        if not is_in_kind:
+            row["escalation"].set("")
+
+    def get_values(self) -> dict[str, dict[str, str]]:
+        return {
+            group: {
+                "kind": row["kind"].get(),
+                "escalation": row["escalation"].get().strip(),
+                "note": row["note"].get().strip(),
+            }
+            for group, row in self._rows.items()
+        }
+
+    def set_values(self, values: dict[str, dict[str, str]]) -> None:
+        for group, item in values.items():
+            row = self._rows.get(group)
+            if row is None:
+                continue
+            for key in ("kind", "escalation", "note"):
+                if key in item:
+                    row[key].set(item[key])
+            self._sync(group)
+
+
 class AssumptionsEditor(tk.Toplevel):
     """산출 가정 입력 창."""
 
@@ -712,6 +825,7 @@ class AssumptionsEditor(tk.Toplevel):
             grid.rebuild_columns(names)
         self._payout_tab.rebuild(names)
         self._rule_tab.rebuild(names)
+        self._longterm_tab.rebuild(names)
 
     def _load_from_roster(self) -> None:
         """명부의 ``Input`` 시트에서 변환 직군명을 가져온다. 이름 불일치를 막는다."""
@@ -757,6 +871,9 @@ class AssumptionsEditor(tk.Toplevel):
 
         self._rule_tab = _BenefitRuleTab(book, self.job_groups)
         book.add(self._rule_tab, text="지급률 규정")
+
+        self._longterm_tab = _LongTermRuleTab(book, self.job_groups)
+        book.add(self._longterm_tab, text="장기급여 유형")
 
     # ── 저장·불러오기 ────────────────────────────────────────────
     def _build_actions(self) -> None:
@@ -868,6 +985,21 @@ class AssumptionsEditor(tk.Toplevel):
                     }
                 self._payout_tab.set_values(payout)
 
+            if LONGTERM_RULE_SHEET in wb.sheetnames:
+                ws = wb[LONGTERM_RULE_SHEET]
+                longterm: dict[str, dict[str, str]] = {}
+                for row in range(2, ws.max_row + 1):
+                    name = text(ws.cell(row, 1).value)
+                    if not name:
+                        continue
+                    raw = ws.cell(row, 3).value
+                    longterm[name] = {
+                        "kind": text(ws.cell(row, 2).value) or LT_VACATION,
+                        "escalation": f"{float(raw) * 100:g}%" if isinstance(raw, (int, float)) and raw else "",
+                        "note": text(ws.cell(row, 4).value),
+                    }
+                self._longterm_tab.set_values(longterm)
+
             if BENEFIT_RULE_SHEET in wb.sheetnames:
                 ws = wb[BENEFIT_RULE_SHEET]
                 values: dict[str, dict[str, str]] = {}
@@ -918,7 +1050,11 @@ class AssumptionsEditor(tk.Toplevel):
         self.status.configure(text=f"저장했습니다: {Path(path).name}")
         messagebox.showinfo("저장", f"기초율을 저장했습니다.\n\n{path}", parent=self)
 
-    def collect(self) -> tuple[dict[str, tuple[list[str], list[list[Any]]]], dict[str, tuple[str, str]]]:
+    def collect(self) -> tuple[
+        dict[str, tuple[list[str], list[list[Any]]]],
+        dict[str, tuple[str, str]],
+        dict[str, tuple[str, float, str]],
+    ]:
         """화면의 입력을 파일로 쓸 수 있는 평범한 자료구조로 모은다."""
         sheets = {
             spec.sheet: (
@@ -950,12 +1086,23 @@ class AssumptionsEditor(tk.Toplevel):
                 _ROUNDING_VALUES.get(item["unit"], 0), FRACTION_HALF,
             ])
         sheets[PAYOUT_SHEET] = (list(_PAYOUT_HEADERS), rows)
-        return sheets, rules
+
+        longterm = {
+            group: (
+                item["kind"],
+                _as_float(item["escalation"].rstrip("%"), 0.0) / 100.0
+                if item["escalation"].endswith("%")
+                else _as_float(item["escalation"], 0.0),
+                item["note"],
+            )
+            for group, item in self._longterm_tab.get_values().items()
+        }
+        return sheets, rules, longterm
 
     def write(self, path: Path) -> Path:
         """현재 입력을 기초율 워크북으로 쓴다."""
-        sheets, rules = self.collect()
-        return write_assumptions(path, sheets, rules)
+        sheets, rules, longterm = self.collect()
+        return write_assumptions(path, sheets, rules, longterm)
 
 
     def close(self) -> None:

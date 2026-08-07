@@ -35,11 +35,17 @@ __all__ = [
     "BENEFIT_MODES",
     "CUMULATIVE",
     "FORMULA",
+    "LONGTERM_TYPES",
+    "LT_AVERAGE_WAGE",
+    "LT_CASH",
+    "LT_IN_KIND",
+    "LT_VACATION",
     "PROGRESSIVE",
     "STATUTORY_RULE",
     "Assumptions",
     "BenefitScale",
     "DiscountCurve",
+    "LongTermRule",
     "MortalityTable",
     "RateCurve",
     "RateTable",
@@ -64,6 +70,25 @@ BENEFIT_SHEET: Final = "지급률"
 LONGTERM_SHEET: Final = "장기급여지급률"
 BENEFIT_RULE_SHEET: Final = "지급률규정"
 """규정별 방식(누적/누진/수식)과 수식 코드를 적는 시트."""
+LONGTERM_RULE_SHEET: Final = "장기급여규정"
+"""장기급여 규정별 지급유형과 현물 상승률을 적는 시트."""
+
+# ── 장기급여 지급유형 ────────────────────────────────────────────
+# 근속 포상은 회사마다 주는 것이 다르다. 실제 규정에서 확인한 형태:
+#   '휴가 10일', '순금 30돈 + 재직기념패', '금 1냥', '평균임금의 500%', '100만원'
+LT_VACATION: Final = "휴가"
+"""일 기본급 × 지급일수. 임금상승률을 반영한다."""
+LT_AVERAGE_WAGE: Final = "평균임금"
+"""30일 평균임금 × 배수. 임금상승률을 반영한다."""
+LT_IN_KIND: Final = "현물"
+"""금·물품 등. 평가시점 시세를 정액으로 넣고 **현물 상승률** 로 올린다."""
+LT_CASH: Final = "현금"
+"""정액 현금. 규정 금액이 고정이므로 올리지 않는다."""
+
+LONGTERM_TYPES: Final = (LT_VACATION, LT_AVERAGE_WAGE, LT_IN_KIND, LT_CASH)
+
+DEFAULT_IN_KIND_ESCALATION: Final = 0.03
+"""현물 상승률 기본값. 시세를 모를 때 쓰는 값이며 반드시 확인해야 한다."""
 
 
 @dataclass(slots=True)
@@ -296,6 +321,29 @@ class BenefitScale:
 
 
 @dataclass(slots=True)
+class LongTermRule:
+    """장기급여 규정 하나의 지급유형.
+
+    ``장기급여지급률`` 표의 값이 무엇을 뜻하는지는 유형에 따라 달라진다.
+
+    ==========  ====================================================
+    유형        표 값의 뜻
+    ==========  ====================================================
+    휴가        지급일수 (일 기본급 × 일수)
+    평균임금    배수 (30일 평균임금 × 배수)
+    현물        정액(원) — 평가시점 시세로 환산해 넣는다
+    현금        정액(원)
+    ==========  ====================================================
+    """
+
+    kind: str = LT_VACATION
+    escalation: float = 0.0
+    """현물 상승률(연). ``현물`` 유형에만 쓴다."""
+    note: str = ""
+    """'순금 30돈 @ 2025-12-31 시세' 처럼 환산 근거를 남긴다."""
+
+
+@dataclass(slots=True)
 class Assumptions:
     """계리 산출에 필요한 기초율 일체."""
 
@@ -308,6 +356,11 @@ class Assumptions:
     longterm_benefit: BenefitScale = field(
         default_factory=lambda: BenefitScale(statutory_when_missing=False)
     )
+    longterm_rules: dict[str, LongTermRule] = field(default_factory=dict)
+    """장기급여 규정명 → 지급유형. 없으면 ``휴가`` 로 본다(기존 동작)."""
+
+    def longterm_rule(self, rule: str) -> LongTermRule:
+        return self.longterm_rules.get(text(rule), LongTermRule())
 
     label: str = "당기 가정"
     """리포트에 표시할 이름. 민감도·증감분석에서 구분자로 쓴다."""
@@ -509,6 +562,44 @@ def _read_mortality(wb) -> MortalityTable:
     return MortalityTable(RateCurve(male), RateCurve(female))
 
 
+def _read_longterm_rules(wb) -> tuple[dict[str, LongTermRule], list[str]]:
+    """``장기급여규정`` 시트에서 규정별 지급유형을 읽는다.
+
+    시트가 없으면 빈 표를 돌려준다 — 그러면 전부 ``휴가`` 로 보아 기존 동작과
+    같아진다.
+    """
+    rules: dict[str, LongTermRule] = {}
+    problems: list[str] = []
+    if LONGTERM_RULE_SHEET not in wb.sheetnames:
+        return rules, problems
+
+    ws = wb[LONGTERM_RULE_SHEET]
+    for row, _ in _rows(ws):
+        name = text(ws.cell(row, 1).value)
+        if not name:
+            continue
+        kind = text(ws.cell(row, 2).value) or LT_VACATION
+        if kind not in LONGTERM_TYPES:
+            problems.append(
+                f"{LONGTERM_RULE_SHEET}!B{row}: 지급유형 '{kind}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(LONGTERM_TYPES)} 중 하나)"
+            )
+            continue
+
+        escalation = _as_rate(ws.cell(row, 3).value) or 0.0
+        if kind != LT_IN_KIND and escalation:
+            problems.append(
+                f"{LONGTERM_RULE_SHEET}!C{row}: '{name}' 은 {kind} 유형이라 현물 상승률을 "
+                "쓰지 않습니다 (유형을 '현물'로 바꾸거나 상승률을 비우세요)"
+            )
+        rules[name] = LongTermRule(
+            kind=kind,
+            escalation=escalation if kind == LT_IN_KIND else 0.0,
+            note=text(ws.cell(row, 4).value),
+        )
+    return rules, problems
+
+
 def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assumptions:
     """기초율 워크북을 읽는다.
 
@@ -533,9 +624,11 @@ def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assum
         flat = next(iter(spot.points.values())) if len(spot.points) == 1 else None
 
         modes, formulas, problems = _read_rule_modes(wb)
+        longterm_rules, longterm_problems = _read_longterm_rules(wb)
+        problems = problems + longterm_problems
         if problems:
             raise ValueError(
-                "지급률 규정을 읽지 못했습니다:\n  · " + "\n  · ".join(problems)
+                "지급 규정을 읽지 못했습니다:\n  · " + "\n  · ".join(problems)
             )
 
         return Assumptions(
@@ -550,6 +643,7 @@ def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assum
                 wb, BENEFIT_SHEET, statutory=True, modes=modes, formulas=formulas
             ),
             longterm_benefit=_read_benefit_scale(wb, LONGTERM_SHEET, statutory=False),
+            longterm_rules=longterm_rules,
             label=label,
         )
     finally:
@@ -576,6 +670,7 @@ def write_assumptions(
     path: str | Path,
     sheets: dict[str, tuple[list[str], list[list[Any]]]],
     rules: dict[str, tuple[str, str]] | None = None,
+    longterm_rules: dict[str, tuple[str, float, str]] | None = None,
 ) -> Path:
     """기초율 워크북을 쓴다.
 
@@ -610,6 +705,16 @@ def write_assumptions(
 
     for name, (headers, rows) in sheets.items():
         write_sheet(name, headers, rows)
+
+    if longterm_rules is not None:
+        write_sheet(
+            LONGTERM_RULE_SHEET,
+            ["규정명", "지급유형", "현물 상승률", "환산 근거"],
+            [
+                [name, kind, escalation or None, note]
+                for name, (kind, escalation, note) in longterm_rules.items()
+            ],
+        )
 
     if rules is not None:
         write_sheet(

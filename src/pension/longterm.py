@@ -18,7 +18,12 @@ from __future__ import annotations
 import datetime as _dt
 from dataclasses import dataclass, field
 
-from .assumptions import Assumptions
+from .assumptions import (
+    LT_AVERAGE_WAGE,
+    LT_CASH,
+    LT_IN_KIND,
+    Assumptions,
+)
 from .config import CalculationConfig
 from .models import ActiveMember, Roster
 
@@ -39,6 +44,8 @@ class LongTermMemberValuation:
     dbo: float = 0.0
     service_cost: float = 0.0
     interest_cost: float = 0.0
+    benefit_kind: str = ""
+    """적용한 지급유형(휴가/평균임금/현물/현금)."""
     next_milestone: int | None = None
     """다음 지급 근속연수. 남은 지급 시점이 없으면 ``None``."""
     milestone_count: int = 0
@@ -93,6 +100,8 @@ def value_longterm_member(
         return result
 
     rule = member.rules.longterm_benefit
+    kind = assumptions.longterm_rule(rule)
+    result.benefit_kind = kind.kind
     milestones = assumptions.longterm_benefit.milestones(rule)
     if not milestones:
         result.excluded_reason = f"장기급여 지급률 규정 '{rule}' 을(를) 찾을 수 없음"
@@ -141,7 +150,20 @@ def value_longterm_member(
         if result.next_milestone is None:
             result.next_milestone = target_service
 
-        benefit = days * daily * wage_index[t]
+        # 표 값의 뜻이 지급유형에 따라 달라진다.
+        #   휴가      지급일수  → 일 기본급 × 일수, 임금상승률 반영
+        #   평균임금  배수      → 30일 평균임금 × 배수, 임금상승률 반영
+        #   현물      정액(원)  → 평가시점 시세를 현물 상승률로 올린다
+        #   현금      정액(원)  → 규정 금액이 고정이므로 올리지 않는다
+        if kind.kind == LT_AVERAGE_WAGE:
+            benefit = days * member.monthly_wage * wage_index[t]
+        elif kind.kind == LT_IN_KIND:
+            benefit = days * (1.0 + kind.escalation) ** t
+        elif kind.kind == LT_CASH:
+            benefit = days
+        else:
+            benefit = days * daily * wage_index[t]
+
         weighted = benefit * survival[t] * assumptions.discount.discount_factor(remaining)
 
         attribution = min(1.0, past_service / target_service) if target_service > 0 else 0.0
