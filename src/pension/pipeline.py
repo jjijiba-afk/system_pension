@@ -6,7 +6,7 @@ GUI 와 CLI 는 모두 이 모듈만 호출한다.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -140,7 +140,13 @@ def load_inputs(
     *,
     label: str = "당기 가정",
 ) -> tuple[CalculationConfig, Roster, Assumptions, IssueLog]:
-    """명부 워크북과 기초율 워크북을 읽어 검증까지 마친다."""
+    """명부 워크북과 기초율 워크북을 읽어 검증까지 마친다.
+
+    직군 규칙은 두 곳에 있을 수 있다. 명부의 ``Input`` 시트와, 가정 입력 화면이
+    기초율 워크북에 저장하는 ``지급규정`` 시트다. **후자가 있으면 그쪽을 쓴다.**
+    ``Input`` 시트는 회사가 채워 보내는 칸이라 비어 있거나 직군만 적혀 오는 일이
+    잦고, ``지급규정`` 은 계리 담당자가 규정을 보고 확정한 것이기 때문이다.
+    """
 
     from .validation import validate_roster
     from .workbook import open_workbook
@@ -149,9 +155,14 @@ def load_inputs(
     if not roster_path.exists():
         raise FileNotFoundError(f"명부 파일을 찾을 수 없습니다: {roster_path}")
 
+    payout_rules = _read_payout_rules(assumptions_path)
+
     wb = open_workbook(roster_path)
     try:
         config = read_config(wb)
+        if payout_rules:
+            # 직군 배정이 명부를 읽는 도중에 일어나므로 읽기 전에 바꿔 끼워야 한다.
+            config = replace(config, job_group_rules=payout_rules, inferred=False)
         log = IssueLog()
         roster = read_roster(wb, config, log)
     finally:
@@ -160,6 +171,21 @@ def load_inputs(
     assumptions = load_assumptions(assumptions_path, label=label)
     validate_roster(roster, config, log)
     return config, roster, assumptions, log
+
+
+def _read_payout_rules(assumptions_path: str | Path) -> list:
+    """기초율 워크북의 ``지급규정`` 시트를 읽는다. 없으면 빈 목록."""
+    from .config import read_payout_rules
+    from .workbook import open_workbook
+
+    path = Path(assumptions_path)
+    if not path.exists():
+        return []
+    wb = open_workbook(path)
+    try:
+        return read_payout_rules(wb)
+    finally:
+        wb.close()
 
 
 def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun:

@@ -29,15 +29,32 @@ class JobGroupRule:
     """직군 하나에 대한 산출 규칙(``Input`` B~N 열 한 행)."""
 
     source_name: str
-    """명부 직군명(재직/퇴직자명부 E열과 대조할 키). ``Input`` B열."""
+    """명부 직군명(재직/퇴직자명부 E열과 대조할 키). ``Input`` B열.
+
+    빈 문자열이면 직군을 가리지 않고 :attr:`employee_type_filter` 로만 판정한다.
+    """
     mapped_name: str
-    """변환 직군명. ``Input`` C열."""
+    """변환 직군명. ``Input`` C열.
+
+    산출·기초율은 이 이름으로 묶인다. 여러 명부 직군을 같은 이름으로 보내면
+    한 덩어리가 된다 — 실제 명부의 직군 열에 '과장/부장/계장/대표이사' 처럼
+    직급이 들어오는 경우가 있어, 이를 '정규직/임원' 으로 묶어야 한다.
+    반대로 '정규직' 을 '생산직/관리직/일반직' 으로 쪼갤 수도 있다.
+    """
     severance_nra: int = 0
     """퇴직급여 정년연령. ``Input`` D열."""
     longterm_nra: int = 0
     """장기급여 정년연령. ``Input`` E열."""
     over_nra_add_age: int = 0
     """정년연령 초과자에게 더할 연수. ``Input`` F열."""
+
+    employee_type_filter: str = ""
+    """이 규칙을 적용할 임직원구분. 비면 임직원구분을 가리지 않는다.
+
+    같은 직군이라도 임원과 직원의 정년·지급배수가 다른 경우가 흔하다. 실제
+    명부에서 임원의 직군이 '정규직'/'과장' 으로 적혀 있어 직군만으로는 갈라낼
+    수 없었다.
+    """
     executive_nra: int = 0
     """임원 퇴직급여 정년연령. ``Input`` P열. 0 이면 직원과 같게 본다.
 
@@ -106,11 +123,40 @@ class CalculationConfig:
     _by_source: dict[str, tuple[int, JobGroupRule]] = field(
         default_factory=dict, init=False, repr=False
     )
+    _by_pair: dict[tuple[str, str], tuple[int, JobGroupRule]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _by_type: dict[str, tuple[int, JobGroupRule]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _by_any_source: dict[str, tuple[int, JobGroupRule]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    """임직원구분을 무시하고 직군만 본 색인. 최후 수단이다."""
 
     def __post_init__(self) -> None:
-        self._by_source = {
-            rule.source_name: (idx, rule) for idx, rule in enumerate(self.job_group_rules)
-        }
+        self._by_source = {}
+        self._by_pair = {}
+        self._by_type = {}
+        self._by_any_source = {}
+        for index, rule in enumerate(self.job_group_rules):
+            entry = (index, rule)
+            if rule.source_name and rule.employee_type_filter:
+                self._by_pair[(rule.source_name, rule.employee_type_filter)] = entry
+            elif rule.employee_type_filter:
+                self._by_type.setdefault(rule.employee_type_filter, entry)
+            elif rule.source_name:
+                self._by_source.setdefault(rule.source_name, entry)
+            if rule.source_name:
+                self._by_any_source.setdefault(rule.source_name, entry)
+
+    def mapped_names(self) -> list[str]:
+        """변환 직군명 목록(중복 제거, 등장 순서). 기초율 열 머리글이 된다."""
+        names: list[str] = []
+        for rule in self.job_group_rules:
+            if rule.mapped_name and rule.mapped_name not in names:
+                names.append(rule.mapped_name)
+        return names
 
     @property
     def base_year(self) -> int:
@@ -142,14 +188,55 @@ class CalculationConfig:
             return names
         return [r.mapped_name for r in self.job_group_rules if r.mapped_name]
 
-    def find_job_group(self, source_name: object) -> tuple[int, JobGroupRule] | None:
-        """명부 직군명으로 규칙을 찾는다. 없으면 ``None``.
+    def find_job_group(
+        self,
+        source_name: object,
+        employee_type: object = "",
+        raw_employee_type: object = "",
+    ) -> tuple[int, JobGroupRule] | None:
+        """명부 직군명(과 임직원구분)으로 규칙을 찾는다. 없으면 ``None``.
 
-        종전 규칙 는 ``Cells(jc1, 5).Value = list_jkn(j)`` 로 완전일치 비교만 한다.
-        앞뒤 공백 때문에 매칭이 깨지는 사고가 잦아 여기서는 공백을 정리한 뒤
-        비교한다.
+        찾는 순서는 **좁은 것부터** 다.
+
+        1. 직군 + 임직원구분 원문 (`과장` + `촉탁사원`)
+        2. 직군 + 정규화된 임직원구분 (`과장` + `직원`)
+        3. 임직원구분 원문만 (직군 무관)
+        4. 정규화된 임직원구분만
+        5. 직군만 지정된 규칙
+        6. 직군이 같은 아무 규칙 (임직원구분을 무시)
+
+        마지막 단계는 명부의 임직원구분 칸이 비었을 때를 위한 것이다. 규정이
+        전부 `직군+임직원구분` 짝으로 적혀 있으면 5 번에서 걸리지 않아 그 사람만
+        규칙 없이 남는다. 직군이라도 맞는 규칙을 쓰는 편이 기본값으로 떨어지는
+        것보다 낫다.
+
+        종전 규칙 는 직군 완전일치 하나만 보았다. 임원의 직군이 '정규직' 으로 적혀
+        오는 명부가 있어 임원을 갈라낼 수 없었다.
+
+        원문까지 보는 이유는 정규화가 `임원`/`직원` 둘로만 줄이기 때문이다.
+        같은 `과장` 이라도 `정규사원` 과 `촉탁사원` 은 계약 형태가 달라 퇴직률과
+        지급률이 갈리는데, 정규화 결과만으로는 둘 다 `직원` 이라 구분이 사라진다.
         """
-        return self._by_source.get(text(source_name))
+        job = text(source_name)
+        kind = text(employee_type)
+        raw = text(raw_employee_type)
+
+        for token in (raw, kind):
+            if not token:
+                continue
+            found = self._by_pair.get((job, token))
+            if found is not None:
+                return found
+        for token in (raw, kind):
+            if not token:
+                continue
+            found = self._by_type.get(token)
+            if found is not None:
+                return found
+        found = self._by_source.get(job)
+        if found is not None:
+            return found
+        return self._by_any_source.get(job)
 
 
 PAYOUT_SHEET = "지급규정"
@@ -196,6 +283,7 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
                 service_fraction=text(ws.cell(row, 19).value) or "그대로",
                 benefit_rounding_unit=_int(ws.cell(row, 20).value),
                 benefit_rounding_mode=text(ws.cell(row, 21).value) or "반올림",
+                employee_type_filter=text(ws.cell(row, 22).value),
             )
         )
     return rules
@@ -257,6 +345,7 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
                 service_fraction=text(ws.cell(row, 20).value) or "그대로",
                 benefit_rounding_unit=_int(ws.cell(row, 21).value),
                 benefit_rounding_mode=text(ws.cell(row, 22).value) or "반올림",
+                employee_type_filter=text(ws.cell(row, 23).value),
             )
         )
 

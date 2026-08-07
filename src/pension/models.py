@@ -48,6 +48,12 @@ class ActiveMember:
 
     employee_id: str = ""
     employee_type: EmployeeType = EmployeeType.STAFF
+    employee_type_raw: str = ""
+    """명부에 적힌 임직원구분 원문.
+
+    정규화하면 '임원'/'직원' 둘뿐이라 '정규사원'과 '촉탁사원'이 한 칸에 모인다.
+    직군 규칙은 원문으로도 가릴 수 있어야 해서 원본을 남긴다.
+    """
     job_group_raw: str = ""
     """명부에 적힌 직군명(``Input`` B열과 대조할 키)."""
     job_group: str = ""
@@ -158,6 +164,7 @@ class RetiredMember:
 
     employee_id: str = ""
     employee_type: EmployeeType = EmployeeType.STAFF
+    employee_type_raw: str = ""
     job_group_raw: str = ""
     job_group: str = ""
     job_group_index: int | None = None
