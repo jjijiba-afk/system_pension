@@ -391,6 +391,8 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
             member.job_group = rule.mapped_name
             member.min_service_years = rule.min_service_years
             member.excluded_group = rule.excluded
+            member.service_basis = rule.service_basis
+            member.service_fraction = rule.service_fraction
             member.rules = RateRules(
                 severance_benefit=rule.severance_benefit or text(get("severance_benefit")),
                 longterm_benefit=rule.longterm_benefit or text(get("longterm_benefit")),

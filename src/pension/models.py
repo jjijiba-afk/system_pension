@@ -115,6 +115,10 @@ class ActiveMember:
     """퇴직급여 지급 대상 최소 근속연수. 직군 규칙에서 받아 온다."""
     excluded_group: bool = False
     """직군 자체가 퇴직급여 대상이 아닌지. 직군 규칙에서 받아 온다."""
+    service_basis: str = "일할"
+    """근속기간 산정방법. 직군 규칙에서 받아 온다."""
+    service_fraction: str = "그대로"
+    """근속연수 단수 처리. 직군 규칙에서 받아 온다."""
 
     def effective_daily_base_pay(self) -> float:
         """업로드 명부에 쓸 일 기본급.
@@ -126,12 +130,23 @@ class ActiveMember:
         return float(round(self.monthly_wage / 30))
 
     def service_years(self, base_date: _dt.date) -> float:
-        """중간정산일(또는 입사일) 기준 근속연수. 가산·차감 연수를 반영한다."""
+        """중간정산일(또는 입사일) 기준 근속연수.
+
+        가산·차감 연수를 반영하고, 회사 규정의 산정방법(일할/월할/연할)과 단수
+        처리를 적용한다.
+        """
+        from .actuarial import service_years as _service_years
+
         start = self.settlement_date or self.hire_date
         if start is None or base_date < start:
             return 0.0
-        raw = (base_date - start).days / 365.25
-        return max(0.0, raw + self.added_service_years - self.deducted_service_years)
+        return _service_years(
+            start, base_date,
+            added=self.added_service_years,
+            deducted=self.deducted_service_years,
+            basis=self.service_basis,
+            fraction=self.service_fraction,
+        )
 
 
 @dataclass(slots=True)
