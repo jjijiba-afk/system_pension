@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 
@@ -19,6 +20,31 @@ from . import __version__
 from .errors import PensionDataError, Severity
 
 __all__ = ["main"]
+
+
+def force_utf8_output() -> None:
+    """표준 출력을 UTF-8 로 맞춘다.
+
+    한국어 윈도우의 명령프롬프트는 기본 코드페이지가 949(CP949)이고, GitHub
+    Actions 같은 영문 환경은 1252 다. 어느 쪽이든 파이썬은 그 코드페이지로
+    stdout 을 열기 때문에, 한글이 섞인 메시지를 ``print`` 하면
+    ``UnicodeEncodeError: 'charmap' codec can't encode characters`` 로 죽는다.
+    산출은 다 끝내 놓고 결과를 찍다가 실패하는 셈이라 특히 나쁘다.
+
+    ``errors="replace"`` 를 함께 주어, 콘솔이 정말 표현하지 못하는 글자가 있어도
+    프로그램이 멈추지는 않게 한다.
+
+    창 모드로 빌드된 실행 파일(``console=False``)에서는 ``sys.stdout`` 이
+    ``None`` 일 수 있으므로 존재 여부를 확인한다.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        # 이미 닫혔거나 재설정할 수 없는 스트림이면 그냥 둔다. 출력 인코딩
+        # 때문에 산출 자체를 막을 이유는 없다.
+        with contextlib.suppress(ValueError, OSError):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def _percent(value: str) -> float:
@@ -239,6 +265,7 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """진입점. 인자가 없으면 GUI 를 띄운다."""
+    force_utf8_output()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         return _cmd_gui(argparse.Namespace())
