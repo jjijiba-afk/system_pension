@@ -31,7 +31,20 @@ K-IFRS 1019호 '종업원급여' 에 따른 **확정급여채무(DBO) 산출 시
 
 1. GitHub 저장소 → **Actions** 탭 → 최근 `Windows 실행파일 빌드` 실행 →
    **Artifacts** 의 `연금계리산출-windows` 다운로드
-2. 압축을 풀고 `연금계리산출.exe` 더블클릭
+2. 압축(`연금계리산출.zip`)을 풀고 `연금계리산출.exe` 더블클릭
+
+압축 안에 **기본자료** 폴더가 함께 들어 있습니다. 회사 자료를 넣기 전에
+그 두 파일만으로 한 번 돌려 보면 흐름이 보입니다.
+
+| 파일 | 내용 |
+|---|---|
+| `기본자료/명부_양식.xlsx` | 빈 명부 양식 (작성 예시 두 줄 포함) |
+| `기본자료/기초율_기본값.xlsx` | 사망률·퇴직률·지급률이 채워진 기초율 |
+| `기본자료/기초율_빈양식.xlsx` | 처음부터 회사 값으로 채우고 싶을 때 |
+
+사망률은 통계청 「2024년 생명표」 공표치에 맞춘 값이라 그대로 쓸 수 있습니다.
+**할인율·퇴직률·승급률은 회사 값으로 바꿔야 합니다** — 특히 퇴직률은 채무에
+가장 크게 영향을 주는 가정입니다.
 
 ### 소스에서 실행
 
@@ -44,6 +57,7 @@ python -m pension
 # 배치
 python -m pension assumptions --roster 명부.xlsm            # 산출 가정 입력 화면
 python -m pension template 기초율.xlsx --roster 명부.xlsm   # 기초율 양식 생성
+python -m pension samples 기본자료                           # 명부 양식·기초율 기본값 한 벌
 python -m pension check 명부.xlsm                            # 검증만
 python -m pension calc 명부.xlsm 기초율.xlsx -o 산출결과.xlsx
 python -m pension members 명부.xlsm 기초율.xlsx -o 개인별결과.xlsx  # 개인별 결과만

@@ -49,20 +49,37 @@ jobs:
       - name: 실행파일 빌드
         run: python -m PyInstaller pension.spec --noconfirm --clean
 
-      - name: 실행 확인
+      - name: 배포 꾸러미 구성
+        shell: pwsh
         run: |
-          dist\pension-cli.exe --version
-          dist\pension-cli.exe template dist\기초율_샘플.xlsx
+          $pack = "dist/연금계리산출"
+          New-Item -ItemType Directory -Force -Path "$pack/기본자료" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$pack/설명서" | Out-Null
+
+          Move-Item dist/연금계리산출.exe "$pack/"
+          Move-Item dist/pension-cli.exe "$pack/"
+          Copy-Item docs/*.md "$pack/설명서/"
+
+          # 방금 만든 EXE 로 기본 파일을 뽑는다. 빌드된 실행 파일이 실제로
+          # 도는지까지 한 번에 확인된다.
+          & "$pack/pension-cli.exe" --version
+          & "$pack/pension-cli.exe" samples "$pack/기본자료"
+
+          # 기본 파일만으로 산출이 끝까지 도는지 확인한다. 받는 사람이 처음
+          # 여는 파일이 곧바로 실패하면 안 된다.
+          & "$pack/pension-cli.exe" calc `
+              "$pack/기본자료/명부_양식.xlsx" `
+              "$pack/기본자료/기초율_기본값.xlsx" `
+              -o "$env:RUNNER_TEMP/연습산출.xlsx"
+
+          Compress-Archive -Path "$pack/*" -DestinationPath dist/연금계리산출.zip -Force
+          Get-ChildItem -Recurse $pack | Select-Object FullName, Length
 
       - name: 아티팩트 업로드
         uses: actions/upload-artifact@v4
         with:
           name: 연금계리산출-windows
-          path: |
-            dist/연금계리산출.exe
-            dist/pension-cli.exe
-            dist/기초율_샘플.xlsx
-            docs/사용설명서.md
+          path: dist/연금계리산출.zip
           retention-days: 90
 
       - name: 릴리스에 첨부 (태그 푸시 시)
@@ -70,5 +87,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/연금계리산출.exe
-            dist/pension-cli.exe
+            dist/연금계리산출.zip

@@ -6,6 +6,7 @@
     pension calc 명부.xlsm 기초율.xlsx -o 산출결과.xlsx
     pension check 명부.xlsm                 # 검증만
     pension template 기초율.xlsx            # 기초율 양식 생성
+    pension samples 기본자료                 # 명부 양식·기초율 기본값 한 벌 생성
     pension upload 명부.xlsm -o 업로드.xlsx  # 업로드 명부만 생성
 """
 
@@ -83,6 +84,17 @@ def _build_parser() -> argparse.ArgumentParser:
     template = sub.add_parser("template", help="기초율 양식 생성")
     template.add_argument("output", type=Path)
     template.add_argument("--roster", type=Path, help="직군명을 가져올 명부 워크북")
+
+    samples = sub.add_parser(
+        "samples", help="명부 양식·기초율 기본값 등 기본 파일 한 벌 생성"
+    )
+    samples.add_argument(
+        "directory", type=Path, nargs="?", default=Path("기본자료"),
+        help="만들 폴더 (생략하면 ./기본자료)",
+    )
+    samples.add_argument(
+        "--job-groups", default="", help="직군을 쉼표로. 생략하면 정규직,계약직,임원"
+    )
 
     upload = sub.add_parser("upload", help="업로드 명부만 생성")
     upload.add_argument("roster", type=Path)
@@ -263,6 +275,25 @@ def _cmd_template(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_samples(args: argparse.Namespace) -> int:
+    from .jobgroup import DEFAULT_GROUPS
+    from .samples import write_sample_pack
+
+    groups = tuple(g.strip() for g in args.job_groups.split(",") if g.strip())
+    paths = write_sample_pack(args.directory, job_groups=groups or DEFAULT_GROUPS)
+
+    print(f"기본 파일을 만들었습니다: {args.directory}")
+    for path in paths:
+        print(f"  {path.name}")
+    print(
+        "\n바로 돌려 보려면:\n"
+        f"  pension calc {paths[0]} {paths[1]} -o 산출결과.xlsx\n"
+        "\n기초율_기본값의 할인율·퇴직률·승급률은 회사 값으로 바꿔야 합니다. "
+        "사망률은 통계청 공표치라 그대로 써도 됩니다."
+    )
+    return 0
+
+
 def _cmd_upload(args: argparse.Namespace) -> int:
     import openpyxl
 
@@ -386,6 +417,7 @@ def main(argv: list[str] | None = None) -> int:
         "calc": _cmd_calc,
         "check": _cmd_check,
         "template": _cmd_template,
+        "samples": _cmd_samples,
         "assumptions": _cmd_assumptions,
         "members": _cmd_members,
         "upload": _cmd_upload,

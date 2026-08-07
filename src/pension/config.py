@@ -248,6 +248,10 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
 
     명부의 ``Input`` 시트가 비어 있거나 없을 때, 가정 입력 화면에서 저장한
     규정을 그대로 쓸 수 있게 한다. 머리글 한 줄 아래부터 데이터다.
+
+    표 아래에 적힌 안내문은 건너뛴다. 첫 칸에 글자가 있다는 것만으로 규칙으로
+    보면 '· 명부의 Input 시트보다 우선합니다' 같은 주석이 직군 이름이 되어,
+    기초율 열 머리글에 통째로 끼어든다.
     """
     from .workbook import find_sheet
 
@@ -258,7 +262,10 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
     rules: list[JobGroupRule] = []
     for row in range(2, ws.max_row + 1):
         source_name = text(ws.cell(row, 1).value)
-        if not source_name:
+        if not source_name or source_name.startswith(("·", "*", "※", "#")):
+            continue
+        # 정년연령 칸이 숫자가 아니면 규칙 행이 아니다. 안내문은 한 칸만 채운다.
+        if not isinstance(ws.cell(row, 3).value, (int, float)):
             continue
         rules.append(
             JobGroupRule(
