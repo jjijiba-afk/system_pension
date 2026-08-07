@@ -93,6 +93,9 @@ class MemberValuation:
     duration: float = 0.0
     """가중평균 잔존만기(년). 할인율 회사채 만기 선택 근거로 쓴다."""
 
+    min_service_years: float = 0.0
+    """적용한 가입자격(최소 근속연수). 0 이면 제한 없음."""
+
     excluded_reason: str = ""
     """산출 대상에서 뺀 이유. 비어 있으면 정상 산출."""
 
@@ -216,13 +219,25 @@ def value_member(
         "배수": member.payout_multiple,
     }
 
+    minimum = member.min_service_years
+    result.min_service_years = minimum
+
+    def benefit_at(service: float, age: float, wage: float) -> float:
+        """퇴직 시점 지급액.
+
+        가입자격(최소 근속연수)을 못 채우고 나가면 지급 대상이 아니다. 대상에서
+        빼는 것이 아니라 **급여식에서 0** 으로 두는 것이 맞다. 지금 근속이 짧아도
+        정년까지 남아 요건을 채우면 그때는 지급 대상이 되므로, 그 몫은 그대로
+        부채에 잡혀야 하기 때문이다.
+        """
+        if minimum > 0 and service < minimum:
+            return 0.0
+        return assumptions.severance_benefit.multiple(
+            rule, service, x=age, **context
+        ) * wage
+
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
-    result.accrued_benefit = (
-        assumptions.severance_benefit.multiple(
-            rule, past_service, x=float(member.age), **context
-        )
-        * member.monthly_wage
-    )
+    result.accrued_benefit = benefit_at(past_service, float(member.age), member.monthly_wage)
 
     survival = 1.0  # 기준일부터 t년 초까지 재직해 있을 확률
     wage = member.monthly_wage
@@ -260,12 +275,7 @@ def value_member(
         if exit_probability > 0.0:
             # 퇴직 시점의 연령·근속으로 평가한다. 정년 임박자 감액 같은 규정이
             # 기준일이 아니라 실제 퇴직 시점을 보고 판단해야 하기 때문이다.
-            benefit = (
-                assumptions.severance_benefit.multiple(
-                    rule, total_service, x=member.age + timing, **context
-                )
-                * wage
-            )
+            benefit = benefit_at(total_service, member.age + timing, wage)
             discount = assumptions.discount.discount_factor(timing)
             attribution = min(1.0, past_service / total_service) if total_service > 0 else 0.0
             # 근무원가는 "1년치 근속이 더 쌓이는 몫". 총근속이 0 이면 귀속할 것이 없다.

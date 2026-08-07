@@ -15,6 +15,13 @@ from typing import Any, Final
 from .config import CalculationConfig
 from .dates import parse_roster_date
 from .errors import DateParseError, IssueLog
+from .layout import (
+    ACTIVE_HEADER_ALIASES,
+    REQUIRED_ACTIVE,
+    REQUIRED_RETIRED,
+    RETIRED_HEADER_ALIASES,
+    resolve_layout,
+)
 from .models import ActiveMember, RateRules, RetiredMember, Roster
 from .normalize import (
     normalize_benefit_plan,
@@ -38,6 +45,10 @@ __all__ = [
 ACTIVE_SHEET: Final = "재직자명부"
 RETIRED_SHEET: Final = "퇴직자명부"
 
+#: 같은 명부인데 통합문서마다 시트 이름이 다르다.
+ACTIVE_SHEET_ALIASES: Final = (ACTIVE_SHEET, "2)재직자명부", "재직자")
+RETIRED_SHEET_ALIASES: Final = (RETIRED_SHEET, "3)퇴직자명부", "퇴직자")
+
 #: 재직자명부 데이터 시작 행. VBA ``jc1 = jc + 25``.
 ACTIVE_FIRST_ROW: Final = 26
 
@@ -60,6 +71,8 @@ class _Col:
 
     @property
     def letter(self) -> str:
+        if self.index < 1:
+            return ""
         from openpyxl.utils import get_column_letter
 
         return get_column_letter(self.index)
@@ -168,6 +181,14 @@ def _multiple(value: object) -> float:
     return number if number > 0 else 1.0
 
 
+_ABSENT = _Col(0, "(없는 열)")
+
+
+def _col_of(cols: dict[str, _Col], key: str) -> _Col:
+    """인식된 열 정보. 그 서식에 없는 열이면 자리표시자를 돌려준다."""
+    return cols.get(key, _ABSENT)
+
+
 def _optional_int(value: object) -> int | None:
     if value is None or value == "":
         return None
@@ -175,7 +196,7 @@ def _optional_int(value: object) -> int | None:
     return int(number) if number else None
 
 
-def _last_data_row(ws: Any, first_row: int) -> int:
+def _last_data_row(ws: Any, first_row: int, cols: dict[str, _Col] | None = None) -> int:
     """명부의 마지막 데이터 행.
 
     VBA 는 ``CountA(H:H)`` 로 **건수** 를 센 뒤 ``첫 행 + 건수`` 까지만 읽는다.
@@ -183,14 +204,24 @@ def _last_data_row(ws: Any, first_row: int) -> int:
     사람들이 조용히 누락된다. 여기서는 실제 마지막 행을 찾고, 앵커 열이 비어도
     다른 열에 값이 있으면 데이터로 취급한다.
     """
+    if cols:
+        anchor_col = cols["birth_date"].index if "birth_date" in cols else _ANCHOR_COLUMN
+        others = [
+            cols[k].index for k in ("employee_id", "job_group", "name", "hire_date")
+            if k in cols
+        ]
+    else:
+        anchor_col = _ANCHOR_COLUMN
+        others = [3, 5, 6, 9]
+
     last = first_row - 1
     blank_run = 0
     row = first_row
     max_row = max(ws.max_row, first_row)
     while row <= max_row:
-        anchor = ws.cell(row, _ANCHOR_COLUMN).value
+        anchor = ws.cell(row, anchor_col).value
         has_any = anchor not in (None, "") or any(
-            ws.cell(row, c).value not in (None, "") for c in (3, 5, 6, 9)
+            ws.cell(row, c).value not in (None, "") for c in others
         )
         if has_any:
             last = row
@@ -245,21 +276,57 @@ def _read_date(
     return parsed
 
 
+
+def _resolve(workbook, aliases_key: str, log: IssueLog):
+    """시트를 찾고 열 배치를 확정한다."""
+    from .workbook import find_sheet
+
+    if aliases_key == "active":
+        sheet = find_sheet(workbook, *ACTIVE_SHEET_ALIASES)
+        aliases, base, required = ACTIVE_HEADER_ALIASES, ACTIVE_COLUMNS, REQUIRED_ACTIVE
+        fallback_start = ACTIVE_FIRST_ROW
+        label = ACTIVE_SHEET
+    else:
+        sheet = find_sheet(workbook, *RETIRED_SHEET_ALIASES)
+        aliases, base, required = RETIRED_HEADER_ALIASES, RETIRED_COLUMNS, REQUIRED_RETIRED
+        fallback_start = RETIRED_FIRST_ROW
+        label = RETIRED_SHEET
+
+    if sheet is None:
+        raise KeyError(f"'{label}' 시트를 찾을 수 없습니다")
+
+    defaults = {name: col.index for name, col in base.items()}
+    defaults["_data_start"] = fallback_start
+    layout = resolve_layout(sheet, aliases, defaults, required, log)
+
+    # 열 번호는 인식 결과를, 이름표는 기존 표를 쓴다.
+    cols = {
+        name: _Col(index, base[name].label if name in base else aliases[name][0])
+        for name, index in layout.columns.items()
+    }
+    return sheet, cols, layout
+
+
 def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> list[ActiveMember]:
     """``재직자명부`` 를 읽어 :class:`ActiveMember` 목록으로 만든다.
 
     형식 오류가 있어도 중단하지 않고 해당 항목만 비운 채 진행한다. 값의 정합성
     검사는 :mod:`pension.validation` 이 맡는다.
     """
-    ws = workbook[ACTIVE_SHEET]
-    cols = ACTIVE_COLUMNS
+    ws, cols, layout = _resolve(workbook, "active", log)
     members: list[ActiveMember] = []
-    last_row = _last_data_row(ws, ACTIVE_FIRST_ROW)
+    first_row = layout.data_start_row
+    last_row = _last_data_row(ws, first_row, cols)
 
-    for seq, row in enumerate(range(ACTIVE_FIRST_ROW, last_row + 1), start=1):
+    for seq, row in enumerate(range(first_row, last_row + 1), start=1):
         def get(key: str, _row: int = row) -> Any:
-            """이 행의 논리 칼럼 값. 기본인자로 행을 묶어 두어 늦은 바인딩을 피한다."""
-            return ws.cell(_row, cols[key].index).value
+            """이 행의 논리 칼럼 값. 기본인자로 행을 묶어 두어 늦은 바인딩을 피한다.
+
+            그 서식에 없는 열이면 ``None``. 구 서식에는 규정 열이 아예 없어
+            Input 시트의 직군 규칙에서 값을 받는다.
+            """
+            column = cols.get(key)
+            return ws.cell(_row, column.index).value if column is not None else None
 
         employee_id = text(get("employee_id"))
 
@@ -272,23 +339,23 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
 
         kw = dict(sheet=ACTIVE_SHEET, row=row, seq=seq, employee_id=employee_id)
         member.birth_date = _read_date(
-            get("birth_date"), config, log, col=cols["birth_date"],
+            get("birth_date"), config, log, col=_col_of(cols, "birth_date"),
             code="JAE_BIRTH_DATE", required=True, **kw,
         )
         member.hire_date = _read_date(
-            get("hire_date"), config, log, col=cols["hire_date"],
+            get("hire_date"), config, log, col=_col_of(cols, "hire_date"),
             code="JAE_HIRE_DATE", required=True, **kw,
         )
         member.settlement_date = _read_date(
-            get("settlement_date"), config, log, col=cols["settlement_date"],
+            get("settlement_date"), config, log, col=_col_of(cols, "settlement_date"),
             code="JAE_SETTLEMENT_DATE", required=False, **kw,
         )
         member.transfer_in_date = _read_date(
-            get("transfer_in_date"), config, log, col=cols["transfer_in_date"],
+            get("transfer_in_date"), config, log, col=_col_of(cols, "transfer_in_date"),
             code="JAE_TRANSFER_IN_DATE", required=False, **kw,
         )
         member.extra_pay_base_date = _read_date(
-            get("extra_pay_base_date"), config, log, col=cols["extra_pay_base_date"],
+            get("extra_pay_base_date"), config, log, col=_col_of(cols, "extra_pay_base_date"),
             code="JAE_EXTRA_PAY_DATE", required=False, **kw,
         )
 
@@ -322,6 +389,7 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
             index, rule = found
             member.job_group_index = index
             member.job_group = rule.mapped_name
+            member.min_service_years = rule.min_service_years
             member.rules = RateRules(
                 severance_benefit=rule.severance_benefit or text(get("severance_benefit")),
                 longterm_benefit=rule.longterm_benefit or text(get("longterm_benefit")),
@@ -350,15 +418,20 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
 
 def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> list[RetiredMember]:
     """``퇴직자명부`` 를 읽어 :class:`RetiredMember` 목록으로 만든다."""
-    ws = workbook[RETIRED_SHEET]
-    cols = RETIRED_COLUMNS
+    ws, cols, layout = _resolve(workbook, "retired", log)
     members: list[RetiredMember] = []
-    last_row = _last_data_row(ws, RETIRED_FIRST_ROW)
+    first_row = layout.data_start_row
+    last_row = _last_data_row(ws, first_row, cols)
 
-    for seq, row in enumerate(range(RETIRED_FIRST_ROW, last_row + 1), start=1):
+    for seq, row in enumerate(range(first_row, last_row + 1), start=1):
         def get(key: str, _row: int = row) -> Any:
-            """이 행의 논리 칼럼 값. 기본인자로 행을 묶어 두어 늦은 바인딩을 피한다."""
-            return ws.cell(_row, cols[key].index).value
+            """이 행의 논리 칼럼 값. 기본인자로 행을 묶어 두어 늦은 바인딩을 피한다.
+
+            그 서식에 없는 열이면 ``None``. 구 서식에는 규정 열이 아예 없어
+            Input 시트의 직군 규칙에서 값을 받는다.
+            """
+            column = cols.get(key)
+            return ws.cell(_row, column.index).value if column is not None else None
 
         employee_id = text(get("employee_id"))
 
@@ -371,19 +444,19 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
 
         kw = dict(sheet=RETIRED_SHEET, row=row, seq=seq, employee_id=employee_id)
         member.birth_date = _read_date(
-            get("birth_date"), config, log, col=cols["birth_date"],
+            get("birth_date"), config, log, col=_col_of(cols, "birth_date"),
             code="TOI_BIRTH_DATE", required=True, **kw,
         )
         member.hire_date = _read_date(
-            get("hire_date"), config, log, col=cols["hire_date"],
+            get("hire_date"), config, log, col=_col_of(cols, "hire_date"),
             code="TOI_HIRE_DATE", required=True, **kw,
         )
         member.exit_date = _read_date(
-            get("exit_date"), config, log, col=cols["exit_date"],
+            get("exit_date"), config, log, col=_col_of(cols, "exit_date"),
             code="TOI_EXIT_DATE", required=False, **kw,
         )
         member.fund_payment_date = _read_date(
-            get("fund_payment_date"), config, log, col=cols["fund_payment_date"],
+            get("fund_payment_date"), config, log, col=_col_of(cols, "fund_payment_date"),
             code="TOI_FUND_DATE", required=False, **kw,
         )
 
@@ -435,3 +508,16 @@ def read_roster(workbook, config: CalculationConfig, log: IssueLog) -> Roster:
         active=read_active_roster(workbook, config, log),
         retired=read_retired_roster(workbook, config, log),
     )
+
+
+def describe_layout(workbook, log: IssueLog) -> list[str]:
+    """두 명부의 열 인식 결과를 사람이 읽을 수 있는 줄로."""
+    lines: list[str] = []
+    for key in ("active", "retired"):
+        try:
+            _sheet, _cols, layout = _resolve(workbook, key, log)
+        except KeyError as exc:
+            lines.append(str(exc))
+            continue
+        lines.extend(layout.report.lines())
+    return lines

@@ -38,6 +38,13 @@ class JobGroupRule:
     """장기급여 정년연령. ``Input`` E열."""
     over_nra_add_age: int = 0
     """정년연령 초과자에게 더할 연수. ``Input`` F열."""
+    min_service_years: float = 0.0
+    """퇴직급여 지급 대상이 되는 최소 근속연수(가입자격). ``Input`` O열.
+
+    회사 규정마다 다르다 — 실제 사례에서 '근속 1년 이상'(다수)과 '근속 3년 이상'
+    이 확인되었다. 근로자퇴직급여보장법 제4조 단서도 계속근로 1년 미만은 지급
+    대상에서 제외한다. 0 이면 제한 없음.
+    """
 
     # 재직자용 기초율 규정(G~L). 비면 명부 칼럼 값을 쓴다.
     severance_benefit: str = ""
@@ -61,6 +68,9 @@ class CalculationConfig:
     wage_check_amount: float = 0.0
     """평균임금 하한 체크금액. ``Input`` C5. 이 값보다 작으면 오류로 본다."""
     job_group_rules: list[JobGroupRule] = field(default_factory=list)
+
+    inferred: bool = False
+    """``Input`` 시트 없이 명부에서 끌어낸 설정인지. 참이면 직군 규칙이 잠정값이다."""
 
     min_age: int = 15
     """허용 최소 만 연령. VBA 하드코딩 값."""
@@ -119,11 +129,18 @@ class CalculationConfig:
 def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
     """``Input`` 시트를 :class:`CalculationConfig` 로 읽는다.
 
+    ``Input`` 시트가 없는 통합문서(자료요청서 원본 등)면 명부에서 산출기준일과
+    직군을 끌어내 최소한의 설정을 만든다. 그때 직군 규칙은 정년 60세·가산 2년의
+    잠정값이므로, 반드시 확인하고 확정해야 한다.
+
     :param workbook: ``openpyxl`` 워크북(``data_only=True`` 로 연 것).
-    :raises KeyError: ``Input`` 시트가 없을 때.
-    :raises ValueError: 산출기준일(C3)이 비어 있을 때.
+    :raises ValueError: 산출기준일을 어디에서도 찾지 못했을 때.
     """
-    ws = workbook[sheet_name]
+    from .workbook import find_sheet
+
+    ws = find_sheet(workbook, sheet_name)
+    if ws is None:
+        return infer_config(workbook)
 
     base_date = to_date(ws.cell(3, 3).value)
     if base_date is None:
@@ -157,6 +174,7 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
                 longterm_salary_increase=text(ws.cell(row, 12).value),
                 retired_severance_withdrawal=text(ws.cell(row, 13).value),
                 retired_longterm_withdrawal=text(ws.cell(row, 14).value),
+                min_service_years=_float(ws.cell(row, 15).value),
             )
         )
 
@@ -165,6 +183,17 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
         wage_check_amount=wage_check,
         job_group_rules=rules,
     )
+
+
+def _float(value: object) -> float:
+    if isinstance(value, bool) or value is None or value == "":
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(text(value))
+    except ValueError:
+        return 0.0
 
 
 def _int(value: object) -> int:
@@ -177,3 +206,77 @@ def _int(value: object) -> int:
         return int(float(token))
     except ValueError:
         return 0
+
+
+# ────────────────────────────────────────────────────────────────
+# Input 시트가 없는 통합문서
+# ────────────────────────────────────────────────────────────────
+
+DEFAULT_NRA = 60
+"""직군 규칙을 명부에서 끌어낼 때 쓰는 잠정 정년연령."""
+
+DEFAULT_OVER_NRA_ADD = 2
+"""정년을 이미 넘긴 사람에게 더할 잠정 연수."""
+
+
+def infer_config(workbook) -> CalculationConfig:
+    """``Input`` 시트 없이 명부만 있는 통합문서에서 설정을 끌어낸다.
+
+    산출기준일은 재직자명부의 '작성기준일' 칸에서, 직군은 명부에 실제로 나오는
+    값에서 모은다. 정년·가산연수는 알 길이 없으므로 잠정값을 넣는다.
+    """
+    from .layout import ACTIVE_HEADER_ALIASES, find_data_start, find_header_row, normalize_header
+    from .workbook import find_sheet
+
+    ws = find_sheet(workbook, "재직자명부", "2)재직자명부", "재직자")
+    if ws is None:
+        raise ValueError(
+            "Input 시트도 재직자명부도 없어 산출기준일을 정할 수 없습니다"
+        )
+
+    base_date = _find_base_date(ws)
+    if base_date is None:
+        raise ValueError(
+            "산출기준일을 찾지 못했습니다. Input 시트 C3 에 기준일을 넣거나 "
+            "재직자명부의 '작성기준일' 칸을 채우세요"
+        )
+
+    header_row = find_header_row(ws, ACTIVE_HEADER_ALIASES)
+    job_col = 5
+    if header_row:
+        for col in range(1, ws.max_column + 1):
+            if normalize_header(ws.cell(header_row, col).value) == "직군":
+                job_col = col
+                break
+
+    start = find_data_start(ws, header_row) if header_row else 26
+    names: list[str] = []
+    for row in range(start, ws.max_row + 1):
+        name = text(ws.cell(row, job_col).value)
+        if name and name not in names:
+            names.append(name)
+
+    rules = [
+        JobGroupRule(
+            source_name=name,
+            mapped_name=name,
+            severance_nra=DEFAULT_NRA,
+            longterm_nra=DEFAULT_NRA,
+            over_nra_add_age=DEFAULT_OVER_NRA_ADD,
+        )
+        for name in names
+    ]
+    return CalculationConfig(base_date=base_date, job_group_rules=rules, inferred=True)
+
+
+def _find_base_date(ws) -> _dt.date | None:
+    """재직자명부 위쪽에서 '작성기준일' 이 적힌 칸을 찾는다."""
+    for row in range(1, min(ws.max_row, 30) + 1):
+        for col in range(1, min(ws.max_column, 12) + 1):
+            label = text(ws.cell(row, col).value).replace(" ", "")
+            if label in ("작성기준일", "산출기준일", "평가기준일"):
+                for offset in range(1, 4):
+                    found = to_date(ws.cell(row, col + offset).value)
+                    if found is not None:
+                        return found
+    return None
