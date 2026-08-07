@@ -245,23 +245,26 @@ def _sensitivity_sheet(wb, run: PensionRun) -> None:
 def _member_sheet(wb, run: PensionRun) -> None:
     ws = wb.create_sheet("개인별산출")
     headers = [
-        "사번", "성명", "직군", "성별", "연령", "근속연수", "투영연수",
-        "30일 평균임금", "퇴직급여추계액", "확정급여채무", "당기근무원가",
-        "이자원가", "듀레이션", "제외사유",
+        "사번", "성명", "직군", "성별", "원가코드", "제도구분", "연령", "근속연수",
+        "정년연령", "투영연수", "30일 평균임금", "퇴직급여추계액", "확정급여채무",
+        "당기근무원가", "이자원가", "듀레이션", "지급률 규정", "제외사유",
     ]
     rows = [
         [
-            m.employee_id, m.name, m.job_group, m.gender, m.age,
-            m.past_service, m.projection_years, m.monthly_wage,
-            m.accrued_benefit, m.dbo, m.service_cost, m.interest_cost,
-            m.duration, m.excluded_reason,
+            m.employee_id, m.name, m.job_group, m.gender, m.cost_code, m.plan,
+            m.age, m.past_service, m.retirement_age, m.projection_years,
+            m.monthly_wage, m.accrued_benefit, m.dbo, m.service_cost,
+            m.interest_cost, m.duration, m.benefit_rule, m.excluded_reason,
         ]
         for m in run.valuation.members
     ]
     _write_table(
         ws, headers, rows,
-        formats={6: _YEARS, 8: _MONEY, 9: _MONEY, 10: _MONEY, 11: _MONEY, 12: _MONEY, 13: _YEARS},
-        widths={1: 16, 2: 12, 3: 14, 14: 34},
+        formats={
+            8: _YEARS, 11: _MONEY, 12: _MONEY, 13: _MONEY,
+            14: _MONEY, 15: _MONEY, 16: _YEARS,
+        },
+        widths={1: 16, 2: 12, 3: 14, 5: 14, 17: 14, 18: 34},
     )
 
 

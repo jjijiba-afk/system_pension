@@ -68,6 +68,10 @@ def _build_parser() -> argparse.ArgumentParser:
     calc.add_argument("--no-sensitivity", action="store_true", help="민감도분석 생략")
     calc.add_argument("--no-longterm", action="store_true", help="장기종업원급여 생략")
     calc.add_argument("--force", action="store_true", help="검증 오류가 있어도 산출")
+    calc.add_argument(
+        "--members", type=Path, metavar="경로",
+        help="개인별 결과를 별도 엑셀로도 저장 (생략하면 결과 파일 안 시트로만)",
+    )
     calc.add_argument("--prior-dbo", type=float, default=0.0, help="전기말 확정급여채무")
     calc.add_argument("--prior-rate", type=_percent, default=0.0, help="전기말 할인율 (예: 4.5%%)")
     calc.add_argument("--prior-assumptions", type=Path, help="전기 기초율 워크북")
@@ -84,6 +88,12 @@ def _build_parser() -> argparse.ArgumentParser:
     upload.add_argument("roster", type=Path)
     upload.add_argument("-o", "--output", type=Path, required=True)
     upload.add_argument("--force", action="store_true", help="검증 오류가 있어도 생성")
+
+    members = sub.add_parser("members", help="개인별 산출 결과만 엑셀로 내보내기")
+    members.add_argument("roster", type=Path, help="명부 워크북")
+    members.add_argument("assumptions", type=Path, help="기초율 워크북")
+    members.add_argument("-o", "--output", type=Path, required=True)
+    members.add_argument("--force", action="store_true", help="검증 오류가 있어도 산출")
 
     sub.add_parser("gui", help="GUI 실행")
 
@@ -161,6 +171,11 @@ def _cmd_calc(args: argparse.Namespace) -> int:
         print(f"  보험수리적손익 {run.rollforward.actuarial_gain_loss:>18,.0f} 원")
     print(f"  명부 검증      오류 {len(run.issues.errors)}건 / 경고 {len(run.issues.warnings)}건")
     print(f"\n결과 파일: {args.output}")
+    if args.members:
+        from .members import write_member_export
+
+        write_member_export(run, args.members)
+        print(f"개인별 결과: {args.members}")
     return 0
 
 
@@ -275,6 +290,41 @@ def _cmd_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_members(args: argparse.Namespace) -> int:
+    """산출한 뒤 개인별 결과만 별도 엑셀로 내보낸다."""
+    from .members import build_member_rows, write_member_export
+    from .pipeline import RunOptions, run_valuation
+
+    options = RunOptions(
+        roster_path=args.roster,
+        assumptions_path=args.assumptions,
+        output_path=args.output,
+        include_sensitivity=False,
+        include_longterm=True,
+        allow_errors=args.force,
+    )
+
+    def progress(message: str, fraction: float) -> None:
+        print(f"[{fraction * 100:3.0f}%] {message}")
+
+    try:
+        run = run_valuation(options, progress)
+    except PensionDataError as exc:
+        print(f"\n{exc}\n", file=sys.stderr)
+        _print_issue_list(exc.issues)
+        print("\n--force 를 주면 오류를 남긴 채 산출할 수 있습니다.", file=sys.stderr)
+        return 2
+
+    write_member_export(run, args.output)
+    rows = build_member_rows(run)
+    included = [r for r in rows if not r.excluded_reason]
+    print(f"\n개인별 결과 {len(rows):,}명 (산출대상 {len(included):,}명)")
+    print(f"  확정급여채무 합계 {sum(r.dbo for r in rows):>18,.0f} 원")
+    print(f"  채무 합계       {sum(r.total_dbo for r in rows):>18,.0f} 원")
+    print(f"\n파일: {args.output}")
+    return 0
+
+
 def _cmd_assumptions(args: argparse.Namespace) -> int:
     """산출 가정 입력 화면을 띄운다."""
     import tkinter as tk
@@ -320,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         "check": _cmd_check,
         "template": _cmd_template,
         "assumptions": _cmd_assumptions,
+        "members": _cmd_members,
         "upload": _cmd_upload,
         "gui": _cmd_gui,
     }

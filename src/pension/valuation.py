@@ -61,6 +61,25 @@ class MemberValuation:
     """정년까지 남은 투영 연수."""
     monthly_wage: float
 
+    # ── 명부에서 그대로 옮겨 오는 항목 ────────────────────────────
+    # 개인별 결과만 따로 받아 원가배분·검산에 쓰는 경우가 많아, 명부를 다시 열지
+    # 않아도 되도록 함께 싣는다.
+    employee_type: str = ""
+    cost_code: str = ""
+    """원가구분코드(제조원가/판관비 등). 부서·원가 단위 배분에 쓴다."""
+    plan: str = ""
+    """퇴직급여 제도구분."""
+    birth_date: _dt.date | None = None
+    hire_date: _dt.date | None = None
+    settlement_date: _dt.date | None = None
+    """중간정산일(의 익일). 근속 기산일이다."""
+    retirement_age: int = 0
+    """적용한 퇴직급여 정년연령."""
+    benefit_rule: str = ""
+    """적용한 지급률 규정명."""
+    withdrawal_rule: str = ""
+    """적용한 중도(사망)퇴직률 규정명."""
+
     dbo: float = 0.0
     """확정급여채무."""
     service_cost: float = 0.0
@@ -158,6 +177,15 @@ def value_member(
         past_service=member.service_years(config.base_date),
         projection_years=0,
         monthly_wage=member.monthly_wage,
+        employee_type=member.employee_type.value,
+        cost_code=member.cost_code,
+        plan=member.plan.value if member.plan else "",
+        birth_date=member.birth_date,
+        hire_date=member.hire_date,
+        settlement_date=member.settlement_date,
+        retirement_age=member.severance_nra,
+        benefit_rule=member.rules.severance_benefit,
+        withdrawal_rule=member.rules.severance_withdrawal,
     )
 
     if member.plan is BenefitPlan.DC:
