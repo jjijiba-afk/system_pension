@@ -46,6 +46,7 @@ python -m pension assumptions --roster 명부.xlsm            # 산출 가정 �
 python -m pension template 기초율.xlsx --roster 명부.xlsm   # 기초율 양식 생성
 python -m pension check 명부.xlsm                            # 검증만
 python -m pension calc 명부.xlsm 기초율.xlsx -o 산출결과.xlsx
+python -m pension members 명부.xlsm 기초율.xlsx -o 개인별결과.xlsx  # 개인별 결과만
 ```
 
 ---
@@ -141,6 +142,7 @@ src/pension/
   validation.py    검증 (오류 일괄 수집)
   upload.py        UpLoad_Jae / UpLoad_Toi 생성
   assumptions.py   기초율 로딩 및 양식 생성
+  members.py       개인별 결과 내보내기 (원가코드·직군별 집계)
   editor.py        산출 가정 입력 화면
   formula.py       지급률 규정 수식 (안전한 엑셀형 표현식)
   actuarial.py     연령·근속·정년연령

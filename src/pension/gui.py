@@ -60,6 +60,7 @@ class PensionApp(tk.Tk):
         self.output_path = tk.StringVar()
         self.include_sensitivity = tk.BooleanVar(value=True)
         self.include_longterm = tk.BooleanVar(value=True)
+        self.export_members = tk.BooleanVar(value=False)
         self.allow_errors = tk.BooleanVar(value=False)
         self.prior_dbo = tk.StringVar()
         self.prior_rate = tk.StringVar()
@@ -184,11 +185,16 @@ class PensionApp(tk.Tk):
         ttk.Checkbutton(
             box, text="검증 오류가 있어도 산출 강행", variable=self.allow_errors
         ).grid(row=0, column=2, sticky="w")
+        ttk.Checkbutton(
+            box, text="개인별 결과 별도 파일로 저장", variable=self.export_members
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Label(
             box,
-            text="※ 오류를 남긴 채 산출한 결과는 검토용입니다. 확정 공시 전에는 명부를 수정하세요.",
+            text="※ 오류를 남긴 채 산출한 결과는 검토용입니다. 확정 공시 전에는 명부를 수정하세요.\n"
+                 "※ 개인별 결과는 결과 파일 안에도 '개인별산출' 시트로 들어갑니다. "
+                 "원가배분용으로 따로 받으려면 위를 체크하세요.",
             style="Hint.TLabel",
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     def _build_prior_section(self, parent, row: int) -> None:
         box = ttk.Labelframe(
@@ -441,8 +447,24 @@ class PensionApp(tk.Tk):
         self.progress["value"] = 100
         self.open_button.configure(state="normal")
         self._summarize(run, output)
+
+        member_path: Path | None = None
+        if self.export_members.get():
+            from .members import write_member_export
+
+            member_path = self._member_export_path(output)
+            try:
+                write_member_export(run, member_path)
+            except OSError as exc:
+                # 산출은 이미 끝났다. 개인별 파일을 못 썼다고 결과까지 버리지 않는다.
+                self._write(f"  개인별 결과를 저장하지 못했습니다: {exc}", "error")
+                member_path = None
+            else:
+                self._write(f"  개인별 결과: {member_path}", "ok")
+
         self.status.set(f"산출 완료 — {output}")
-        messagebox.showinfo(APP_TITLE, f"산출을 마쳤습니다.\n\n{output}")
+        extra = f"\n개인별 결과: {member_path}" if member_path else ""
+        messagebox.showinfo(APP_TITLE, f"산출을 마쳤습니다.\n\n{output}{extra}")
 
     def _on_data_error(self, exc: PensionDataError) -> None:
         self._finish()
@@ -471,6 +493,10 @@ class PensionApp(tk.Tk):
     def _finish(self) -> None:
         self.run_button.configure(state="normal")
         self._worker = None
+
+    def _member_export_path(self, output: Path) -> Path:
+        """결과 파일 옆에 둘 개인별 결과 파일 경로."""
+        return output.with_name(f"{output.stem}_개인별{output.suffix}")
 
     def _summarize(self, run: PensionRun, output: Path) -> None:
         v = run.valuation
