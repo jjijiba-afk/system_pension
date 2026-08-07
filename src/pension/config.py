@@ -49,6 +49,15 @@ class JobGroupRule:
     executive_over_nra_add_age: int = 0
     """임원 정년 초과자에게 더할 연수. ``Input`` Q열. 0 이면 직원 값을 쓴다."""
 
+    service_basis: str = "일할"
+    """근속기간 산정방법. ``Input`` S열. ``일할`` / ``월할`` / ``연할``."""
+    service_fraction: str = "그대로"
+    """근속연수 단수 처리. ``Input`` T열. ``그대로`` / ``절사`` / ``절상`` / ``반올림``."""
+    benefit_rounding_unit: int = 0
+    """지급액 반올림 단위(원). ``Input`` U열. 0 이면 반올림하지 않는다."""
+    benefit_rounding_mode: str = "반올림"
+    """지급액 반올림 방식. ``Input`` V열."""
+
     excluded: bool = False
     """이 직군을 퇴직급여 산출에서 통째로 뺄지. ``Input`` R열.
 
@@ -195,6 +204,10 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
                 executive_nra=_int(ws.cell(row, 16).value),
                 executive_over_nra_add_age=_int(ws.cell(row, 17).value),
                 excluded=text(ws.cell(row, 18).value).upper() in ("Y", "제외", "TRUE", "1"),
+                service_basis=text(ws.cell(row, 19).value) or "일할",
+                service_fraction=text(ws.cell(row, 20).value) or "그대로",
+                benefit_rounding_unit=_int(ws.cell(row, 21).value),
+                benefit_rounding_mode=text(ws.cell(row, 22).value) or "반올림",
             )
         )
 

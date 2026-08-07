@@ -33,6 +33,7 @@ from __future__ import annotations
 import datetime as _dt
 from dataclasses import dataclass, field
 
+from .actuarial import FRACTION_HALF, round_amount
 from .assumptions import Assumptions
 from .config import CalculationConfig
 from .models import ActiveMember, Roster
@@ -95,6 +96,8 @@ class MemberValuation:
 
     min_service_years: float = 0.0
     """적용한 가입자격(최소 근속연수). 0 이면 제한 없음."""
+    rounding_unit: int = 0
+    """적용한 지급액 반올림 단위(원). 0 이면 반올림하지 않았다."""
     extra_payment: float = 0.0
     """전별금·위로금 등 정액 추가지급액. 명부에 금액이 적힌 사람만 대상이다."""
 
@@ -239,6 +242,15 @@ def value_member(
     minimum = member.min_service_years
     result.min_service_years = minimum
 
+    # 지급액 반올림 규칙(예: 10원 단위). 직군 규칙에서 받아 온다.
+    rounding_unit = 0
+    rounding_mode = FRACTION_HALF
+    found = config.find_job_group(member.job_group_raw)
+    if found is not None:
+        rounding_unit = found[1].benefit_rounding_unit
+        rounding_mode = found[1].benefit_rounding_mode
+    result.rounding_unit = rounding_unit
+
     # 명부의 추가지급 기본급. 값이 있으면 그 사람이 위로금 대상이라는 뜻이다.
     extra_payment = max(0.0, member.extra_pay_base_wage)
     result.extra_payment = extra_payment
@@ -257,7 +269,7 @@ def value_member(
             rule, service, x=age, **context
         ) * wage
         # 전별금·위로금 등 정액 추가지급. 금액이 적힌 사람만 대상이다.
-        return amount + extra_payment
+        return round_amount(amount + extra_payment, rounding_unit, rounding_mode)
 
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
     result.accrued_benefit = benefit_at(past_service, float(member.age), member.monthly_wage)
