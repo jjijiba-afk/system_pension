@@ -141,15 +141,15 @@ def load_inputs(
     label: str = "당기 가정",
 ) -> tuple[CalculationConfig, Roster, Assumptions, IssueLog]:
     """명부 워크북과 기초율 워크북을 읽어 검증까지 마친다."""
-    import openpyxl
 
     from .validation import validate_roster
+    from .workbook import open_workbook
 
     roster_path = Path(roster_path)
     if not roster_path.exists():
         raise FileNotFoundError(f"명부 파일을 찾을 수 없습니다: {roster_path}")
 
-    wb = openpyxl.load_workbook(roster_path, data_only=True)
+    wb = open_workbook(roster_path)
     try:
         config = read_config(wb)
         log = IssueLog()

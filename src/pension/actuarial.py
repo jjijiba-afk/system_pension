@@ -43,6 +43,7 @@ def normal_retirement_age(
     rule: JobGroupRule,
     *,
     wage_peak_age: int | None = None,
+    is_executive: bool = False,
 ) -> int:
     """퇴직급여 정년연령.
 
@@ -58,12 +59,22 @@ def normal_retirement_age(
 
     임금피크 연령이 현재 연령보다 크면 그 값을 정년으로 쓰고, 이미 정년을 넘긴
     사람은 현재 연령에 직군별 가산연수를 더해 잔여 근무기간을 확보한다.
+
+    임원은 정년이 따로 없거나 다른 경우가 많아 직군 규칙의 임원 값을 먼저 본다.
     """
+    nra = rule.severance_nra
+    add_age = rule.over_nra_add_age
+    if is_executive:
+        if rule.executive_nra:
+            nra = rule.executive_nra
+        if rule.executive_over_nra_add_age:
+            add_age = rule.executive_over_nra_add_age
+
     if wage_peak_age is not None and wage_peak_age > age:
         return wage_peak_age
-    if age >= rule.severance_nra:
-        return age + rule.over_nra_add_age
-    return rule.severance_nra
+    if age >= nra:
+        return age + add_age
+    return nra
 
 
 def longterm_retirement_age(age: int, rule: JobGroupRule) -> int:

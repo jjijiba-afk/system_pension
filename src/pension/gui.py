@@ -346,11 +346,10 @@ class PensionApp(tk.Tk):
         if not path or not Path(path).exists():
             return []
         try:
-            import openpyxl
-
             from .config import read_config
+            from .workbook import open_workbook
 
-            wb = openpyxl.load_workbook(path, data_only=True)
+            wb = open_workbook(path)
             try:
                 config = read_config(wb)
             finally:

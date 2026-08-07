@@ -38,6 +38,23 @@ class JobGroupRule:
     """장기급여 정년연령. ``Input`` E열."""
     over_nra_add_age: int = 0
     """정년연령 초과자에게 더할 연수. ``Input`` F열."""
+    executive_nra: int = 0
+    """임원 퇴직급여 정년연령. ``Input`` P열. 0 이면 직원과 같게 본다.
+
+    임원은 대개 정년이 따로 없어 규정에 '없음'/'제약 無' 로 적혀 온다. 그럴 때는
+    기본 정년(60세)에 초과자 가산연령을 얹어 처리한다. 직군이 아니라 **임직원
+    구분** 으로 갈리므로 직군 규칙 안에 따로 둔다 — 실제 명부에서 임원의 직군이
+    '정규직' 으로 적혀 있어 직군만으로는 임원을 분리할 수 없었다.
+    """
+    executive_over_nra_add_age: int = 0
+    """임원 정년 초과자에게 더할 연수. ``Input`` Q열. 0 이면 직원 값을 쓴다."""
+
+    excluded: bool = False
+    """이 직군을 퇴직급여 산출에서 통째로 뺄지. ``Input`` R열.
+
+    '계약직은 퇴직금 대상에서 제외' 처럼 직군 단위로 대상이 아닌 경우가 있다.
+    """
+
     min_service_years: float = 0.0
     """퇴직급여 지급 대상이 되는 최소 근속연수(가입자격). ``Input`` O열.
 
@@ -175,6 +192,9 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
                 retired_severance_withdrawal=text(ws.cell(row, 13).value),
                 retired_longterm_withdrawal=text(ws.cell(row, 14).value),
                 min_service_years=_float(ws.cell(row, 15).value),
+                executive_nra=_int(ws.cell(row, 16).value),
+                executive_over_nra_add_age=_int(ws.cell(row, 17).value),
+                excluded=text(ws.cell(row, 18).value).upper() in ("Y", "제외", "TRUE", "1"),
             )
         )
 

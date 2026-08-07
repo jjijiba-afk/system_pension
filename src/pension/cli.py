@@ -170,6 +170,18 @@ def _cmd_calc(args: argparse.Namespace) -> int:
     if run.rollforward is not None:
         print(f"  보험수리적손익 {run.rollforward.actuarial_gain_loss:>18,.0f} 원")
     print(f"  명부 검증      오류 {len(run.issues.errors)}건 / 경고 {len(run.issues.warnings)}건")
+
+    excluded = v.exclusion_summary()
+    if excluded:
+        total = sum(excluded.values())
+        print(f"\n  산출 제외 {total:,}명")
+        for reason, count in excluded.items():
+            print(f"    {count:>5,}명  {reason}")
+        if v.headcount == 0:
+            print(
+                "\n  ※ 산출대상이 한 명도 없어 확정급여채무가 0 입니다. "
+                "위 사유를 확인하세요."
+            )
     print(f"\n결과 파일: {args.output}")
     if args.members:
         from .members import write_member_export
@@ -182,14 +194,13 @@ def _cmd_calc(args: argparse.Namespace) -> int:
 def _cmd_check(args: argparse.Namespace) -> int:
     import csv
 
-    import openpyxl
-
     from .config import read_config
     from .errors import IssueLog
     from .readers import read_roster
     from .validation import validate_roster
+    from .workbook import open_workbook
 
-    wb = openpyxl.load_workbook(args.roster, data_only=True)
+    wb = open_workbook(args.roster)
     try:
         config = read_config(wb)
         log = IssueLog()
@@ -220,12 +231,12 @@ def _job_groups_from_roster(roster: Path | None) -> list[str]:
     if not roster or not roster.exists():
         return []
 
-    import openpyxl
 
     from .config import read_config
+    from .workbook import open_workbook
 
     try:
-        wb = openpyxl.load_workbook(roster, data_only=True)
+        wb = open_workbook(roster)
     except (OSError, ValueError, KeyError):
         return []
     try:
@@ -255,8 +266,9 @@ def _cmd_upload(args: argparse.Namespace) -> int:
     from .readers import read_roster
     from .upload import ACTIVE_UPLOAD_HEADERS, RETIRED_UPLOAD_HEADERS, build_upload
     from .validation import validate_roster
+    from .workbook import open_workbook
 
-    wb = openpyxl.load_workbook(args.roster, data_only=True)
+    wb = open_workbook(args.roster)
     try:
         config = read_config(wb)
         log = IssueLog()
