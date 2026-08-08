@@ -17,20 +17,31 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 
 from .actuarial import (
-    FRACTION_HALF,
     FRACTION_KEEP,
     FRACTION_MODES,
     SERVICE_BASES,
     SERVICE_DAILY,
 )
+from .assumption_form import (
+    APPLY_CHOICES as _APPLY_CHOICES,
+)
+from .assumption_form import (
+    FORM_SHEETS,
+)
+from .assumption_form import (
+    ROUNDING_UNITS as _ROUNDING_UNITS,
+)
+from .assumption_form import (
+    UNIT_LABELS as _UNIT_LABELS,
+)
+from .assumption_form import read_state as _read_state
+from .assumption_form import state_to_sheets as _state_to_sheets
 from .assumptions import (
     BENEFIT_MODES,
-    BENEFIT_RULE_SHEET,
     BENEFIT_SHEET,
     CUMULATIVE,
     DISCOUNT_SHEET,
     FORMULA,
-    LONGTERM_RULE_SHEET,
     LONGTERM_SHEET,
     LONGTERM_TYPES,
     LT_IN_KIND,
@@ -39,7 +50,6 @@ from .assumptions import (
     PROMOTION_SHEET,
     SALARY_SHEET,
     WITHDRAWAL_SHEET,
-    write_assumptions,
 )
 from .formula import FUNCTIONS, VARIABLES, Formula, FormulaError
 from .jobgroup import DEFAULT_GROUPS
@@ -49,26 +59,6 @@ __all__ = ["AssumptionsEditor", "open_editor"]
 
 _PAD = 8
 _DEFAULT_ROWS = 12
-
-#: 지급액 반올림 단위 선택지. 화면에 보이는 글자 → 원 단위 값.
-_ROUNDING_UNITS = ("없음", "1원", "10원", "100원", "1,000원")
-_ROUNDING_VALUES = {"없음": 0, "1원": 1, "10원": 10, "100원": 100, "1,000원": 1000}
-_UNIT_LABELS = {v: k for k, v in _ROUNDING_VALUES.items()}
-
-#: 지급규정을 담는 시트. ``Input`` 시트와 열 배치가 같아 그대로 읽힌다.
-PAYOUT_SHEET = "지급규정"
-_PAYOUT_HEADERS = (
-    "명부직군", "변환직군명", "퇴직급여 정년연령", "장기급여 정년연령",
-    "정년초과 가산연령", "퇴직급여 지급률 규정", "장기급여 지급률 규정",
-    "퇴직급여 퇴직률 규정", "퇴직급여 승급률 규정", "장기급여 퇴직률 규정",
-    "장기급여 승급률 규정", "퇴직자 퇴직급여 퇴직률 규정", "퇴직자 장기급여 퇴직률 규정",
-    "가입자격(최소근속)", "임원 정년연령", "임원 정년초과 가산연령", "산출 제외",
-    "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식", "임직원구분",
-    "Base-up 적용", "승급률 적용", "퇴직률 적용", "사망률 적용",
-)
-
-#: 직군별 가정 적용 여부 선택지.
-_APPLY_CHOICES = ("반영", "미반영")
 
 
 @dataclass(slots=True)
@@ -92,37 +82,14 @@ class SheetSpec:
         return not self.fixed_headers
 
 
-SPECS: tuple[SheetSpec, ...] = (
+# 탭 서식은 웹앱과 공유한다 — 두 화면의 시트 구성이 어긋나면 안 된다.
+SPECS: tuple[SheetSpec, ...] = tuple(
     SheetSpec(
-        DISCOUNT_SHEET, "할인율", "연차", ("할인율",),
-        "한 줄만 넣으면 전 기간 단일 할인율입니다. 여러 줄이면 각 연차의 현물이자율(spot)로 봅니다.",
-    ),
-    SheetSpec(
-        SALARY_SHEET, "Base-up", "연차", ("Base-up 상승률",),
-        "승진·승급을 제외한 공통 임금인상률입니다. 마지막 줄의 값이 그 이후 전 기간에 적용됩니다.",
-    ),
-    SheetSpec(
-        PROMOTION_SHEET, "승급률", "연령", (),
-        "승진·호봉 승급에 따른 인상률입니다. Base-up 과 더해져 총 임금상승률이 됩니다.",
-        key_choices=("연령", "근속"),
-    ),
-    SheetSpec(
-        WITHDRAWAL_SHEET, "퇴직률", "연령", (),
-        "사망을 제외한 연간 중도퇴직률입니다.",
-        key_choices=("연령", "근속"),
-    ),
-    SheetSpec(
-        MORTALITY_SHEET, "사망률", "연령", ("남자", "여자"),
-        "연간 사망률 qx 입니다. 사용한 경험생명표의 출처를 비고에 남겨 두세요.",
-    ),
-    SheetSpec(
-        BENEFIT_SHEET, "지급률", "근속연수", (),
-        "30일 평균임금 대비 지급배수입니다. 값의 의미는 '지급률 규정' 탭의 방식에 따라 달라집니다.",
-    ),
-    SheetSpec(
-        LONGTERM_SHEET, "장기급여", "근속연수", (),
-        "근속 포상·장기근속휴가의 지급일수입니다(일 기본급 × 일수).",
-    ),
+        sheet=item["sheet"], tab=item["tab"], key_header=item["key"],
+        fixed_headers=tuple(item["fixed"]), note=item["note"],
+        key_choices=tuple(item["key_choices"]),
+    )
+    for item in FORM_SHEETS
 )
 
 
@@ -1325,107 +1292,24 @@ class AssumptionsEditor(tk.Toplevel):
         self.status.configure(text=f"불러왔습니다: {Path(path).name}")
 
     def load_workbook(self, path: Path) -> None:
-        from .workbook import open_workbook
+        state = _read_state(path)
 
-        wb = open_workbook(path)
-        try:
-            # 직군은 지급률 시트의 열 머리글에서 가져온다.
-            groups: list[str] = []
-            for spec in SPECS:
-                if not spec.per_job_group or spec.sheet not in wb.sheetnames:
-                    continue
-                ws = wb[spec.sheet]
-                groups = [
-                    text(ws.cell(1, c).value)
-                    for c in range(2, ws.max_column + 1)
-                    if text(ws.cell(1, c).value)
-                ]
-                if groups:
-                    break
-            if groups:
-                self.job_group_var.set(", ".join(groups))
-                self._apply_job_groups()
+        if state["job_groups"]:
+            self.job_group_var.set(", ".join(state["job_groups"]))
+            self._apply_job_groups()
 
-            for spec in SPECS:
-                grid = self._grids[spec.sheet]
-                if spec.sheet not in wb.sheetnames:
-                    grid.set_rows([])
-                    continue
-                ws = wb[spec.sheet]
-                if spec.key_choices:
-                    header = text(ws.cell(1, 1).value)
-                    grid.key_var.set("근속" if "근속" in header else "연령")
+        for spec in SPECS:
+            grid = self._grids[spec.sheet]
+            item = state["grids"][spec.sheet]
+            if spec.key_choices:
+                grid.key_var.set(item["key"])
+            grid.set_rows(item["rows"])
 
-                width = len(grid.headers)
-                rows = []
-                for row in range(2, ws.max_row + 1):
-                    values = [_cell_text(ws.cell(row, c).value) for c in range(1, width + 1)]
-                    if any(values):
-                        rows.append(values)
-                grid.set_rows(rows)
-
-            if PAYOUT_SHEET in wb.sheetnames:
-                ws = wb[PAYOUT_SHEET]
-                payout: dict[str, dict[str, Any]] = {}
-                mapping: list[tuple[str, str, str]] = []
-                for row in range(2, ws.max_row + 1):
-                    name = text(ws.cell(row, 1).value)
-                    if not name:
-                        continue
-                    # 규정 값은 변환 직군(2열) 단위로, 매핑은 행 단위로 되읽는다.
-                    target = text(ws.cell(row, 2).value) or name
-                    kind = text(ws.cell(row, 22).value)
-                    mapping.append((name, kind, target))
-                    unit = _as_int(_cell_text(ws.cell(row, 20).value), 0)
-                    payout[target] = {
-                        "nra": _cell_text(ws.cell(row, 3).value) or "60",
-                        "add_age": _cell_text(ws.cell(row, 5).value) or "2",
-                        "min_service": _cell_text(ws.cell(row, 14).value) or "0",
-                        "executive_nra": _cell_text(ws.cell(row, 15).value) or "60",
-                        "excluded": text(ws.cell(row, 17).value).upper() in ("Y", "제외"),
-                        "basis": text(ws.cell(row, 18).value) or SERVICE_DAILY,
-                        "fraction": text(ws.cell(row, 19).value) or FRACTION_KEEP,
-                        "unit": _UNIT_LABELS.get(unit, "없음"),
-                        # 빈 칸은 '반영'. 이 열이 없던 기존 파일과 동작을 맞춘다.
-                        "base_up": text(ws.cell(row, 23).value) or "반영",
-                        "promotion": text(ws.cell(row, 24).value) or "반영",
-                        "withdrawal": text(ws.cell(row, 25).value) or "반영",
-                        "mortality": text(ws.cell(row, 26).value) or "반영",
-                    }
-                self._payout_tab.set_values(payout)
-                # 명부 직군이 변환 직군과 다른 행이 하나라도 있으면 진짜 매핑이다.
-                if any(source != target or kind for source, kind, target in mapping):
-                    self._map_tab.set_rows(mapping)
-
-            if LONGTERM_RULE_SHEET in wb.sheetnames:
-                ws = wb[LONGTERM_RULE_SHEET]
-                longterm: dict[str, dict[str, str]] = {}
-                for row in range(2, ws.max_row + 1):
-                    name = text(ws.cell(row, 1).value)
-                    if not name:
-                        continue
-                    raw = ws.cell(row, 3).value
-                    longterm[name] = {
-                        "kind": text(ws.cell(row, 2).value) or LT_VACATION,
-                        "escalation": f"{float(raw) * 100:g}%" if isinstance(raw, (int, float)) and raw else "",
-                        "note": text(ws.cell(row, 4).value),
-                    }
-                self._longterm_tab.set_values(longterm)
-
-            if BENEFIT_RULE_SHEET in wb.sheetnames:
-                ws = wb[BENEFIT_RULE_SHEET]
-                values: dict[str, dict[str, str]] = {}
-                for row in range(2, ws.max_row + 1):
-                    name = text(ws.cell(row, 1).value)
-                    if not name:
-                        continue
-                    values[name] = {
-                        "mode": text(ws.cell(row, 2).value) or CUMULATIVE,
-                        "formula": text(ws.cell(row, 3).value),
-                    }
-                self._rule_tab.set_values(values)
-        finally:
-            wb.close()
+        self._payout_tab.set_values(state["payout"])
+        if state["mapping"]:
+            self._map_tab.set_rows([tuple(row) for row in state["mapping"]])
+        self._longterm_tab.set_values(state["longterm_rules"])
+        self._rule_tab.set_values(state["benefit_rules"])
 
     def save(self) -> None:
         problems = self._rule_tab.problems()
@@ -1470,73 +1354,35 @@ class AssumptionsEditor(tk.Toplevel):
             parent=self,
         )
 
+    def state(self) -> dict[str, Any]:
+        """화면의 입력을 웹앱과 공유하는 state 자료구조로 모은다."""
+        return {
+            "job_groups": list(self.job_groups),
+            "grids": {
+                spec.sheet: {
+                    "key": self._grids[spec.sheet].key_var.get(),
+                    "rows": self._grids[spec.sheet].get_rows(),
+                }
+                for spec in SPECS
+            },
+            "payout": self._payout_tab.get_values(),
+            "benefit_rules": self._rule_tab.get_values(),
+            "longterm_rules": self._longterm_tab.get_values(),
+            "mapping": [list(row) for row in self._map_tab.rows()],
+        }
+
     def collect(self) -> tuple[
         dict[str, tuple[list[str], list[list[Any]]]],
         dict[str, tuple[str, str]],
         dict[str, tuple[str, float, str]],
     ]:
         """화면의 입력을 파일로 쓸 수 있는 평범한 자료구조로 모은다."""
-        sheets = {
-            spec.sheet: (
-                self._grids[spec.sheet].headers,
-                [[_parse_cell(v) for v in row] for row in self._grids[spec.sheet].get_rows()],
-            )
-            for spec in SPECS
-        }
-        rules = {
-            group: (item["mode"], item["formula"])
-            for group, item in self._rule_tab.get_values().items()
-        }
-
-        # 지급규정 탭 → 'Input' 시트와 같은 배치로 한 장 더 만든다. 산출 때
-        # 그대로 읽히도록 열 순서를 맞춘다.
-        #
-        # 한 행이 곧 하나의 조회 키다. '직군 매핑' 탭이 채워져 있으면 명부에서
-        # 발견된 (직군, 임직원구분) 조합마다 한 행씩 쓰고, 규정 값은 배정된
-        # 묶음의 것을 그대로 복사한다. 매핑이 비어 있으면 묶음 이름을 그대로
-        # 명부 직군으로 본다(직군 열에 이미 정규직/계약직이 적혀 오는 명부).
-        payout = self._payout_tab.get_values()
-        mapping = [
-            (source, kind, target)
-            for source, kind, target in self._map_tab.rows()
-            if target in payout
-        ]
-        if not mapping:
-            mapping = [(group, "", group) for group in payout]
-
-        rows: list[list[Any]] = []
-        for source, kind, target in mapping:
-            item = payout[target]
-            rows.append([
-                source, target,
-                _as_int(item["nra"], 60), _as_int(item["nra"], 60),
-                _as_int(item["add_age"], 2),
-                "", "", "", "", "", "", "", "",
-                _as_float(item["min_service"], 0.0),
-                _as_int(item["executive_nra"], 0),
-                _as_int(item["add_age"], 2),
-                "Y" if item["excluded"] else "",
-                item["basis"], item["fraction"],
-                _ROUNDING_VALUES.get(item["unit"], 0), FRACTION_HALF,
-                kind,
-                item["base_up"], item["promotion"], item["withdrawal"], item["mortality"],
-            ])
-        sheets[PAYOUT_SHEET] = (list(_PAYOUT_HEADERS), rows)
-
-        longterm = {
-            group: (
-                item["kind"],
-                _as_float(item["escalation"].rstrip("%"), 0.0) / 100.0
-                if item["escalation"].endswith("%")
-                else _as_float(item["escalation"], 0.0),
-                item["note"],
-            )
-            for group, item in self._longterm_tab.get_values().items()
-        }
-        return sheets, rules, longterm
+        return _state_to_sheets(self.state())
 
     def write(self, path: Path) -> Path:
         """현재 입력을 기초율 워크북으로 쓴다."""
+        from .assumptions import write_assumptions
+
         sheets, rules, longterm = self.collect()
         return write_assumptions(path, sheets, rules, longterm)
 
@@ -1570,42 +1416,6 @@ class AssumptionsEditor(tk.Toplevel):
         if self._on_close is not None:
             self._on_close(self)
         self.destroy()
-
-
-def _as_int(token: str, default: int) -> int:
-    try:
-        return int(float(str(token).strip()))
-    except (TypeError, ValueError):
-        return default
-
-
-def _as_float(token: str, default: float) -> float:
-    try:
-        return float(str(token).strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def _cell_text(value: object) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float):
-        return f"{value:g}"
-    return str(value).strip()
-
-
-def _parse_cell(token: str) -> Any:
-    """입력 문자열을 엑셀에 쓸 값으로. ``4.5%`` 는 0.045 로 저장한다."""
-    token = token.strip()
-    if not token:
-        return None
-    percent = token.endswith("%")
-    body = token[:-1] if percent else token
-    try:
-        number = float(body.replace(",", ""))
-    except ValueError:
-        return token
-    return number / 100.0 if percent else number
 
 
 def open_editor(
