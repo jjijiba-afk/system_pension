@@ -289,7 +289,7 @@ class TestReport:
 
         wb = openpyxl.load_workbook(path)
         assert set(wb.sheetnames) == {
-            "산출요약", "증감분석", "민감도분석", "개인별산출",
+            "산출요약", "증감분석", "민감도분석", "기대현금흐름", "적용가정", "개인별산출",
             "장기급여", "검증리포트", "UpLoad_Jae", "UpLoad_Toi",
         }
 
@@ -339,3 +339,70 @@ class TestAssumptionTemplateColumns:
 
         config, _, _ = read_all(roster_path)
         assert config.referenced_rule_names() == ["2임원", "1정규직", "3계약직"]
+
+
+class TestReportAuditTrail:
+    """결과 파일 혼자서 근거자료가 되어야 한다.
+
+    결과는 담당자 → 회사 → 감사인 사이를 메일로 돌아다니는 동안 기초율 파일과
+    분리되기 마련이다. 현금흐름과 적용 가정이 결과 안에 있어야 "이 숫자가 어떻게
+    나왔나" 에 답할 수 있다.
+    """
+
+    def _report(self, roster_path, assumptions_path, tmp_path):
+        run = run_valuation(RunOptions(
+            roster_path=roster_path,
+            assumptions_path=assumptions_path,
+            output_path=tmp_path / "결과.xlsx",
+        ))
+        return run, write_report(run, tmp_path / "결과.xlsx")
+
+    def test_cashflow_sheet_reconciles_to_the_dbo(
+        self, roster_path: Path, assumptions_path: Path, tmp_path: Path
+    ) -> None:
+        """시트의 두 열(지급액·현가계수)만으로 채무가 재계산되어야 한다."""
+        run, path = self._report(roster_path, assumptions_path, tmp_path)
+
+        ws = openpyxl.load_workbook(path, data_only=True)["기대현금흐름"]
+        rows = [
+            (ws.cell(r, 1).value, ws.cell(r, 2).value, ws.cell(r, 3).value)
+            for r in range(6, ws.max_row + 1)
+            if isinstance(ws.cell(r, 1).value, (int, float))
+        ]
+        assert rows, "현금흐름 행이 없다"
+        rebuilt = sum(amount * factor for _t, amount, factor in rows)
+        assert rebuilt == pytest.approx(run.valuation.dbo, rel=1e-9)
+
+    def test_cashflow_sheet_verifies_the_single_rate(
+        self, roster_path: Path, assumptions_path: Path, tmp_path: Path
+    ) -> None:
+        run, path = self._report(roster_path, assumptions_path, tmp_path)
+
+        ws = openpyxl.load_workbook(path, data_only=True)["기대현금흐름"]
+        rate = run.valuation.single_discount_rate()
+        rows = [
+            (ws.cell(r, 1).value, ws.cell(r, 2).value)
+            for r in range(6, ws.max_row + 1)
+            if isinstance(ws.cell(r, 1).value, (int, float))
+        ]
+        restated = sum(amount / (1 + rate) ** t for t, amount in rows)
+        assert restated == pytest.approx(run.valuation.dbo, rel=1e-6)
+
+    def test_assumption_sheet_snapshots_what_was_used(
+        self, roster_path: Path, assumptions_path: Path, tmp_path: Path
+    ) -> None:
+        _run, path = self._report(roster_path, assumptions_path, tmp_path)
+
+        ws = openpyxl.load_workbook(path, data_only=True)["적용가정"]
+        cells = {
+            str(ws.cell(r, c).value)
+            for r in range(1, ws.max_row + 1)
+            for c in range(2, 16)
+            if ws.cell(r, c).value is not None
+        }
+        # 구역 제목들과 직군 규칙 열이 있어야 한다.
+        for expected in ("할인율", "퇴직률 (기준: 연령)", "사망률 qx", "직군별 규정",
+                         "명부직군", "Base-up"):
+            assert expected in cells, f"'{expected}' 이(가) 적용가정 시트에 없다"
+        # 직군 규칙의 적용 여부가 값으로 남아야 한다.
+        assert "반영" in cells

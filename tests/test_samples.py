@@ -303,15 +303,3 @@ class TestYieldCurve:
         assert discount.flat is None            # 곡선이므로 단일 할인율이 아니다
         assert discount.rate(1) == pytest.approx(0.03122)
         assert discount.rate(20) == pytest.approx(0.0526)
-
-    def test_representative_rate_follows_duration(self, tmp_path) -> None:
-        """곡선을 넣었으면 듀레이션 시점 이자율이 공시용 대표값이다."""
-        from pension.assumptions import load_assumptions
-        from pension.samples import write_standard_assumptions
-
-        path = write_standard_assumptions(
-            tmp_path / "기초율.xlsx", yield_curve_path=self._book(tmp_path)
-        )
-        discount = load_assumptions(path).discount
-        assert discount.representative_rate(6.0) == pytest.approx(0.0362)
-        assert discount.representative_rate(1.0) == pytest.approx(0.03122)
