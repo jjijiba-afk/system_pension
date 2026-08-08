@@ -9,58 +9,36 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1F3864">
-<style>
-:root { color-scheme: light dark; }
-* { box-sizing: border-box; }
-body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
-       max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; line-height: 1.55; }
-h1 { font-size: 1.5rem; color: #1F3864; margin-bottom: 4px; }
-@media (prefers-color-scheme: dark) { h1 { color: #9DB6E0; } legend { color: #9DB6E0 !important; } }
-h1 small { font-weight: normal; font-size: 0.88rem; color: #5B6478; display: block; }
-fieldset { border: 1px solid #C4CBD8; border-radius: 10px; margin: 0 0 16px; padding: 14px 16px; }
-legend { font-weight: bold; color: #1F3864; padding: 0 6px; }
-label { display: block; margin: 10px 0 4px; font-weight: 600; }
-input[type=file] { width: 100%; padding: 12px; border: 1px dashed #8894AB;
-                   border-radius: 8px; font-size: 1rem; }
-input[type=text] { width: 100%; padding: 12px; border: 1px solid #C4CBD8;
-                   border-radius: 8px; font-size: 1.05rem; background: transparent; color: inherit; }
-.hint { color: #5B6478; font-size: 0.85rem; margin-top: 2px; }
-.check { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-weight: 600; }
-.check input { width: 22px; height: 22px; }
-button { display: block; width: 100%; padding: 16px; margin-top: 14px;
-  background: #1F3864; color: #fff; border: 0; border-radius: 10px;
-  font-size: 1.15rem; font-weight: bold; }
-button:disabled { background: #A9B2C4; }
-button.secondary { background: #44546A; }
-table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-td, th { border: 1px solid #C4CBD8; padding: 9px 12px; text-align: left; font-size: 0.95rem; }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
-#status { background: #EEF3F8; border-radius: 8px; padding: 10px 14px; margin: 10px 0;
-          font-size: 0.92rem; white-space: pre-line; color: #333; }
-@media (prefers-color-scheme: dark) { #status { background: #263041; color: #dde; } }
-.error { background: #FCE4E4; color: #5c1a1a; border-radius: 8px; padding: 10px 14px; margin: 6px 0;
-         font-size: 0.9rem; }
-.warn-box { background: #FFF6E0; color: #5c4a1a; border-radius: 8px; padding: 10px 14px; margin: 6px 0;
-            font-size: 0.9rem; }
-.notice { color: #5B6478; font-size: 0.88rem; }
-#result { display: none; }
-</style>
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
 <h1>연금계리 산출<small>K-IFRS 1019 확정급여채무 (PUC) — 기기 안에서 계산, 자료는 밖으로 나가지 않음</small></h1>
 
 <div id="status">엔진을 준비하는 중… (처음 한 번만 오래 걸립니다)</div>
 
+<nav class="tabs">
+  <button id="tab-calc" class="on">산출</button>
+  <button id="tab-edit">산출가정 입력</button>
+  <button id="tab-lib">기본가정 관리</button>
+</nav>
+
+<!-- ════════ 산출 ════════ -->
+<section class="page on" id="page-calc">
 <form id="form">
-<fieldset><legend>1. 입력 파일</legend>
-  <label>명부 파일 (.xls / .xlsx / .xlsm)</label>
+<fieldset><legend>1. 명부 파일</legend>
   <input type="file" id="roster" accept=".xls,.xlsx,.xlsm" required>
   <div class="hint">Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서</div>
-  <label>기초율 파일 (.xlsx)</label>
-  <input type="file" id="assumptions" accept=".xlsx,.xlsm" required>
-  <div class="hint">할인율 · 승급률 · 퇴직률 · 사망률 · 지급률 · 지급규정</div>
 </fieldset>
-<fieldset><legend>2. 산출 옵션</legend>
+<fieldset><legend>2. 기초율(산출가정)</legend>
+  <div class="check"><input type="radio" name="asrc" id="asrc-editor" value="editor">
+    <label for="asrc-editor" style="margin:0">산출가정 입력 화면의 내용 사용
+      <span class="hint" id="editor-state-hint" style="display:inline">— 아직 입력 없음</span></label></div>
+  <div class="check"><input type="radio" name="asrc" id="asrc-file" value="file" checked>
+    <label for="asrc-file" style="margin:0">기초율 파일 업로드</label></div>
+  <input type="file" id="assumptions" accept=".xlsx,.xlsm">
+  <div class="hint">할인율 · 승급률 · 퇴직률 · 사망률 · 지급률 · 지급규정 시트가 든 워크북</div>
+</fieldset>
+<fieldset><legend>3. 산출 옵션</legend>
   <div class="check"><input type="checkbox" id="force">
     <label for="force" style="margin:0">검증 오류가 있어도 산출 강행 (검토용)</label></div>
   <div class="check"><input type="checkbox" id="sensitivity" checked>
@@ -68,229 +46,114 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   <div class="check"><input type="checkbox" id="longterm" checked>
     <label for="longterm" style="margin:0">기타장기종업원급여 별도 산출</label></div>
 </fieldset>
-<fieldset><legend>3. 전기 산출 결과 (증감분석용 · 최초 평가면 비워 두세요)</legend>
+<fieldset><legend>4. 전기 산출 결과 (증감분석용 · 최초 평가면 비워 두세요)</legend>
   <label>전기말 확정급여채무 (원)</label>
-  <input type="text" id="prior_dbo" inputmode="numeric" placeholder="예: 10,000,000,000">
+  <input type="text" id="prior_dbo" inputmode="numeric" placeholder="예: 10,000,000,000" style="width:100%">
   <label>전기말 할인율</label>
-  <input type="text" id="prior_rate" inputmode="decimal" placeholder="예: 4.1%">
+  <input type="text" id="prior_rate" inputmode="decimal" placeholder="예: 4.1%" style="width:100%">
 </fieldset>
-<button type="submit" id="run" disabled>산출 실행</button>
+<button type="submit" class="big" id="run" disabled>산출 실행</button>
 </form>
 
 <div id="errors"></div>
 
-<div id="result">
+<div id="result" style="display:none">
   <h1 style="font-size:1.2rem">산출 결과</h1>
-  <table id="summary"></table>
+  <table class="data" id="summary"></table>
   <h1 style="font-size:1.05rem">직군별</h1>
-  <table id="groups"></table>
+  <table class="data" id="groups"></table>
   <div class="warn-box" id="issues"></div>
-  <button id="dl-result">결과 엑셀 내려받기</button>
-  <button id="dl-members" class="secondary">개인별 결과 내려받기</button>
+  <button class="big" id="dl-result">결과 엑셀 내려받기</button>
+  <button class="big secondary" id="dl-members">개인별 결과 내려받기</button>
 </div>
+</section>
+
+<!-- ════════ 산출가정 입력 ════════ -->
+<section class="page" id="page-edit">
+<fieldset><legend>시스템 등록 자료</legend>
+  <div class="lib-line">
+    <span style="font-weight:600">표준률</span>
+    <select id="ed-rates"></select>
+    <button class="small" id="ed-rates-load">불러오기</button>
+  </div>
+  <div class="lib-line">
+    <span style="font-weight:600">금리표</span>
+    <select id="ed-curve"></select>
+    <select id="ed-grade"></select>
+    <button class="small" id="ed-curve-apply">할인율에 적용</button>
+  </div>
+  <div class="hint">등록·삭제는 [기본가정 관리] 탭에서 합니다. 불러온 뒤 값을 고쳐도
+  됩니다 — 등록된 것은 출발점이지 확정이 아닙니다.</div>
+</fieldset>
+
+<fieldset><legend>직군별 규정</legend>
+  <div class="row">
+    <input type="text" id="ed-groups" placeholder="정규직, 계약직, 임원">
+    <button class="small primary" id="ed-groups-apply">적용</button>
+    <button class="small" id="ed-groups-reset">기본값</button>
+    <button class="small" id="ed-groups-roster">명부에서 불러오기</button>
+  </div>
+  <div class="hint">여기 적은 이름이 모든 가정 표의 열 머리글이 됩니다.
+  예) 정규직, 계약직, 임원 · 생산직, 관리직, 일반직, 계약직, 임원.
+  퇴직률·승급률·지급률이 실제로 다른 단위로만 나누세요.</div>
+</fieldset>
+
+<nav class="subtabs" id="ed-subtabs"></nav>
+<div id="ed-subpages"></div>
+
+<div class="toolbar" style="margin-top:14px">
+  <button class="small" id="ed-example">예시 채우기</button>
+  <label class="small" style="margin:0;border:1px solid var(--line);border-radius:8px;padding:9px 14px;font-size:0.94rem">
+    불러오기(.xlsx)<input type="file" id="ed-load" accept=".xlsx,.xlsm" style="display:none"></label>
+  <span class="spacer"></span>
+  <button class="small primary" id="ed-save">저장 (.xlsx 내려받기)</button>
+</div>
+<div id="ed-status" class="hint"></div>
+<div id="ed-problems"></div>
+</section>
+
+<!-- ════════ 기본가정 관리 ════════ -->
+<section class="page" id="page-lib">
+<p class="notice">한 결산기에 여러 단체를 산출할 때 금리표·표준률은 모두 같습니다.
+여기 등록해 두면 [산출가정 입력] 화면에서 목록으로 골라 쓸 수 있고, 이 기기의
+브라우저 안에 저장되어 다음에 열어도 남아 있습니다. 따로 지정하지 않으면
+<b>가장 최근 등록한 것</b>이 기본으로 잡힙니다.</p>
+
+<fieldset><legend>금리표 (KIS-Net 등급별 기간구조)</legend>
+  <div class="lib-line">
+    <input type="file" id="lib-curve-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-curve-name" placeholder="등록 이름 (예: KIS_20261231)" style="min-width:180px">
+    <button class="small primary" id="lib-curve-add">등록</button>
+  </div>
+  <div id="lib-curve-list"></div>
+</fieldset>
+
+<fieldset><legend>표준률 (퇴직률·승급률·사망률 기초율 워크북)</legend>
+  <div class="lib-line">
+    <input type="file" id="lib-rates-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-rates-name" placeholder="등록 이름 (예: 2026 표준률)" style="min-width:180px">
+    <button class="small primary" id="lib-rates-add">등록</button>
+  </div>
+  <div class="hint">기초율 워크북 서식(할인율·승급률·퇴직률·사망률·지급률 시트)이면
+  됩니다. [산출가정 입력]에서 만들어 저장한 파일을 그대로 등록해도 됩니다.
+  등록이 없어도 <b>내장 표준률</b>(15~70세 표)은 항상 쓸 수 있습니다.</div>
+  <div id="lib-rates-list"></div>
+</fieldset>
+</section>
 
 <p class="notice">모든 계산은 이 기기의 브라우저 안에서 이루어집니다. 명부·기초율은
 어디로도 전송되지 않습니다. Safari 공유 버튼 → <b>홈 화면에 추가</b> 를 누르면
 앱으로 설치되고, 한 번 연 뒤에는 오프라인에서도 동작합니다.</p>
 
+<dialog id="preview-dialog">
+  <h1 style="font-size:1.05rem">지급률 수식 미리보기</h1>
+  <p class="hint">연령 40세 · 정년 60세 · 제도 DB 기준으로 계산한 근속연수별 배수입니다.</p>
+  <div id="preview-body" class="scroll-x"></div>
+  <button class="big secondary" onclick="this.closest('dialog').close()">닫기</button>
+</dialog>
+
+<script>const WHEELS = __WHEELS__;</script>
 <script src="pyodide/pyodide.js"></script>
-<script>
-"use strict";
-const WHEELS = __WHEELS__;
-const $ = (id) => document.getElementById(id);
-const status = (msg) => { $("status").textContent = msg; };
-
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
-}
-
-// 파이썬 쪽 실행기. 결과를 JSON 문자열 하나로 돌려받는다 — 경계를 단순하게.
-const DRIVER = `
-import json
-from pathlib import Path
-
-def 산출(roster_name, force, sensitivity, longterm, prior_dbo, prior_rate):
-    from pension.errors import PensionDataError, Severity
-    from pension.members import write_member_export
-    from pension.pipeline import PriorPeriod, RunOptions, run_valuation
-    from pension.report import write_report
-
-    out = Path('/work/산출결과.xlsx')
-    try:
-        run = run_valuation(RunOptions(
-            roster_path=Path('/work') / roster_name,
-            assumptions_path=Path('/work/기초율.xlsx'),
-            output_path=out,
-            include_sensitivity=sensitivity,
-            include_longterm=longterm,
-            allow_errors=force,
-            prior=PriorPeriod(dbo=prior_dbo, discount_rate=prior_rate),
-        ))
-    except PensionDataError as exc:
-        errors = [str(i) for i in exc.issues if i.severity is Severity.ERROR]
-        return json.dumps({'ok': False, 'errors': errors[:40], 'more': max(0, len(errors) - 40)})
-    except Exception as exc:
-        # 엉뚱한 파일을 넣은 경우가 대부분이다. 트레이스백 대신 원인만 보여 준다.
-        return json.dumps({'ok': False, 'errors': [f'{type(exc).__name__}: {exc}'], 'more': 0})
-
-    write_report(run, out)
-    write_member_export(run, Path('/work/개인별결과.xlsx'))
-
-    v = run.valuation
-    if run.assumptions.discount.flat is None:
-        rate = f'{v.single_discount_rate():.3%} (수익률곡선기법 단일할인율)'
-    else:
-        rate = f'{run.assumptions.discount.level_rate:.3%}'
-    summary = [
-        ('산출기준일', str(run.config.base_date)),
-        ('적용 할인율', rate),
-        ('산출대상 인원', f'{v.headcount:,}명'),
-        ('확정급여채무 (DBO)', f'{v.dbo:,.0f} 원'),
-        ('당기근무원가', f'{v.service_cost:,.0f} 원'),
-        ('이자원가 (차기)', f'{v.interest_cost:,.0f} 원'),
-        ('듀레이션', f'{v.duration:.1f} 년'),
-    ]
-    if run.longterm is not None:
-        summary.append(('장기급여채무', f'{run.longterm.dbo:,.0f} 원'))
-    if run.rollforward is not None:
-        summary.append(('보험수리적손익', f'{run.rollforward.actuarial_gain_loss:,.0f} 원'))
-
-    groups = [
-        (name, f'{count:,}', f'{dbo:,.0f}', f'{sc:,.0f}')
-        for name, (count, dbo, sc) in v.by_job_group().items()
-    ]
-    excluded = [f'{count:,}명 — {reason}' for reason, count in v.exclusion_summary().items()]
-    issues = (f'오류 {len(run.issues.errors)}건 / 경고 {len(run.issues.warnings)}건 — '
-              '상세는 결과 파일의 검증리포트 시트')
-    return json.dumps({'ok': True, 'summary': summary, 'groups': groups,
-                       'issues': issues, 'excluded': excluded})
-`;
-
-let pyodide = null;
-
-async function boot() {
-  try {
-    status("엔진을 준비하는 중… (1/3 런타임)");
-    pyodide = await loadPyodide({ indexURL: new URL("pyodide/", location.href).href });
-
-    status("엔진을 준비하는 중… (2/3 계산 모듈)");
-    pyodide.FS.mkdirTree("/wheels");
-    pyodide.FS.mkdirTree("/work");
-    for (const wheel of WHEELS) {
-      const payload = await (await fetch("wheels/" + wheel)).arrayBuffer();
-      pyodide.FS.writeFile("/wheels/" + wheel, new Uint8Array(payload));
-    }
-    // 순수 파이썬 휠은 압축을 풀어 놓기만 하면 된다. micropip 없이도 확정적이다.
-    await pyodide.runPythonAsync(`
-import sys, zipfile
-from pathlib import Path
-site = next(p for p in sys.path if 'site-packages' in p)
-for wheel in Path('/wheels').glob('*.whl'):
-    zipfile.ZipFile(wheel).extractall(site)
-import pension
-`);
-    status("엔진을 준비하는 중… (3/3 실행기)");
-    await pyodide.runPythonAsync(DRIVER);
-    status("준비 완료. 명부와 기초율 파일을 골라 [산출 실행]을 누르세요.");
-    $("run").disabled = false;
-  } catch (error) {
-    status("엔진을 준비하지 못했습니다: " + error);
-  }
-}
-boot();
-
-function parseNumber(raw) {
-  const token = raw.replaceAll(",", "").trim();
-  return token ? parseFloat(token) : 0;
-}
-function parseRate(raw) {
-  const token = raw.replaceAll(",", "").trim();
-  if (!token) return 0;
-  const value = parseFloat(token.replace("%", ""));
-  return token.includes("%") || value > 1 ? value / 100 : value;
-}
-async function intoFS(input, name) {
-  const file = input.files[0];
-  pyodide.FS.writeFile("/work/" + name, new Uint8Array(await file.arrayBuffer()));
-  return name;
-}
-function download(path, filename) {
-  const payload = pyodide.FS.readFile(path);
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([payload], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 30000);
-}
-function fillTable(table, rows, numericFrom) {
-  table.innerHTML = "";
-  for (const row of rows) {
-    const tr = document.createElement("tr");
-    row.forEach((value, index) => {
-      const cell = document.createElement(index === 0 ? "th" : "td");
-      if (index >= numericFrom) cell.className = "num";
-      cell.textContent = value;
-      tr.appendChild(cell);
-    });
-    table.appendChild(tr);
-  }
-}
-
-$("form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  $("errors").innerHTML = "";
-  $("result").style.display = "none";
-  $("run").disabled = true;
-  try {
-    status("산출하는 중…");
-    const suffix = $("roster").files[0].name.toLowerCase().match(/\.(xls[xm]?)$/);
-    const rosterName = "명부." + (suffix ? suffix[1] : "xlsx");
-    await intoFS($("roster"), rosterName);
-    await intoFS($("assumptions"), "기초율.xlsx");
-
-    const run = pyodide.globals.get("산출");
-    const raw = run(rosterName, $("force").checked, $("sensitivity").checked,
-                    $("longterm").checked,
-                    parseNumber($("prior_dbo").value), parseRate($("prior_rate").value));
-    run.destroy();
-    const report = JSON.parse(raw);
-
-    if (!report.ok) {
-      status(report.errors.length === 1 && !report.errors[0].startsWith("[ERROR]")
-        ? "산출하지 못했습니다. 파일을 확인해 주세요."
-        : "명부 검증 오류로 산출을 중단했습니다.");
-      for (const message of report.errors) {
-        const box = document.createElement("div");
-        box.className = "error";
-        box.textContent = message;
-        $("errors").appendChild(box);
-      }
-      if (report.more) {
-        const box = document.createElement("p");
-        box.className = "notice";
-        box.textContent = `… 외 ${report.more}건`;
-        $("errors").appendChild(box);
-      }
-      return;
-    }
-
-    fillTable($("summary"), report.summary, 1);
-    fillTable($("groups"), [["직군", "인원", "확정급여채무", "당기근무원가"], ...report.groups], 1);
-    $("issues").textContent = report.issues +
-      (report.excluded.length ? "\n산출 제외: " + report.excluded.join(" · ") : "");
-    $("result").style.display = "block";
-    status("산출을 마쳤습니다.");
-    $("result").scrollIntoView({ behavior: "smooth" });
-  } catch (error) {
-    status("산출하지 못했습니다: " + error);
-  } finally {
-    $("run").disabled = false;
-  }
-});
-
-$("dl-result").addEventListener("click", () => download("/work/산출결과.xlsx", "산출결과.xlsx"));
-$("dl-members").addEventListener("click", () => download("/work/개인별결과.xlsx", "개인별결과.xlsx"));
-</script>
+<script src="app.js"></script>
 </body>
 </html>

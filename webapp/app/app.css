@@ -1,0 +1,103 @@
+/* 연금계리 산출 웹앱 — 아이패드 Safari 기준.
+   터치 표적은 44px 안팎, 넓은 표는 가로 스크롤 컨테이너 안에서만 움직인다. */
+:root { color-scheme: light dark;
+  --navy: #1F3864; --navy-soft: #44546A; --line: #C4CBD8; --hint: #5B6478;
+  --bg-soft: #EEF3F8; }
+@media (prefers-color-scheme: dark) {
+  :root { --navy: #9DB6E0; --navy-soft: #8494B0; --line: #4A5568;
+          --hint: #98A2B8; --bg-soft: #263041; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+       max-width: 980px; margin: 0 auto; padding: 20px 14px 64px; line-height: 1.55; }
+h1 { font-size: 1.45rem; color: var(--navy); margin: 0 0 2px; }
+h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display: block; }
+
+/* ── 큰 탭 ── */
+nav.tabs { display: flex; gap: 6px; margin: 14px 0 18px; }
+nav.tabs button { flex: 1; padding: 13px 6px; font-size: 1.02rem; font-weight: bold;
+  border: 1px solid var(--line); border-radius: 10px; background: transparent;
+  color: inherit; }
+nav.tabs button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+section.page { display: none; }
+section.page.on { display: block; }
+
+fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 0 0 16px;
+           padding: 14px 16px; min-width: 0; }
+legend { font-weight: bold; color: var(--navy); padding: 0 6px; }
+label { display: block; margin: 10px 0 4px; font-weight: 600; }
+input[type=file] { width: 100%; padding: 12px; border: 1px dashed #8894AB;
+                   border-radius: 8px; font-size: 0.98rem; }
+input[type=text] { padding: 10px 12px; border: 1px solid var(--line);
+                   border-radius: 8px; font-size: 1rem; background: transparent;
+                   color: inherit; }
+select { padding: 10px 8px; border: 1px solid var(--line); border-radius: 8px;
+         font-size: 0.98rem; background: transparent; color: inherit; }
+.hint { color: var(--hint); font-size: 0.85rem; margin-top: 2px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row > input[type=text] { flex: 1; min-width: 160px; }
+.check { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-weight: 600; }
+.check input { width: 22px; height: 22px; }
+
+button.big { display: block; width: 100%; padding: 16px; margin-top: 14px;
+  background: var(--navy); color: #fff; border: 0; border-radius: 10px;
+  font-size: 1.12rem; font-weight: bold; }
+@media (prefers-color-scheme: dark) { button.big { color: #10141c; } }
+button.big:disabled { background: #A9B2C4; }
+button.big.secondary { background: var(--navy-soft); }
+button.small { padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: inherit; font-size: 0.94rem; font-weight: 600; }
+button.small.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
+@media (prefers-color-scheme: dark) { button.small.primary { color: #10141c; } }
+
+#status { background: var(--bg-soft); border-radius: 8px; padding: 10px 14px;
+          margin: 10px 0; font-size: 0.92rem; white-space: pre-line; }
+.error { background: #FCE4E4; color: #5c1a1a; border-radius: 8px; padding: 10px 14px;
+         margin: 6px 0; font-size: 0.9rem; white-space: pre-line; }
+.warn-box { background: #FFF6E0; color: #5c4a1a; border-radius: 8px; padding: 10px 14px;
+            margin: 6px 0; font-size: 0.9rem; }
+.notice { color: var(--hint); font-size: 0.88rem; }
+.ok-text { color: #15803D; font-size: 0.88rem; }
+.bad-text { color: #B91C1C; font-size: 0.88rem; }
+
+/* ── 결과·데이터 표 ── */
+table.data { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.data td, .data th { border: 1px solid var(--line); padding: 9px 12px;
+                     text-align: left; font-size: 0.94rem; }
+.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── 가정 편집기 ── */
+nav.subtabs { display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px; margin: 12px 0 0; }
+nav.subtabs button { padding: 10px 13px; white-space: nowrap; font-size: 0.94rem;
+  font-weight: 600; border: 1px solid var(--line); border-radius: 8px 8px 0 0;
+  border-bottom: none; background: transparent; color: inherit; }
+nav.subtabs button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+@media (prefers-color-scheme: dark) { nav.subtabs button.on { color: #10141c; } }
+.subpage { display: none; border: 1px solid var(--line); border-radius: 0 10px 10px 10px;
+           padding: 12px; }
+.subpage.on { display: block; }
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+table.grid { border-collapse: collapse; margin: 10px 0; }
+.grid th { border: 1px solid var(--line); padding: 7px 9px; font-size: 0.88rem;
+           background: var(--bg-soft); white-space: nowrap; }
+.grid td { border: 1px solid var(--line); padding: 0; }
+.grid input[type=text] { width: 108px; border: 0; border-radius: 0; padding: 10px 8px;
+                         text-align: right; font-size: 0.95rem; }
+.grid select { border: 0; border-radius: 0; }
+.grid input[type=checkbox] { width: 20px; height: 20px; margin: 10px; }
+.grid td.name { padding: 8px 10px; font-weight: 600; white-space: nowrap; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.toolbar .spacer { flex: 1; }
+.lib-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.lib-line select { min-width: 150px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem;
+         background: var(--navy); color: #fff; }
+@media (prefers-color-scheme: dark) { .badge { color: #10141c; } }
+
+#formula-preview table { margin-top: 8px; }
+dialog { border: 1px solid var(--line); border-radius: 12px; max-width: 90vw;
+         max-height: 80vh; overflow: auto; }
+dialog::backdrop { background: rgba(0,0,0,0.35); }

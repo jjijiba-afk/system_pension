@@ -24,7 +24,7 @@ pytestmark = [
 ]
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def app_url():
     handler = functools.partial(
         http.server.SimpleHTTPRequestHandler, directory=str(DIST)
@@ -36,7 +36,19 @@ def app_url():
     server.server_close()
 
 
-def test_engine_runs_in_the_browser(app_url, tmp_path) -> None:
+@pytest.fixture(scope="module")
+def page(app_url):
+    """엔진 부팅이 오래 걸리므로 한 번 띄운 페이지를 모듈 전체가 나눠 쓴다."""
+    with playwright_api.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=str(CHROMIUM))
+        page = browser.new_page()
+        page.goto(app_url)
+        page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+        yield page
+        browser.close()
+
+
+def test_upload_run_download(page, tmp_path) -> None:
     """업로드 → 브라우저 안 산출 → 진짜 엑셀 내려받기까지."""
     from pension.samples import write_sample_pack
 
@@ -44,22 +56,82 @@ def test_engine_runs_in_the_browser(app_url, tmp_path) -> None:
     roster = next(p for p in files if p.name == "명부_양식.xlsx")
     assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
 
-    with playwright_api.sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=str(CHROMIUM))
-        page = browser.new_page()
-        page.goto(app_url)
-        page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
 
-        page.set_input_files("#roster", str(roster))
-        page.set_input_files("#assumptions", str(assumptions))
-        page.click("#run")
-        page.wait_for_selector("#result", state="visible", timeout=180_000)
+    summary = page.inner_text("#summary")
+    assert "확정급여채무" in summary
 
-        summary = page.inner_text("#summary")
-        assert "확정급여채무" in summary
+    with page.expect_download() as captured:
+        page.click("#dl-result")
+    payload = Path(captured.value.path()).read_bytes()
+    assert payload[:2] == b"PK"
 
-        with page.expect_download() as captured:
-            page.click("#dl-result")
-        payload = Path(captured.value.path()).read_bytes()
-        assert payload[:2] == b"PK"
-        browser.close()
+
+def test_editor_tab_builds_assumptions_and_runs(page, tmp_path) -> None:
+    """산출가정 입력 탭에서 만든 가정만으로 산출까지 이어져야 한다."""
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    page.set_input_files("#roster", str(roster))
+
+    page.click("#tab-edit")
+    page.click("#ed-example")  # 예시 값 채우기 → 할인율이 생겨 편집기 소스가 열린다
+
+    # 저장하면 산출가정.xlsx 가 내려오고, 산출 탭의 소스가 편집기로 바뀐다.
+    with page.expect_download() as captured:
+        page.click("#ed-save")
+    assert Path(captured.value.path()).read_bytes()[:2] == b"PK"
+
+    page.click("#tab-calc")
+    assert page.is_checked("#asrc-editor")
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    assert "확정급여채무" in page.inner_text("#summary")
+
+
+def test_library_registers_curve_into_editor(page, tmp_path) -> None:
+    """기본가정 관리에 금리표를 등록하면 편집기 할인율에 적용할 수 있어야 한다."""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "KIS_NET금리"
+    ws.append(["No", "기준일자", "구분", "등급", "3월", "1년", "5년", "20년"])
+    ws.append([1, None, "공모 무보증회사채", "AA0", 3.01, 3.122, 3.62, 5.26])
+    source = tmp_path / "금리.xlsx"
+    wb.save(source)
+
+    page.click("#tab-lib")
+    page.set_input_files("#lib-curve-file", str(source))
+    page.fill("#lib-curve-name", "KIS_E2E")
+    page.click("#lib-curve-add")
+    page.wait_for_selector("#lib-curve-list table", timeout=30_000)
+    assert "KIS_E2E" in page.inner_text("#lib-curve-list")
+
+    page.click("#tab-edit")
+    page.select_option("#ed-curve", "KIS_E2E")
+    page.select_option("#ed-grade", "AA0")
+    page.click("#ed-curve-apply")
+    assert "할인율에 넣었습니다" in page.inner_text("#ed-status")
+
+    # 3월 만기(0.25년)가 살아 있어야 한다 — 내림하면 안 되는 값.
+    page.click("#ed-subtabs >> text=할인율")
+    first_key = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input").first
+    assert first_key.input_value() == "0.25"
+
+
+def test_standard_rates_fill_the_grids(page) -> None:
+    """내장 표준률 불러오기 — 15~70세 표가 채워져야 한다."""
+    page.click("#tab-edit")
+    page.select_option("#ed-rates", "__builtin__")
+    page.click("#ed-rates-load")
+    assert "불러왔습니다" in page.inner_text("#ed-status")
+
+    page.click("#ed-subtabs >> text=사망률")
+    first_age = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input").first
+    assert first_age.input_value() == "15"

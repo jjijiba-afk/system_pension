@@ -166,7 +166,7 @@ def build() -> Path:
     wheels = _build_wheels(DIST / "wheels")
     print(f"  휠 {len(wheels)}개: {', '.join(wheels)}")
 
-    for name in ("index.html", "manifest.webmanifest"):
+    for name in ("index.html", "app.css", "app.js", "manifest.webmanifest"):
         shutil.copy2(APP / name, DIST / name)
     (DIST / "icon-180.png").write_bytes(_png(180))
     (DIST / "icon-512.png").write_bytes(_png(512))
