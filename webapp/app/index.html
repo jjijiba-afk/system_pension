@@ -7,8 +7,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#1F3864">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="color-scheme" content="light">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -87,6 +88,28 @@
   <input type="text" id="prior_dbo" inputmode="numeric" placeholder="예: 10,000,000,000" style="width:100%">
   <label>전기말 할인율</label>
   <input type="text" id="prior_rate" inputmode="decimal" placeholder="예: 4.1%" style="width:100%">
+  <label>과거근무원가 (제도개정 · 원)</label>
+  <input type="text" id="past_service_cost" inputmode="numeric" placeholder="비우면 지급률 변경분을 자동 계산" style="width:100%">
+  <div class="hint">전기 기초율을 연결하면 <b>지급률 규정이 바뀐 만큼</b>을 자동으로
+  과거근무원가로 떼어 냅니다(당기손익). 정년 연장처럼 지급률 밖의 개정은 여기에
+  직접 넣으세요 — 넣으면 자동 계산 대신 이 값을 씁니다.</div>
+  <label>정산으로 소멸한 채무 (원)</label>
+  <input type="text" id="settlement_obligation" inputmode="numeric" placeholder="중간정산·전출자의 전기 채무 합계" style="width:100%">
+  <div class="hint">지급액과의 차이를 정산손익으로 인식합니다(당기손익).
+  비우면 인식하지 않습니다.</div>
+</fieldset>
+<fieldset><legend>6. 사외적립자산 (신탁 명세서 · 없으면 비워 두세요)</legend>
+  <label>기초 공정가치 (원)</label>
+  <input type="text" id="asset_opening" inputmode="numeric" placeholder="전기말 잔액" style="width:100%">
+  <label>부담금 납입액 (원)</label>
+  <input type="text" id="asset_contributions" inputmode="numeric" placeholder="당기 중 회사가 넣은 돈" style="width:100%">
+  <label>자산에서 지급한 퇴직급여 (원)</label>
+  <input type="text" id="asset_paid" inputmode="numeric" placeholder="비우면 명부의 사외자산 지급액 사용" style="width:100%">
+  <label>기말 공정가치 (원)</label>
+  <input type="text" id="asset_closing" inputmode="numeric" placeholder="결산일 잔액" style="width:100%">
+  <div class="hint">이자수익은 <b>채무와 같은 할인율</b>로 계산하고(문단 125),
+  기말 잔액에 맞춘 나머지를 자산 재측정손익(기타포괄손익)으로 잡습니다.
+  순확정급여부채 = 확정급여채무 − 사외적립자산.</div>
 </fieldset>
 <button type="submit" class="big" id="run" disabled>산출 실행</button>
 </form>
@@ -98,6 +121,14 @@
   <table class="data" id="summary"></table>
   <h1 style="font-size:1.05rem">직군별</h1>
   <table class="data" id="groups"></table>
+  <div id="roll-wrap" style="display:none">
+    <h1 style="font-size:1.05rem">증감분석</h1>
+    <table class="data" id="rollforward"></table>
+  </div>
+  <div id="assets-wrap" style="display:none">
+    <h1 style="font-size:1.05rem">사외적립자산 · 순확정급여부채</h1>
+    <table class="data" id="assets"></table>
+  </div>
   <div class="warn-box" id="issues"></div>
   <button class="big" id="dl-result">결과 엑셀 내려받기</button>
   <button class="big secondary" id="dl-members">개인별 결과 내려받기</button>
@@ -256,12 +287,15 @@
 
 <fieldset><legend>만들기</legend>
   <div class="lib-line">
+    <span style="font-weight:600">명부 기준일</span>
+    <input type="date" id="gen-base-date">
     <span style="font-weight:600">난수 씨앗</span>
     <input type="text" id="gen-seed" inputmode="numeric" value="20251231" style="width:130px">
     <button class="small primary" type="button" id="gen-run">시험 명부 만들기</button>
     <button class="small" type="button" id="gen-download" disabled>zip 내려받기</button>
   </div>
-  <div class="hint">씨앗이 같으면 언제 만들어도 같은 명부가 나옵니다 — 산출 결과를
+  <div class="hint">기준일을 비우면 2025-12-31 로 만듭니다. 연령·근속·퇴사일이
+  모두 이 날짜를 기준으로 맞춰집니다.<br>씨앗이 같으면 언제 만들어도 같은 명부가 나옵니다 — 산출 결과를
   비교하려면 명부가 매번 바뀌면 안 되기 때문입니다. 다른 명부를 보고 싶으면
   숫자를 바꾸세요.</div>
 </fieldset>

@@ -152,6 +152,19 @@ class ActiveMember:
         가산·차감 연수를 반영하고, 회사 규정의 산정방법(일할/월할/연할)과 단수
         처리를 적용한다.
         """
+        return self._service_years(base_date, self.service_fraction)
+
+    def raw_service_years(self, base_date: _dt.date) -> float:
+        """단수 처리를 하지 **않은** 근속연수.
+
+        미래 시점의 근속을 만들 때 쓴다. 이미 절사한 값에 연수를 더하면 단수
+        처리가 한 번만 적용되어, 이후 모든 시점의 근속이 어긋난다.
+        """
+        from .actuarial import FRACTION_KEEP
+
+        return self._service_years(base_date, FRACTION_KEEP)
+
+    def _service_years(self, base_date: _dt.date, fraction: str) -> float:
         from .actuarial import service_years as _service_years
 
         start = self.settlement_date or self.hire_date
@@ -162,7 +175,7 @@ class ActiveMember:
             added=self.added_service_years,
             deducted=self.deducted_service_years,
             basis=self.service_basis,
-            fraction=self.service_fraction,
+            fraction=fraction,
         )
 
 

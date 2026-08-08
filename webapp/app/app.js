@@ -1003,6 +1003,12 @@ $("form").addEventListener("submit", async (event) => {
       base_date: $("base_date").value, period_start: $("period_start").value,
       prior_dbo: $("prior_dbo").value, prior_rate: $("prior_rate").value,
       prior_run: $("prior-run").value,
+      past_service_cost: $("past_service_cost").value,
+      settlement_obligation: $("settlement_obligation").value,
+      asset_opening: $("asset_opening").value,
+      asset_contributions: $("asset_contributions").value,
+      asset_paid: $("asset_paid").value,
+      asset_closing: $("asset_closing").value,
     };
     if (options.base_date && options.period_start
         && options.period_start >= options.base_date) {
@@ -1017,6 +1023,12 @@ $("form").addEventListener("submit", async (event) => {
       prior_rate: parseRate(options.prior_rate),
       prior_service_cost: priorLink ? priorLink.values.service_cost : 0,
       prior_assumptions: priorLink ? priorLink.assumptions : "",
+      past_service_cost: parseNumber(options.past_service_cost),
+      settlement_obligation: parseNumber(options.settlement_obligation),
+      asset_opening: parseNumber(options.asset_opening),
+      asset_contributions: parseNumber(options.asset_contributions),
+      asset_paid: parseNumber(options.asset_paid),
+      asset_closing: parseNumber(options.asset_closing),
     });
 
     if (!report.run) {
@@ -1033,6 +1045,20 @@ $("form").addEventListener("submit", async (event) => {
     fillTable($("summary"), report.summary, 1);
     fillTable($("groups"),
       [["직군", "인원", "확정급여채무", "당기근무원가"], ...report.groups], 1);
+    if (report.rollforward && report.rollforward.length) {
+      $("roll-wrap").style.display = "block";
+      fillTable($("rollforward"),
+        report.rollforward.map(([k, v]) => [k, Math.round(v).toLocaleString("en-US")]), 1);
+    } else {
+      $("roll-wrap").style.display = "none";
+    }
+    if (report.assets && report.assets.length) {
+      $("assets-wrap").style.display = "block";
+      fillTable($("assets"),
+        report.assets.map(([k, v]) => [k, Math.round(v).toLocaleString("en-US")]), 1);
+    } else {
+      $("assets-wrap").style.display = "none";
+    }
     $("issues").textContent = report.issues +
       (report.excluded.length ? "\n산출 제외: " + report.excluded.join(" · ") : "");
 
@@ -1163,6 +1189,11 @@ function restoreRun(name) {
     $("period_start").value = options.period_start || "";
     $("prior_dbo").value = options.prior_dbo || "";
     $("prior_rate").value = options.prior_rate || "";
+    for (const key of ["past_service_cost", "settlement_obligation",
+                       "asset_opening", "asset_contributions",
+                       "asset_paid", "asset_closing"]) {
+      $(key).value = options[key] || "";
+    }
     $("run-name").value = name;
 
     $("asrc-saved").disabled = false;
@@ -1287,10 +1318,13 @@ $("gen-run").addEventListener("click", () => {
   try {
     status("시험 명부를 만드는 중… (몇 초 걸립니다)");
     const seed = parseInt($("gen-seed").value, 10) || 20251231;
-    generated = py("gen_cases", { work: "/work", seed });
+    generated = py("gen_cases", {
+      work: "/work", seed, base_date: $("gen-base-date").value,
+    });
     renderGenerated();
     $("gen-download").disabled = false;
-    status(`시험 명부 ${generated.cases.length}종을 만들었습니다.`);
+    status(`시험 명부 ${generated.cases.length}종을 만들었습니다.` +
+           (generated.base_date ? ` (기준일 ${generated.base_date})` : ""));
   } catch (error) {
     status("만들지 못했습니다: " + (error.message || error));
     alert(error.message || error);

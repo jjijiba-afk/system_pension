@@ -35,6 +35,7 @@ from typing import Any, Final
 __all__ = ["CASES", "CaseSpec", "write_case_roster", "write_case_rosters"]
 
 BASE_DATE: Final = _dt.date(2025, 12, 31)
+"""기본 산출기준일. 생성 함수에 ``base_date`` 를 주면 그 날짜로 만든다."""
 
 _SURNAMES: Final = (
     "김", "이", "박", "최", "정", "강", "조", "윤", "장", "임",
@@ -105,7 +106,7 @@ CASES: Final[tuple[CaseSpec, ...]] = (
             "· 전입자·가산근속·개별 지급배수가 섞여 있습니다.",
         ),
         flags={
-            "dc_share": 0.14, "settlement_share": 0.10, "wage_peak_share": 0.08,
+            "dc_share": 0.14, "settlement_share": 0.10, "wage_peak_share": 0.35,
             "over_nra_share": 0.05, "transfer_in_share": 0.05,
             "multiple_share": 0.05,
             "added_service_share": 0.06, "longterm_share": 0.55,
@@ -152,21 +153,21 @@ def _is_executive(group: str) -> bool:
     return any(token in group for token in ("임원", "등기"))
 
 
-def _birth_for_age(rng: random.Random, age: int) -> _dt.date:
+def _birth_for_age(rng: random.Random, age: int, base: _dt.date) -> _dt.date:
     """만 나이가 ``age`` 가 되도록 생년월일을 흩뿌린다."""
-    year = BASE_DATE.year - age
+    year = base.year - age
     month = rng.randint(1, 12)
     day = rng.randint(1, 28)
     born = _dt.date(year, month, day)
     # 생일이 아직 안 지났으면 만 나이가 하나 적어지므로 한 해 당긴다.
-    if (born.month, born.day) > (BASE_DATE.month, BASE_DATE.day):
+    if (born.month, born.day) > (base.month, base.day):
         born = born.replace(year=year - 1)
     return born
 
 
-def _hire_date(rng: random.Random, birth: _dt.date, service_years: float) -> _dt.date:
+def _hire_date(birth: _dt.date, service_years: float, base: _dt.date) -> _dt.date:
     days = int(service_years * 365.25)
-    hired = BASE_DATE - _dt.timedelta(days=days)
+    hired = base - _dt.timedelta(days=days)
     earliest = birth + _dt.timedelta(days=int(19 * 365.25))
     return max(hired, earliest)
 
@@ -191,7 +192,9 @@ class _Person:
         return self.values.get(key)
 
 
-def _make_active(rng: random.Random, spec: CaseSpec, index: int) -> dict[str, Any]:
+def _make_active(
+    rng: random.Random, spec: CaseSpec, index: int, base: _dt.date
+) -> dict[str, Any]:
     group = _pick_group(rng, spec)
     executive = _is_executive(group)
     flags = spec.flags
@@ -208,9 +211,9 @@ def _make_active(rng: random.Random, spec: CaseSpec, index: int) -> dict[str, An
         age = rng.randint(61, 65)
         service = min(age - 25, max(1.0, rng.gauss(24, 6)))
 
-    birth = _birth_for_age(rng, age)
-    hire = _hire_date(rng, birth, max(0.3, service))
-    service = (BASE_DATE - hire).days / 365.25
+    birth = _birth_for_age(rng, age, base)
+    hire = _hire_date(birth, max(0.3, service), base)
+    service = (base - hire).days / 365.25
     wage = _wage(rng, age, service, executive)
 
     plan = "DB"
@@ -237,16 +240,18 @@ def _make_active(rng: random.Random, spec: CaseSpec, index: int) -> dict[str, An
     # ── 사례별 특수 항목 ────────────────────────────────────────
     if rng.random() < flags.get("settlement_share", 0):
         # 중간정산 — 정산일 이후로 근속을 다시 센다.
-        span = max(1, int((BASE_DATE - hire).days * 0.6))
+        span = max(1, int((base - hire).days * 0.6))
         settled = hire + _dt.timedelta(days=rng.randint(1, span))
         row["settlement_date"] = settled.isoformat()
         row["settlement_amount"] = int(wage * (settled - hire).days / 365.25 / 1_000) * 1_000
 
-    if not executive and age >= 55 and rng.random() < flags.get("wage_peak_share", 0):
+    # 임금피크는 진입 직전 연령대에 붙인다. 이미 56세를 넘긴 사람에게 주면
+    # 정년이 현재 연령보다 낮아져 값이 무시된다.
+    if not executive and 50 <= age <= 55 and rng.random() < flags.get("wage_peak_share", 0):
         row["wage_peak_age"] = rng.choice((56, 57, 58))
 
     if rng.random() < flags.get("transfer_in_share", 0):
-        moved = BASE_DATE - _dt.timedelta(days=rng.randint(200, 2_600))
+        moved = base - _dt.timedelta(days=rng.randint(200, 2_600))
         if moved > hire:
             row["transfer_in_date"] = moved.isoformat()
             row["transfer_in_amount"] = int(wage * rng.uniform(1.5, 6.0) / 1_000) * 1_000
@@ -263,18 +268,60 @@ def _make_active(rng: random.Random, spec: CaseSpec, index: int) -> dict[str, An
     return row
 
 
-def _make_retired(rng: random.Random, spec: CaseSpec, index: int) -> dict[str, Any]:
+def _ensure_special_cases(
+    rng: random.Random, spec: CaseSpec, rows: list[dict[str, Any]], base: _dt.date
+) -> None:
+    """사례가 내세운 특이사항이 하나도 안 걸렸으면 억지로라도 넣는다.
+
+    확률로만 뿌리면 씨앗이나 기준일에 따라 '임금피크 대상 0명' 인 명부가 나온다.
+    그런데 이 사례는 안내문에 임금피크가 있다고 적어 두므로, 없으면 안내문이
+    거짓말이 된다. 시험 자료는 무엇이 들어 있는지가 곧 쓸모다.
+    """
+    if not spec.flags:
+        return
+
+    def eligible(key: str, pick):
+        return [row for row in rows if not row.get(key) and pick(row)]
+
+    def age_of(row) -> int:
+        return base.year - int(str(row["birth_date"])[:4])
+
+    wanted = [
+        ("wage_peak_age", lambda r: r["employee_type"] == _TYPE_STAFF
+                                    and 50 <= age_of(r) <= 55,
+         lambda r: rng.choice((56, 57, 58)), "wage_peak_share"),
+        ("transfer_in_date", lambda r: True,
+         lambda r: (base - _dt.timedelta(days=rng.randint(200, 2_600))).isoformat(),
+         "transfer_in_share"),
+        ("payout_multiple", lambda r: True,
+         lambda r: rng.choice((1.5, 2.0, 2.5)), "multiple_share"),
+        ("added_service_years", lambda r: True,
+         lambda r: rng.choice((0.5, 1, 2)), "added_service_share"),
+    ]
+    for key, pick, make, share in wanted:
+        if not spec.flags.get(share):
+            continue
+        if any(row.get(key) for row in rows):
+            continue
+        pool = eligible(key, pick)
+        for row in rng.sample(pool, min(3, len(pool))):
+            row[key] = make(row)
+
+
+def _make_retired(
+    rng: random.Random, spec: CaseSpec, index: int, base: _dt.date
+) -> dict[str, Any]:
     group = _pick_group(rng, spec)
     executive = _is_executive(group)
     flags = spec.flags
 
     age = rng.randint(50, 63) if executive else int(min(64, max(24, rng.gauss(42, 11))))
-    birth = _birth_for_age(rng, age)
+    birth = _birth_for_age(rng, age, base)
 
     # 퇴직자명부는 당기에 나간 사람을 담는다. 퇴사일을 먼저 잡고 거기서
     # 근속을 거슬러 입사일을 만든다 — 반대로 하면 퇴사일이 산출기준일을
     # 넘어가는 사람이 생긴다.
-    exit_date = BASE_DATE - _dt.timedelta(days=rng.randint(0, 364))
+    exit_date = base - _dt.timedelta(days=rng.randint(0, 364))
     service = min(age - 20, max(0.3, rng.gauss(9, 7)))
     hire = exit_date - _dt.timedelta(days=int(service * 365.25))
     hire = max(hire, birth + _dt.timedelta(days=int(19 * 365.25)))
@@ -346,7 +393,9 @@ def _dirty_date(rng: random.Random, value: str) -> Any:
     return f"{year}년 {int(month)}월 {int(day)}일"
 
 
-def _spoil_active(rng: random.Random, rows: list[dict[str, Any]]) -> None:
+def _spoil_active(
+    rng: random.Random, rows: list[dict[str, Any]], base: _dt.date
+) -> None:
     total = len(rows)
 
     def sample(share: float) -> list[dict[str, Any]]:
@@ -381,7 +430,7 @@ def _spoil_active(rng: random.Random, rows: list[dict[str, Any]]) -> None:
 
     # 입사일이 산출기준일보다 늦은 사람(다음 해 입사 예정자가 섞여 옴)
     for row in rng.sample(rows, 2):
-        row["hire_date"] = (BASE_DATE + _dt.timedelta(days=rng.randint(5, 60))).isoformat()
+        row["hire_date"] = (base + _dt.timedelta(days=rng.randint(5, 60))).isoformat()
 
 
 def _spoil_retired(rng: random.Random, rows: list[dict[str, Any]]) -> None:
@@ -412,7 +461,8 @@ def _spoil_retired(rng: random.Random, rows: list[dict[str, Any]]) -> None:
 # ── 파일 쓰기 ────────────────────────────────────────────────────
 
 def _case_report(
-    spec: CaseSpec, actives: list[dict[str, Any]], retirees: list[dict[str, Any]]
+    spec: CaseSpec, actives: list[dict[str, Any]], retirees: list[dict[str, Any]],
+    base: _dt.date,
 ) -> str:
     """이 명부에 무엇이 들어 있는지 적은 안내문.
 
@@ -429,7 +479,7 @@ def _case_report(
         "",
         spec.summary,
         "",
-        f"산출기준일   {BASE_DATE}",
+        f"산출기준일   {base}",
         f"재직자       {len(actives):,}명",
         f"퇴직자       {len(retirees):,}명",
         f"평균임금 체크금액  {spec.wage_check:,}원",
@@ -466,7 +516,7 @@ def _case_report(
         ("정년(60세) 초과 재고용 추정",
          sum(1 for row in actives
              if str(row.get("birth_date", ""))[:4].isdigit()
-             and BASE_DATE.year - int(str(row["birth_date"])[:4]) > 60)),
+             and base.year - int(str(row["birth_date"])[:4]) > 60)),
     ]
     for label, number in special:
         if number:
@@ -519,10 +569,13 @@ def _case_report(
 def write_case_roster(
     spec: CaseSpec, path: str | Path, *, seed: int = 20251231,
     report_path: str | Path | None = None,
+    base_date: _dt.date | None = None,
 ) -> Path:
     """사례 하나를 명부 통합문서로 쓴다.
 
     :param report_path: 주면 그 자리에 특이사항 안내문(.txt)도 쓴다.
+    :param base_date: 명부의 산출기준일. 생략하면 :data:`BASE_DATE`.
+        연령·근속·퇴사일이 모두 이 날짜를 기준으로 만들어진다.
     """
     import openpyxl
 
@@ -537,11 +590,13 @@ def write_case_roster(
     )
     from .samples import _style
 
-    rng = random.Random(f"{seed}:{spec.key}")
-    actives = [_make_active(rng, spec, i + 1) for i in range(spec.active)]
-    retirees = [_make_retired(rng, spec, i + 1) for i in range(spec.retired)]
+    base = base_date or BASE_DATE
+    rng = random.Random(f"{seed}:{spec.key}:{base}")
+    actives = [_make_active(rng, spec, i + 1, base) for i in range(spec.active)]
+    retirees = [_make_retired(rng, spec, i + 1, base) for i in range(spec.retired)]
+    _ensure_special_cases(rng, spec, actives, base)
     if spec.flags.get("dirty"):
-        _spoil_active(rng, actives)
+        _spoil_active(rng, actives, base)
         _spoil_retired(rng, retirees)
 
     path = Path(path)
@@ -579,7 +634,7 @@ def write_case_roster(
     ws.cell(1, 2, f"시험용 명부 — {spec.key}").font = st["title_font"]
     ws.cell(2, 2, spec.summary).font = st["note_font"]
     ws.cell(3, 2, "산출기준일")
-    ws.cell(3, 3, BASE_DATE.isoformat())
+    ws.cell(3, 3, base.isoformat())
     ws.cell(5, 2, "평균임금 체크금액")
     ws.cell(5, 3, spec.wage_check)
 
@@ -620,7 +675,7 @@ def write_case_roster(
 
     if report_path is not None:
         Path(report_path).write_text(
-            _case_report(spec, actives, retirees), encoding="utf-8"
+            _case_report(spec, actives, retirees, base), encoding="utf-8"
         )
     return path
 
@@ -684,7 +739,10 @@ def write_case_assumptions(spec: CaseSpec, path: str | Path) -> Path:
     return form.write_state(state, path)
 
 
-def write_case_pack(directory: str | Path, *, seed: int = 20251231) -> list[Path]:
+def write_case_pack(
+    directory: str | Path, *, seed: int = 20251231,
+    base_date: _dt.date | None = None,
+) -> list[Path]:
     """세 사례의 명부와 짝이 되는 기초율을 한꺼번에 만든다."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -693,17 +751,23 @@ def write_case_pack(directory: str | Path, *, seed: int = 20251231) -> list[Path
         report = directory / f"{spec.title}_특이사항.txt"
         made.append(write_case_roster(
             spec, directory / f"{spec.title}.xlsx", seed=seed, report_path=report,
+            base_date=base_date,
         ))
         made.append(write_case_assumptions(spec, directory / f"{spec.title}_기초율.xlsx"))
         made.append(report)
     return made
 
 
-def write_case_rosters(directory: str | Path, *, seed: int = 20251231) -> list[Path]:
+def write_case_rosters(
+    directory: str | Path, *, seed: int = 20251231,
+    base_date: _dt.date | None = None,
+) -> list[Path]:
     """세 사례의 명부만 만든다."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     return [
-        write_case_roster(spec, directory / f"{spec.title}.xlsx", seed=seed)
+        write_case_roster(
+            spec, directory / f"{spec.title}.xlsx", seed=seed, base_date=base_date,
+        )
         for spec in CASES
     ]

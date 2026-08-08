@@ -156,6 +156,14 @@ def _summary_sheet(wb, run: PensionRun) -> None:
         line("산출대상 인원", run.longterm.headcount, _MONEY, "명")
         row += 1
 
+    if run.plan_assets is not None:
+        assets = run.plan_assets
+        section("3-2. 사외적립자산 · 순확정급여부채")
+        line("사외적립자산 공정가치", assets.closing_fair_value, _MONEY, "원")
+        line("순확정급여부채", assets.net_liability, _MONEY, "원")
+        line("적립비율", assets.funded_ratio, "0.0%", "")
+        row += 1
+
     section("4. 당기 지급 실적")
     line("퇴직급여 지급액", run.benefits_paid, _MONEY, "원")
     line("정산 지급액 (중간정산·DC전환·전출)", run.settlements_paid, _MONEY, "원")
@@ -225,6 +233,61 @@ def _rollforward_sheet(wb, run: PensionRun) -> None:
     ws.cell(row, 3, run.rollforward.actuarial_gain_loss).number_format = _MONEY
     row += 2
     ws.cell(row, 2, "※ 양수는 채무 증가(보험수리적손실), 음수는 채무 감소(이익)를 뜻합니다.")
+    row += 1
+    ws.cell(
+        row, 2,
+        "※ 과거근무원가·정산손익은 당기손익, 보험수리적손익은 기타포괄손익입니다.",
+    )
+
+    # ── 사외적립자산 ────────────────────────────────────────────
+    assets = run.plan_assets
+    if assets is None:
+        return
+
+    row += 3
+    ws.cell(row, 2, "사외적립자산 증감").font = st["title"]
+    row += 1
+    for label, amount in assets.as_rows():
+        is_total = label.startswith(("기초", "기말"))
+        cell_label = ws.cell(row, 2, label)
+        cell_value = ws.cell(row, 3, amount)
+        cell_value.number_format = _MONEY
+        if is_total:
+            cell_label.font = st["total"]
+            cell_value.font = st["total"]
+            cell_label.fill = st["total_fill"]
+            cell_value.fill = st["total_fill"]
+        row += 1
+
+    row += 2
+    ws.cell(row, 2, "순확정급여부채").font = st["title"]
+    row += 1
+    for label, amount in assets.net_rows():
+        cell_label = ws.cell(row, 2, label)
+        cell_value = ws.cell(row, 3, amount)
+        cell_value.number_format = _MONEY
+        if label.startswith("순"):
+            cell_label.font = st["total"]
+            cell_value.font = st["total"]
+            cell_label.fill = st["total_fill"]
+            cell_value.fill = st["total_fill"]
+        row += 1
+
+    ws.cell(row, 2, "적립비율")
+    ws.cell(row, 3, assets.funded_ratio).number_format = "0.0%"
+    row += 2
+    ws.cell(row, 2, "※ 이자수익은 채무와 **같은 할인율** 로 계산합니다(문단 125). "
+                    "자산의 실제 수익률이 아닙니다.")
+    row += 1
+    ws.cell(row, 2, "※ 자산 재측정손익은 기말 공정가치에 맞춘 나머지이며 "
+                    "기타포괄손익입니다.")
+    if assets.overfunded:
+        row += 1
+        ws.cell(
+            row, 2,
+            "※ 자산이 채무를 넘었습니다(초과적립). 자산인식상한(문단 64)을 "
+            "따로 검토하십시오 — 이 프로그램은 상한을 적용하지 않습니다.",
+        ).font = st["section"]
 
 
 def _sensitivity_sheet(wb, run: PensionRun) -> None:

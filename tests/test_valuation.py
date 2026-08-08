@@ -290,3 +290,115 @@ class TestRollForward:
         labels = [label for label, _ in roll.as_rows()]
         assert labels[0] == "기초 확정급여채무"
         assert labels[-1] == "기말 확정급여채무"
+
+
+class TestBenefitFormulaAttribution:
+    """귀속은 근속이 아니라 **급여식** 을 따라야 한다(문단 70).
+
+    급여가 근속에 비례하면 두 방식이 같지만, 상한·정액 구간이 있으면 갈린다.
+    """
+
+    def _member(self, hire_year: int = 1991):
+        import datetime as _dt
+
+        from pension.models import ActiveMember, RateRules
+        from pension.normalize import BenefitPlan, EmployeeType, Gender
+
+        member = ActiveMember(
+            seq=1, row=1, employee_id="A1", name="홍길동",
+            job_group="정규직", job_group_raw="정규직",
+            gender=Gender.MALE, birth_date=_dt.date(1988, 1, 1),
+            hire_date=_dt.date(hire_year, 1, 1), monthly_wage=5_000_000,
+            plan=BenefitPlan.DB, employee_type=EmployeeType.STAFF, rules=RateRules(),
+        )
+        member.age = 37
+        member.severance_nra = 60
+        return member
+
+    def _config(self):
+        import datetime as _dt
+
+        from pension.config import CalculationConfig, JobGroupRule
+
+        return CalculationConfig(
+            base_date=_dt.date(2025, 12, 31),
+            job_group_rules=[
+                JobGroupRule(source_name="정규직", mapped_name="정규직", severance_nra=60)
+            ],
+        )
+
+    def test_capped_benefit_is_fully_attributed(self) -> None:
+        """30년 상한 규정에서 근속 35년이면 더 일해도 급여가 안 는다.
+
+        근속비로 재면 총근속이 늘수록 귀속비율이 줄어 채무가 과소계상된다.
+        """
+        from pension.assumptions import Assumptions, BenefitScale, DiscountCurve
+        from pension.formula import Formula
+        from pension.valuation import value_member
+
+        assumptions = Assumptions(discount=DiscountCurve(flat=0.045))
+        assumptions.severance_benefit = BenefitScale(
+            formulas={"정규직": Formula("=MIN(t,30)")}
+        )
+        result = value_member(self._member(), self._config(), assumptions)
+
+        # 상한을 이미 넘겼으니 추가 근무로 늘어날 급여가 없다 → 근무원가 0.
+        assert result.service_cost == pytest.approx(0.0)
+        # 귀속비율이 1.0 이므로 채무는 '기대급여 현가' 전액이어야 한다.
+        assert result.dbo == pytest.approx(result.expected_benefit_pv)
+
+    def test_proportional_benefit_matches_service_ratio(self) -> None:
+        """법정(근속 비례)에서는 근속비 방식과 결과가 같아야 한다."""
+        from pension.assumptions import Assumptions, DiscountCurve
+        from pension.valuation import value_member
+
+        assumptions = Assumptions(discount=DiscountCurve(flat=0.045))
+        member = self._member(hire_year=2013)
+        result = value_member(member, self._config(), assumptions)
+
+        # 귀속비율이 과거근속/총근속과 같으므로 DBO = 기대급여현가 × 그 비율.
+        assert 0 < result.dbo < result.expected_benefit_pv
+        assert result.service_cost > 0
+
+
+class TestServiceFractionInProjection:
+    """단수 처리는 미래 시점의 근속에도 적용돼야 한다."""
+
+    def test_truncation_lowers_the_obligation(self) -> None:
+        import datetime as _dt
+
+        from pension.assumptions import Assumptions, DiscountCurve
+        from pension.config import CalculationConfig, JobGroupRule
+        from pension.models import ActiveMember, RateRules
+        from pension.normalize import BenefitPlan, EmployeeType, Gender
+        from pension.valuation import value_member
+
+        config = CalculationConfig(
+            base_date=_dt.date(2025, 12, 31),
+            job_group_rules=[
+                JobGroupRule(source_name="정규직", mapped_name="정규직", severance_nra=60)
+            ],
+        )
+        assumptions = Assumptions(discount=DiscountCurve(flat=0.045))
+
+        def valued(fraction: str):
+            member = ActiveMember(
+                seq=1, row=1, employee_id="A1", name="홍길동",
+                job_group="정규직", job_group_raw="정규직",
+                gender=Gender.MALE, birth_date=_dt.date(1988, 1, 1),
+                hire_date=_dt.date(2013, 7, 1), monthly_wage=5_000_000,
+                plan=BenefitPlan.DB, employee_type=EmployeeType.STAFF,
+                rules=RateRules(), service_fraction=fraction,
+            )
+            member.age = 37
+            member.severance_nra = 60
+            return value_member(member, config, assumptions)
+
+        keep = valued("그대로")
+        cut = valued("절사")
+
+        # 기준일 근속부터 이미 다르다(12.5년 → 12년).
+        assert cut.past_service == pytest.approx(12.0)
+        assert keep.past_service > cut.past_service
+        # 미래 시점에도 계속 깎이므로 채무가 낮아야 한다.
+        assert cut.dbo < keep.dbo
