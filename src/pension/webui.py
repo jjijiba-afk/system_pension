@@ -20,8 +20,9 @@ import json
 import re
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from . import assumption_form as form
 from .actuarial import FRACTION_MODES, SERVICE_BASES
@@ -31,6 +32,7 @@ from .jobgroup import DEFAULT_GROUPS, scan_roster, suggest_group
 from .library import (
     CURVE_KIND,
     RATES_KIND,
+    ROSTER_KIND,
     entries,
     find_entry,
     library_dir,
@@ -149,17 +151,22 @@ def _formula_preview(request: dict) -> dict[str, Any]:
 def _library_list(_request: dict) -> dict[str, Any]:
     settings = read_settings()
     result: dict[str, Any] = {}
-    for kind in (CURVE_KIND, RATES_KIND):
+    for kind in (CURVE_KIND, RATES_KIND, ROSTER_KIND):
         default = resolve_default(kind)
         result[kind] = {
             "entries": [
-                {"name": e.name, "registered": str(e.registered or "")}
+                {
+                    "name": e.name,
+                    "registered": str(e.registered or ""),
+                    "suffix": e.path.suffix.lower(),
+                    "path": str(e.path),
+                }
                 for e in entries(kind)
             ],
             "default": default.name if default else "",
             "pinned": settings.get(kind, ""),
         }
-    return {"library": result}
+    return {"library": result, "backup": settings.get(_BACKUP_STAMP, "")}
 
 
 def _library_register(request: dict) -> dict[str, Any]:
@@ -193,6 +200,15 @@ def _library_pin(request: dict) -> dict[str, Any]:
         settings.pop(kind, None)
     write_settings(settings)
     return _library_list({})
+
+
+def _library_path(request: dict) -> dict[str, Any]:
+    """등록된 자료의 실제 경로. 저장해 둔 명부를 산출에 그대로 넘길 때 쓴다."""
+    kind = text(request.get("kind"))
+    entry = find_entry(kind, text(request.get("name")))
+    if entry is None:
+        raise ValueError(f"등록된 {kind} '{request.get('name')}' 이(가) 없습니다")
+    return {"path": str(entry.path), "name": entry.name}
 
 
 def _registered_path(kind: str, name: str) -> Path:
@@ -314,6 +330,10 @@ def _run(request: dict) -> dict[str, Any]:
 
     work = Path(request.get("work", "/work"))
     out = work / "산출결과.xlsx"
+    # 전기 기초율까지 주면 증감분석이 경험조정과 가정변경효과를 나눠 낸다.
+    prior_assumptions = text(request.get("prior_assumptions"))
+    if prior_assumptions and not Path(prior_assumptions).exists():
+        prior_assumptions = ""
     try:
         run = run_valuation(RunOptions(
             roster_path=Path(request["roster"]),
@@ -324,7 +344,9 @@ def _run(request: dict) -> dict[str, Any]:
             allow_errors=bool(request.get("force", False)),
             prior=PriorPeriod(
                 dbo=float(request.get("prior_dbo") or 0),
+                service_cost=float(request.get("prior_service_cost") or 0),
                 discount_rate=float(request.get("prior_rate") or 0),
+                assumptions_path=prior_assumptions,
             ),
         ))
     except PensionDataError as exc:
@@ -336,9 +358,11 @@ def _run(request: dict) -> dict[str, Any]:
 
     valuation = run.valuation
     if run.assumptions.discount.flat is None:
-        rate = f"{valuation.single_discount_rate():.3%} (수익률곡선기법 단일할인율)"
+        single_rate = valuation.single_discount_rate()
+        rate = f"{single_rate:.3%} (수익률곡선기법 단일할인율)"
     else:
-        rate = f"{run.assumptions.discount.level_rate:.3%}"
+        single_rate = run.assumptions.discount.level_rate
+        rate = f"{single_rate:.3%}"
     summary = [
         ("산출기준일", str(run.config.base_date)),
         ("적용 할인율", rate),
@@ -370,6 +394,14 @@ def _run(request: dict) -> dict[str, Any]:
     return {
         "run": True, "summary": summary, "groups": groups,
         "issues": issues, "excluded": excluded,
+        # 화면에 보이는 요약은 사람이 읽을 서식이라 다시 숫자로 되돌리기 어렵다.
+        # 다음 결산에서 전기값으로 끌어 쓸 수 있게 원래 숫자를 함께 남긴다.
+        "values": {
+            "base_date": str(run.config.base_date),
+            "dbo": valuation.dbo,
+            "service_cost": valuation.service_cost,
+            "discount_rate": single_rate,
+        },
     }
 
 
@@ -518,6 +550,114 @@ def _run_delete(request: dict) -> dict[str, Any]:
     return _run_list({})
 
 
+def _as_number(token: object) -> float:
+    """'20,143,311,276 원' · '4.170% (수익률곡선기법…)' 처럼 서식이 붙은 값에서 숫자만."""
+    match = re.search(r"-?[\d,]+(?:\.\d+)?", str(token))
+    if match is None:
+        return 0.0
+    value = float(match.group().replace(",", ""))
+    return value / 100.0 if "%" in str(token) else value
+
+
+def _run_prior(request: dict) -> dict[str, Any]:
+    """저장된 산출을 **전기** 로 끌어온다 — 증감분석의 출발점.
+
+    저장할 때 남긴 원래 숫자를 쓰고, 그 이전 판으로 저장돼 숫자가 없으면
+    화면 요약 문자열에서 되짚는다. 전기 기초율 경로도 함께 주므로 경험조정과
+    가정변경효과를 나눠 계산할 수 있다.
+    """
+    folder = _run_folder(request)
+    meta = _run_meta(folder) or {}
+    report = meta.get("report", {})
+    values = report.get("values") or {}
+    if not values:
+        summary = dict(report.get("summary", []))
+        values = {
+            "base_date": summary.get("산출기준일", ""),
+            "dbo": _as_number(summary.get("확정급여채무 (DBO)", 0)),
+            "service_cost": _as_number(summary.get("당기근무원가", 0)),
+            "discount_rate": _as_number(summary.get("적용 할인율", 0)),
+        }
+    return {
+        "name": meta.get("name", folder.name),
+        "values": values,
+        "assumptions": str(folder / "기초율.xlsx"),
+    }
+
+
+# ── 보관함(백업) ─────────────────────────────────────────────────
+# 브라우저 저장소는 사용자가 방문기록·웹사이트 데이터를 지우면 함께 사라진다.
+# 등록 자료와 산출 내역 전체를 파일 하나로 내보내 iCloud Drive 같은 **기기 밖**
+# 에 두게 하고, 그 파일로 어느 기기에서든 되살릴 수 있게 한다.
+
+_BACKUP_STAMP: Final = "마지막백업"
+_BACKUP_MARK: Final = "연금계리보관함.json"
+
+
+def _backup_export(request: dict) -> dict[str, Any]:
+    """등록 자료 + 산출 내역 전체를 zip 하나로 묶는다."""
+    stamp = text(request.get("stamp")) or _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    settings = read_settings()
+    settings[_BACKUP_STAMP] = stamp
+    write_settings(settings)
+
+    home = library_dir()
+    (home / _BACKUP_MARK).write_text(
+        json.dumps({"만든날짜": stamp, "형식": 1}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    work = Path(request.get("work", "/work"))
+    work.mkdir(parents=True, exist_ok=True)
+    target = work / f"연금계리보관함_{stamp[:10].replace('-', '')}.zip"
+
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(home.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(home).as_posix())
+
+    return {
+        "path": str(target), "filename": target.name,
+        "size": target.stat().st_size, "stamp": stamp,
+    }
+
+
+def _backup_import(request: dict) -> dict[str, Any]:
+    """보관함 파일을 되살린다.
+
+    ``replace`` 면 지금 것을 비우고 통째로 바꾸고, 아니면 같은 이름만 덮어쓰며
+    합친다(기본). 다른 기기에서 만든 보관함을 합칠 때 쓰는 쪽이 기본이다.
+    """
+    source = Path(request["path"])
+    if not source.exists():
+        raise ValueError("가져올 보관함 파일이 없습니다")
+
+    home = library_dir()
+    with zipfile.ZipFile(source) as archive:
+        names = archive.namelist()
+        if _BACKUP_MARK not in names:
+            raise ValueError(
+                "이 앱에서 내보낸 보관함 파일이 아닙니다 "
+                "(연금계리보관함_YYYYMMDD.zip 을 고르세요)"
+            )
+        if request.get("replace"):
+            for child in home.iterdir():
+                shutil.rmtree(child) if child.is_dir() else child.unlink()
+        for name in names:
+            if name.endswith("/"):
+                continue
+            # zip 안의 경로가 보관함 밖을 가리키지 않게 막는다.
+            target = (home / name).resolve()
+            if not target.is_relative_to(home.resolve()):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(name) as payload, target.open("wb") as out:
+                shutil.copyfileobj(payload, out)
+
+    result = _library_list({})
+    result.update(_run_list({}))
+    return result
+
+
 _OPS = {
     "meta": _meta,
     "state_new": _state_new,
@@ -544,4 +684,8 @@ _OPS = {
     "run_restore": _run_restore,
     "run_results": _run_results,
     "run_delete": _run_delete,
+    "run_prior": _run_prior,
+    "library_path": _library_path,
+    "backup_export": _backup_export,
+    "backup_import": _backup_import,
 }

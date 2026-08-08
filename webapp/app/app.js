@@ -36,11 +36,13 @@ async function intoFS(file, path) {
 
 const persistHome = () => new Promise((done) => pyodide.FS.syncfs(false, done));
 
-function download(path, filename) {
+const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function download(path, filename, mime = XLSX_MIME) {
   const payload = pyodide.FS.readFile(path);
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([payload], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  link.href = URL.createObjectURL(new Blob([payload], { type: mime }));
   link.download = filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 30000);
@@ -712,9 +714,24 @@ function syncEditorHint() {
 
 // ═════════ 기본가정 관리 ═════════════════════════════════════════
 function refreshLibrary() {
-  const { library } = py("library_list");
+  const { library, backup } = py("library_list");
   renderLibraryList("금리표", library["금리표"], $("lib-curve-list"));
   renderLibraryList("표준률", library["표준률"], $("lib-rates-list"));
+  renderLibraryList("명부", library["명부"], $("lib-roster-list"), { pin: false });
+
+  // 산출 탭의 저장된 명부 목록.
+  const savedRoster = $("roster-saved");
+  const chosen = savedRoster.value;
+  savedRoster.replaceChildren(
+    el("option", { value: "" }, "(새 파일 올리기)"),
+    ...library["명부"].entries.map((e) => el("option", { value: e.name }, e.name)));
+  if (chosen && library["명부"].entries.some((e) => e.name === chosen)) {
+    savedRoster.value = chosen;
+  }
+
+  $("backup-stamp").textContent = backup
+    ? `마지막 내보내기: ${backup}`
+    : "아직 한 번도 내보내지 않았습니다.";
 
   const rates = $("ed-rates");
   rates.replaceChildren(
@@ -732,34 +749,37 @@ function refreshLibrary() {
   }
 }
 
-function renderLibraryList(kind, data, target) {
+function renderLibraryList(kind, data, target, options = {}) {
+  const withPin = options.pin !== false;
   if (!data.entries.length) {
     target.replaceChildren(el("p", { class: "notice" }, "아직 등록된 것이 없습니다."));
     return;
   }
   const rows = data.entries.map((entry) => {
-    const isDefault = entry.name === data.default;
+    const isDefault = withPin && entry.name === data.default;
+    const actions = [];
+    if (withPin) {
+      actions.push(el("button", { class: "small", type: "button", onclick: async () => {
+        try {
+          py("library_pin", { kind, name: data.pinned === entry.name ? "" : entry.name });
+          await persistHome();
+          refreshLibrary();
+        } catch (error) { alert(error.message); }
+      } }, data.pinned === entry.name ? "지정 해제" : "기본 지정"), " ");
+    }
+    actions.push(el("button", { class: "small", type: "button", onclick: async () => {
+      if (!confirm(`${kind} '${entry.name}' 등록을 삭제할까요?`)) return;
+      try {
+        py("library_remove", { kind, name: entry.name });
+        await persistHome();
+        refreshLibrary();
+      } catch (error) { alert(error.message); }
+    } }, "삭제"));
     const cells = [
       el("td", {}, entry.name, " ",
          isDefault ? el("span", { class: "badge" }, data.pinned === entry.name ? "기본(지정)" : "기본(최신)") : ""),
       el("td", {}, entry.registered),
-      el("td", {},
-        el("button", { class: "small", type: "button", onclick: async () => {
-          try {
-            py("library_pin", { kind, name: data.pinned === entry.name ? "" : entry.name });
-            await persistHome();
-            refreshLibrary();
-          } catch (error) { alert(error.message); }
-        } }, data.pinned === entry.name ? "지정 해제" : "기본 지정"),
-        " ",
-        el("button", { class: "small", type: "button", onclick: async () => {
-          if (!confirm(`${kind} '${entry.name}' 등록을 삭제할까요?`)) return;
-          try {
-            py("library_remove", { kind, name: entry.name });
-            await persistHome();
-            refreshLibrary();
-          } catch (error) { alert(error.message); }
-        } }, "삭제")),
+      el("td", {}, ...actions),
     ];
     return el("tr", {}, ...cells);
   });
@@ -790,6 +810,38 @@ $("lib-curve-add").addEventListener("click", () =>
   registerAsset("금리표", $("lib-curve-file"), $("lib-curve-name")));
 $("lib-rates-add").addEventListener("click", () =>
   registerAsset("표준률", $("lib-rates-file"), $("lib-rates-name")));
+$("lib-roster-add").addEventListener("click", () =>
+  registerAsset("명부", $("lib-roster-file"), $("lib-roster-name")));
+
+// ── 저장된 명부 ──
+// 목록에서 고르면 그 파일을 그대로 산출에 쓴다. 새 파일을 올리면 그쪽이 이긴다.
+$("roster-saved").addEventListener("change", () => {
+  const name = $("roster-saved").value;
+  if (!name) {
+    $("roster-hint").textContent = "Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서";
+    return;
+  }
+  $("roster").value = "";
+  $("roster-hint").textContent =
+    `저장된 명부 '${name}' 를 사용합니다. 새 파일을 고르면 그 파일이 우선합니다.`;
+});
+
+$("roster-save").addEventListener("click", async () => {
+  const file = $("roster").files[0];
+  if (!file) { alert("먼저 명부 파일을 고르세요."); return; }
+  const suggestion = file.name.replace(/\.(xls|xlsx|xlsm)$/i, "");
+  const name = prompt("목록에 표시할 이름을 정하세요.", suggestion);
+  if (name === null) return;
+  try {
+    const path = await rosterIntoFS();
+    py("library_register", { kind: "명부", path, name: name.trim() || suggestion });
+    await persistHome();
+    refreshLibrary();
+    status(`명부 '${name.trim() || suggestion}' 을(를) 목록에 저장했습니다.`);
+  } catch (error) {
+    alert("저장하지 못했습니다.\n\n" + error.message);
+  }
+});
 
 // ═════════ 산출 ══════════════════════════════════════════════════
 function parseNumber(raw) {
@@ -819,15 +871,25 @@ function fillTable(table, rows, numericFrom) {
 // 산출 내역에서 불러온 입력. 파일을 새로 고르면 그쪽이 우선한다.
 let loadedRun = null;   // {name, roster, assumptions, rosterName}
 let lastRun = null;     // 방금 마친 산출 — 저장 버튼이 이것을 보관한다
+let priorLink = null;   // 전기로 연결한 저장 산출 {name, values, assumptions}
 
+// 명부를 어디서 가져올지: 방금 올린 파일 > 목록에서 고른 저장 명부 > 불러온 산출 내역.
 async function rosterIntoFS() {
   const file = $("roster").files[0];
   if (file) {
     const suffix = file.name.toLowerCase().match(/\.(xls[xm]?)$/);
     return intoFS(file, "/work/명부." + (suffix ? suffix[1] : "xlsx"));
   }
+  const saved = $("roster-saved").value;
+  if (saved) return py("library_path", { kind: "명부", name: saved }).path;
   if (loadedRun) return loadedRun.roster;
-  throw new Error("[산출] 탭에서 명부 파일을 먼저 골라 주세요.");
+  throw new Error("[산출] 탭에서 명부 파일을 고르거나 저장된 명부를 선택하세요.");
+}
+
+function currentRosterName() {
+  const file = $("roster").files[0];
+  if (file) return file.name;
+  return $("roster-saved").value || loadedRun?.rosterName || "";
 }
 
 $("form").addEventListener("submit", async (event) => {
@@ -860,6 +922,7 @@ $("form").addEventListener("submit", async (event) => {
       force: $("force").checked, sensitivity: $("sensitivity").checked,
       longterm: $("longterm").checked,
       prior_dbo: $("prior_dbo").value, prior_rate: $("prior_rate").value,
+      prior_run: $("prior-run").value,
     };
     const report = py("run", {
       roster: rosterPath, assumptions: assumptionsPath,
@@ -867,6 +930,8 @@ $("form").addEventListener("submit", async (event) => {
       longterm: options.longterm,
       prior_dbo: parseNumber(options.prior_dbo),
       prior_rate: parseRate(options.prior_rate),
+      prior_service_cost: priorLink ? priorLink.values.service_cost : 0,
+      prior_assumptions: priorLink ? priorLink.assumptions : "",
     });
 
     if (!report.run) {
@@ -886,11 +951,9 @@ $("form").addEventListener("submit", async (event) => {
     $("issues").textContent = report.issues +
       (report.excluded.length ? "\n산출 제외: " + report.excluded.join(" · ") : "");
 
-    const rosterFile = $("roster").files[0];
     lastRun = {
       roster: rosterPath, assumptions: assumptionsPath,
-      rosterName: rosterFile ? rosterFile.name : (loadedRun?.rosterName || ""),
-      report, options,
+      rosterName: currentRosterName(), report, options,
     };
     if (!$("run-name").value && loadedRun) $("run-name").value = loadedRun.name;
 
@@ -930,9 +993,47 @@ $("run-save").addEventListener("click", async () => {
   }
 });
 
+// ── 전기 산출 연결 ──
+// 전기 DBO·할인율·근무원가를 손으로 옮겨 적으면 자릿수를 틀리기 쉽다.
+// 저장된 산출을 고르면 숫자와 전기 기초율이 한꺼번에 붙는다.
+$("prior-run").addEventListener("change", () => {
+  const name = $("prior-run").value;
+  if (!name) {
+    priorLink = null;
+    $("prior_dbo").value = "";
+    $("prior_rate").value = "";
+    $("prior-hint").textContent =
+      "전기 산출을 고르면 확정급여채무·할인율·근무원가가 그대로 들어오고, " +
+      "전기 기초율까지 연결되어 증감분석이 경험조정과 가정변경효과를 나눠 계산합니다.";
+    return;
+  }
+  try {
+    priorLink = py("run_prior", { name });
+    const values = priorLink.values;
+    $("prior_dbo").value = Math.round(values.dbo).toLocaleString("en-US");
+    $("prior_rate").value = (values.discount_rate * 100).toFixed(3) + "%";
+    $("prior-hint").textContent =
+      `'${name}' (기준일 ${values.base_date || "?"}) 의 전기값을 연결했습니다. ` +
+      "전기 기초율도 함께 넘겨 가정변경효과를 분리합니다.";
+  } catch (error) {
+    priorLink = null;
+    alert(error.message);
+  }
+});
+
 function refreshRuns() {
   const { runs } = py("run_list");
   const target = $("runs-list");
+
+  // 전기 선택 목록도 같이 새로 고친다.
+  const priorBox = $("prior-run");
+  const chosen = priorBox.value;
+  priorBox.replaceChildren(
+    el("option", { value: "" }, "(직접 입력)"),
+    ...runs.map((run) => el("option", { value: run.name },
+      run.base_date ? `${run.name} — ${run.base_date}` : run.name)));
+  if (runs.some((run) => run.name === chosen)) priorBox.value = chosen;
+
   if (!runs.length) {
     target.replaceChildren(el("p", { class: "notice" },
       "아직 저장된 산출이 없습니다. 산출을 마친 뒤 결과 아래 [이 산출을 기기에 저장] 에서 이름을 붙여 저장하세요."));
@@ -1036,7 +1137,53 @@ async function deleteRun(name) {
     await persistHome();
     refreshRuns();
     if (loadedRun && loadedRun.name === name) $("loaded-run-clear").click();
+    if (priorLink && priorLink.name === name) {
+      $("prior-run").value = "";
+      $("prior-run").dispatchEvent(new Event("change"));
+    }
   } catch (error) {
     alert(error.message);
   }
 }
+
+// ── 보관함 ──
+// 브라우저 저장소는 사용자가 방문기록을 지우면 함께 사라진다. 전부를 파일
+// 하나로 내보내 iCloud Drive 처럼 기기 밖에 두게 한다.
+$("backup-export").addEventListener("click", async () => {
+  try {
+    status("보관함을 만드는 중…");
+    await persistHome();
+    const result = py("backup_export", { work: "/work" });
+    download(result.path, result.filename, "application/zip");
+    refreshLibrary();
+    status(`보관함 ${result.filename} (${(result.size / 1e6).toFixed(1)}MB) 을(를) ` +
+           "내려받았습니다. 공유 → 파일에 저장 → iCloud Drive 에 두세요.");
+  } catch (error) {
+    alert("내보내지 못했습니다.\n\n" + error.message);
+  }
+});
+
+async function importBackup(replace) {
+  const file = $("backup-file").files[0];
+  if (!file) { alert("먼저 보관함 zip 파일을 고르세요."); return; }
+  if (replace && !confirm(
+    "지금 이 기기의 등록 자료와 산출 내역을 모두 지우고 보관함 내용으로 바꿉니다.\n계속할까요?")) return;
+  try {
+    status("보관함을 읽는 중…");
+    await intoFS(file, "/work/보관함.zip");
+    const result = py("backup_import", { path: "/work/보관함.zip", replace });
+    await persistHome();
+    refreshLibrary();
+    refreshRuns();
+    $("backup-file").value = "";
+    status(`보관함을 ${replace ? "그대로 되돌렸습니다" : "합쳤습니다"} — ` +
+           `산출 내역 ${result.runs.length}건, 금리표 ${result.library["금리표"].entries.length}건, ` +
+           `표준률 ${result.library["표준률"].entries.length}건, 명부 ${result.library["명부"].entries.length}건.`);
+  } catch (error) {
+    alert("가져오지 못했습니다.\n\n" + error.message);
+    status("보관함을 가져오지 못했습니다.");
+  }
+}
+
+$("backup-import").addEventListener("click", () => importBackup(false));
+$("backup-replace").addEventListener("click", () => importBackup(true));

@@ -34,6 +34,7 @@ from .normalize import text
 __all__ = [
     "CURVE_KIND",
     "RATES_KIND",
+    "ROSTER_KIND",
     "LibraryEntry",
     "entries",
     "find_entry",
@@ -47,9 +48,18 @@ __all__ = [
 
 CURVE_KIND: Final = "금리표"
 RATES_KIND: Final = "표준률"
+ROSTER_KIND: Final = "명부"
+"""올렸던 명부. 같은 단체를 다음 결산에 다시 산출할 때 그대로 꺼내 쓴다."""
 
-_KINDS: Final = (CURVE_KIND, RATES_KIND)
+_KINDS: Final = (CURVE_KIND, RATES_KIND, ROSTER_KIND)
 _SETTINGS: Final = "설정.json"
+
+#: 종류별로 받아 두는 확장자. 명부는 예전 ``.xls`` 로 오는 일이 흔하다.
+_SUFFIXES: Final[dict[str, tuple[str, ...]]] = {
+    CURVE_KIND: (".xlsx", ".xlsm"),
+    RATES_KIND: (".xlsx", ".xlsm"),
+    ROSTER_KIND: (".xlsx", ".xlsm", ".xls"),
+}
 
 
 def library_dir() -> Path:
@@ -91,6 +101,7 @@ class LibraryEntry:
 
 def entries(kind: str) -> list[LibraryEntry]:
     """등록된 자료 목록. 최근 등록한 것이 앞에 온다."""
+    allowed = _SUFFIXES[kind]
     found = [
         LibraryEntry(
             kind=kind,
@@ -98,8 +109,8 @@ def entries(kind: str) -> list[LibraryEntry]:
             path=path,
             registered=_dt.date.fromtimestamp(path.stat().st_mtime),
         )
-        for path in _kind_dir(kind).glob("*.xlsx")
-        if path.is_file()
+        for path in _kind_dir(kind).iterdir()
+        if path.is_file() and path.suffix.lower() in allowed
     ]
     found.sort(key=lambda e: e.path.stat().st_mtime, reverse=True)
     return found
@@ -118,6 +129,7 @@ def register(kind: str, source: str | Path, *, name: str = "") -> LibraryEntry:
     실패한다. 복사해 두면 등록 시점의 자료가 그대로 남아, 나중에 "그때 무슨
     금리표를 썼나" 를 되짚을 수 있다.
     """
+    folder = _kind_dir(kind)   # 종류를 먼저 확인한다
     source = Path(source)
     if not source.exists():
         raise FileNotFoundError(f"등록할 파일을 찾을 수 없습니다: {source}")
@@ -129,7 +141,18 @@ def register(kind: str, source: str | Path, *, name: str = "") -> LibraryEntry:
     if not label:
         raise ValueError("등록 이름이 비어 있습니다")
 
-    target = _kind_dir(kind) / f"{label}.xlsx"
+    # 확장자는 원본 것을 지킨다. 명부는 예전 ``.xls`` 가 흔한데 ``.xlsx`` 로
+    # 이름만 바꿔 두면 여는 쪽이 서식을 잘못 짚어 읽지 못한다.
+    suffix = source.suffix.lower()
+    if suffix not in _SUFFIXES[kind]:
+        suffix = _SUFFIXES[kind][0]
+
+    # 같은 이름을 다른 확장자로 다시 등록하면 둘 다 남아 목록에 두 번 뜬다.
+    for stale in folder.glob(f"{label}.*"):
+        if stale.is_file():
+            stale.unlink()
+
+    target = folder / f"{label}{suffix}"
     shutil.copy2(source, target)
     return LibraryEntry(
         kind=kind, name=label, path=target,

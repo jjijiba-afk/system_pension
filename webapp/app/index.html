@@ -31,6 +31,11 @@
 </div>
 <form id="form">
 <fieldset><legend>1. 명부 파일</legend>
+  <div class="lib-line">
+    <span style="font-weight:600">저장된 명부</span>
+    <select id="roster-saved"><option value="">(새 파일 올리기)</option></select>
+    <button class="small" type="button" id="roster-save">이 파일을 목록에 저장</button>
+  </div>
   <input type="file" id="roster" accept=".xls,.xlsx,.xlsm">
   <div class="hint" id="roster-hint">Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서</div>
 </fieldset>
@@ -55,6 +60,13 @@
     <label for="longterm" style="margin:0">기타장기종업원급여 별도 산출</label></div>
 </fieldset>
 <fieldset><legend>4. 전기 산출 결과 (증감분석용 · 최초 평가면 비워 두세요)</legend>
+  <div class="lib-line">
+    <span style="font-weight:600">저장된 산출에서</span>
+    <select id="prior-run"><option value="">(직접 입력)</option></select>
+  </div>
+  <div class="hint" id="prior-hint">전기 산출을 고르면 확정급여채무·할인율·근무원가가
+  그대로 들어오고, 전기 기초율까지 연결되어 증감분석이 경험조정과 가정변경효과를
+  나눠 계산합니다.</div>
   <label>전기말 확정급여채무 (원)</label>
   <input type="text" id="prior_dbo" inputmode="numeric" placeholder="예: 10,000,000,000" style="width:100%">
   <label>전기말 할인율</label>
@@ -145,6 +157,18 @@
   <div id="lib-curve-list"></div>
 </fieldset>
 
+<fieldset><legend>명부 (올렸던 명부 보관)</legend>
+  <div class="lib-line">
+    <input type="file" id="lib-roster-file" accept=".xls,.xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-roster-name" placeholder="등록 이름 (예: 1번단체 2412)" style="min-width:180px">
+    <button class="small primary" id="lib-roster-add">등록</button>
+  </div>
+  <div class="hint">여기 등록한 명부는 [산출] 탭의 <b>저장된 명부</b> 목록에서 골라
+  쓸 수 있습니다. 산출 탭에서 파일을 고른 뒤 [이 파일을 목록에 저장] 을 눌러도
+  같습니다. 개인정보가 들어 있으므로 기기 잠금을 걸어 두세요.</div>
+  <div id="lib-roster-list"></div>
+</fieldset>
+
 <fieldset><legend>표준률 (퇴직률·승급률·사망률 기초율 워크북)</legend>
   <div class="lib-line">
     <input type="file" id="lib-rates-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
@@ -161,11 +185,30 @@
 <!-- ════════ 산출 내역 ════════ -->
 <section class="page" id="page-runs">
 <p class="notice">산출을 마친 뒤 이름을 붙여 저장해 두면 여기 쌓입니다.
-"2412 1번단체" 처럼 결산기·단체명으로 이름을 지으면 다음 결산 때 전기 입력을
-그대로 끌어올 수 있습니다. 전부 이 기기의 브라우저 안에만 저장됩니다 —
-기기를 바꾸거나 Safari 데이터를 지우면 사라지므로, 보관용 원본은 결과 엑셀을
-내려받아 따로 두세요.</p>
+"2412 1번단체" 처럼 결산기·단체명으로 이름을 지으면 다음 결산 때 전기 입력과
+전기 DBO 를 그대로 끌어올 수 있습니다.</p>
 <div id="runs-list"></div>
+
+<fieldset style="margin-top:18px"><legend>보관함 — 기기 밖에 저장</legend>
+  <p class="hint">앱 안의 자료(등록한 금리표·표준률·명부, 산출 내역 전부)는 이 기기의
+  브라우저 저장소에 있습니다. Safari 방문기록·웹사이트 데이터를 지우거나 기기를
+  바꾸면 함께 사라집니다. 그래서 <b>전부를 파일 하나로 내보내</b> 파일 앱의
+  iCloud Drive 같은 기기 밖에 두었다가, 필요할 때 그대로 되살릴 수 있게 했습니다.
+  결산이 끝날 때마다 한 번씩 내보내 두시길 권합니다.</p>
+  <div class="lib-line">
+    <button class="small primary" type="button" id="backup-export">보관함 내보내기</button>
+    <span class="hint" id="backup-stamp"></span>
+  </div>
+  <div class="hint">내려받은 뒤 아이패드에서 <b>공유 → 파일에 저장 → iCloud Drive</b>
+  를 고르면 기기를 바꿔도 남습니다.</div>
+  <div class="lib-line" style="margin-top:10px">
+    <input type="file" id="backup-file" accept=".zip" style="flex:1;min-width:200px">
+    <button class="small" type="button" id="backup-import">가져오기 (합치기)</button>
+    <button class="small" type="button" id="backup-replace">전체 교체</button>
+  </div>
+  <div class="hint">합치기는 지금 자료를 두고 같은 이름만 덮어씁니다.
+  전체 교체는 지금 것을 비우고 보관함 그대로 되돌립니다.</div>
+</fieldset>
 </section>
 
 <p class="notice">모든 계산은 이 기기의 브라우저 안에서 이루어집니다. 명부·기초율은
