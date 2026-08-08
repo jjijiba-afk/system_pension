@@ -402,3 +402,55 @@ class TestServiceFractionInProjection:
         assert keep.past_service > cut.past_service
         # 미래 시점에도 계속 깎이므로 채무가 낮아야 한다.
         assert cut.dbo < keep.dbo
+
+
+class TestRosterFieldsThatWereIgnored:
+    """명부에 적혀 오지만 산출이 쓰지 않던 항목들."""
+
+    def test_declared_nra_overrides_the_group_rule(self) -> None:
+        """명부에 개인별 정년이 적혀 있으면 직군 규정보다 우선한다."""
+        from pension.actuarial import normal_retirement_age
+        from pension.config import JobGroupRule
+
+        rule = JobGroupRule(
+            source_name="임원", mapped_name="임원",
+            severance_nra=60, over_nra_add_age=2,
+        )
+        assert normal_retirement_age(50, rule) == 60
+        assert normal_retirement_age(50, rule, declared_nra=63) == 63
+        # 개인 정년을 이미 넘겼으면 그 기준으로 가산연령을 더한다.
+        assert normal_retirement_age(64, rule, declared_nra=63) == 66
+        # 임금피크가 더 이르면 그쪽이 이긴다.
+        assert normal_retirement_age(50, rule, declared_nra=63, wage_peak_age=56) == 56
+
+    def test_hired_after_base_date_leaves_a_trace(self, tmp_path) -> None:
+        """기준일 이후 입사자는 빠지되, 왜 빠졌는지 남아야 한다."""
+        import datetime as _dt
+
+        from pension.assumptions import Assumptions, DiscountCurve
+        from pension.config import CalculationConfig, JobGroupRule
+        from pension.models import ActiveMember, RateRules, Roster
+        from pension.normalize import BenefitPlan, EmployeeType, Gender
+        from pension.valuation import value_roster
+
+        config = CalculationConfig(
+            base_date=_dt.date(2025, 12, 31),
+            job_group_rules=[
+                JobGroupRule(source_name="정규직", mapped_name="정규직", severance_nra=60)
+            ],
+        )
+        future = ActiveMember(
+            seq=1, row=1, employee_id="A1", name="내년입사",
+            job_group="정규직", job_group_raw="정규직",
+            gender=Gender.MALE, birth_date=_dt.date(1990, 1, 1),
+            hire_date=_dt.date(2026, 3, 1), monthly_wage=5_000_000,
+            plan=BenefitPlan.DB, employee_type=EmployeeType.STAFF, rules=RateRules(),
+        )
+        future.age = 35
+        future.severance_nra = 60
+
+        result = value_roster(Roster(active=[future]), config,
+                              Assumptions(discount=DiscountCurve(flat=0.045)))
+        assert result.headcount == 0
+        assert result.dbo == 0
+        assert "입사일이 산출기준일보다 늦음" in result.exclusion_summary()

@@ -82,10 +82,12 @@ class PlanAssetInput:
     """당기 부담금 납입액."""
     benefits_paid: float = 0.0
     """자산에서 직접 지급된 퇴직급여. 0 이면 명부의 사외자산 지급액을 쓴다."""
+    unpaid_benefits: float = 0.0
+    """미지급 퇴직급여. 퇴직했으나 결산일까지 지급하지 않은 금액."""
 
     def is_empty(self) -> bool:
         return not (self.opening_fair_value or self.closing_fair_value
-                    or self.contributions)
+                    or self.contributions or self.unpaid_benefits)
 
 
 @dataclass(slots=True)
@@ -157,6 +159,20 @@ class PensionRun:
             if m.reason in (RetirementReason.DC_CONVERSION, RetirementReason.TRANSFER_OUT)
         )
         return total + sum(m.transfer_out_payment for m in self.roster.retired)
+
+    @property
+    def other_payments(self) -> float:
+        """퇴직위로금 등 퇴직급여 이외 지급액.
+
+        총지급금액과 별도 칸이라 급여지급액에 잡히지 않는다. 증감표에서 빠지면
+        그만큼이 설명 없는 경험조정으로 나타나므로 별도 줄로 보여 준다.
+        """
+        return sum(m.other_payment for m in self.roster.retired)
+
+    @property
+    def transfers_in(self) -> float:
+        """전입으로 인수한 금액. 전출(``settlements_paid``)과 짝을 이룬다."""
+        return sum(m.transfer_in_amount for m in self.roster.active)
 
     @property
     def fund_assets_paid(self) -> float:
@@ -362,6 +378,8 @@ def _build_rollforward(
         benefits_paid=benefits_paid,
         settlement_paid=settlements,
         settlement_obligation=prior.settlement_obligation,
+        other_paid=run.other_payments,
+        transfers_in=run.transfers_in,
         closing_dbo=run.valuation.dbo,
         dbo_with_prior_assumptions=dbo_prior_all,
         dbo_after_amendment=dbo_after_amendment,
@@ -384,6 +402,7 @@ def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | Non
         benefits_paid=given.benefits_paid or run.fund_assets_paid,
         discount_rate=options.prior.discount_rate or _fallback_rate(run),
         closing_dbo=run.valuation.dbo,
+        unpaid_benefits=given.unpaid_benefits,
         period_years=_period_years(run.config.base_date, options.period_start),
     )
 

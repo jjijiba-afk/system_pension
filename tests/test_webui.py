@@ -682,3 +682,58 @@ class TestPlanAssetsAndAmendment:
         rows = dict(report["rollforward"])
         paid = -rows["정산지급액(중간정산·전출)"]
         assert rows["정산손익"] == pytest.approx(paid - 500_000_000)
+
+
+class TestRemainingGapsClosed:
+    """감사에서 찾은 나머지 구멍들."""
+
+    def _case(self, tmp_path):
+        made = call("gen_cases", work=str(tmp_path), seed=909)
+        return next(c for c in made["cases"] if not c["force"])
+
+    def test_transfers_in_and_other_payments_appear(self, tmp_path) -> None:
+        """전입 인수액과 퇴직위로금이 증감표에 제 줄로 나와야 한다.
+
+        시험명부2 에는 전입자와 정년퇴직 위로금이 들어 있다.
+        """
+        made = call("gen_cases", work=str(tmp_path), seed=909)
+        case = next(c for c in made["cases"] if c["key"] == "복합제도")
+        report = call(
+            "run", roster=case["roster"], assumptions=case["assumptions"],
+            work=str(tmp_path), sensitivity=False, longterm=False,
+            prior_dbo=10_000_000_000, prior_rate=0.045,
+        )
+        rows = dict(report["rollforward"])
+        assert rows["전입 인수액"] > 0
+        assert rows["퇴직위로금 등 지급액"] < 0
+
+    def test_unpaid_benefits_raise_the_net_liability(self, tmp_path) -> None:
+        case = self._case(tmp_path)
+        common = dict(roster=case["roster"], assumptions=case["assumptions"],
+                      sensitivity=False, longterm=False,
+                      asset_opening=10_000_000_000, asset_closing=11_000_000_000)
+        without = call("run", work=str(tmp_path / "a"), **common)
+        with_unpaid = call("run", work=str(tmp_path / "b"),
+                           unpaid_benefits=300_000_000, **common)
+
+        net_before = dict(without["assets"])["순확정급여부채"]
+        rows = dict(with_unpaid["assets"])
+        assert rows["미지급 퇴직급여"] == 300_000_000
+        assert rows["순확정급여부채"] == pytest.approx(net_before + 300_000_000)
+
+    def test_extra_pay_and_honorary_wage_are_flagged(self, tmp_path) -> None:
+        """계산에 쓰이거나 버려지는 임금 칸은 경고로 드러나야 한다."""
+        import openpyxl
+
+        case = self._case(tmp_path)
+        book = openpyxl.load_workbook(case["roster"])
+        ws = book["재직자명부"]
+        ws.cell(25, 35, 3_000_000)   # 추가지급 기본급
+        ws.cell(26, 12, 8_000_000)   # 명예퇴직 산정용 임금
+        marked = str(tmp_path / "표시명부.xlsx")
+        book.save(marked)
+
+        report = call("run", roster=marked, assumptions=case["assumptions"],
+                      work=str(tmp_path), sensitivity=False, longterm=False)
+        assert report["run"] is True
+        assert "경고" in report["issues"]

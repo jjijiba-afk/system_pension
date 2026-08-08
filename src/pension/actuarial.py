@@ -159,6 +159,7 @@ def normal_retirement_age(
     *,
     wage_peak_age: int | None = None,
     is_executive: bool = False,
+    declared_nra: int = 0,
 ) -> int:
     """퇴직급여 정년연령.
 
@@ -176,6 +177,10 @@ def normal_retirement_age(
     사람은 현재 연령에 직군별 가산연수를 더해 잔여 근무기간을 확보한다.
 
     임원은 정년이 따로 없거나 다른 경우가 많아 직군 규칙의 임원 값을 먼저 본다.
+
+    ``declared_nra`` 는 명부에 **개인별로** 적어 온 정년연령이다. 계약으로 정년을
+    달리 정한 임원처럼 직군 규칙 한 줄로 담을 수 없는 경우가 있어, 값이 있으면
+    직군 규정보다 우선한다. 정년을 이미 넘겼는지 판정도 이 값으로 한다.
     """
     nra = rule.severance_nra
     add_age = rule.over_nra_add_age
@@ -184,6 +189,9 @@ def normal_retirement_age(
             nra = rule.executive_nra
         if rule.executive_over_nra_add_age:
             add_age = rule.executive_over_nra_add_age
+
+    if declared_nra > 0:
+        nra = declared_nra
 
     if wage_peak_age is not None and wage_peak_age > age:
         return wage_peak_age

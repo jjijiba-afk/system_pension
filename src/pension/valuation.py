@@ -467,7 +467,20 @@ def value_roster(
     result = ValuationResult(base_date=config.base_date, label=assumptions.label)
     for member in roster.active:
         if member.hire_date is not None and member.hire_date > config.base_date:
-            continue  # 기준일 이후 입사자는 산출 대상이 아니다.
+            # 기준일 이후 입사자는 산출 대상이 아니다. 조용히 빼면 인원이 왜
+            # 줄었는지 알 수 없으므로 제외 사유를 남긴다.
+            skipped = MemberValuation(
+                employee_id=member.employee_id, name=member.name,
+                job_group=member.job_group, gender=member.gender.value,
+                age=member.age, past_service=0.0, projection_years=0,
+                monthly_wage=member.monthly_wage,
+                employee_type=member.employee_type.value,
+                cost_code=member.cost_code, birth_date=member.birth_date,
+                hire_date=member.hire_date,
+                excluded_reason="입사일이 산출기준일보다 늦음",
+            )
+            result.members.append(skipped)
+            continue
         result.members.append(value_member(member, config, assumptions))
 
     # 이자원가는 개인별로 1년 이자율을 써 두었다. 곡선을 쓴 경우 대표 이자율은

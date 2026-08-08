@@ -55,6 +55,11 @@ class PlanAssets:
     """기말 공정가치."""
     closing_dbo: float = 0.0
     """기말 확정급여채무. 순부채를 내기 위해 함께 들고 있는다."""
+    unpaid_benefits: float = 0.0
+    """기준일 현재 미지급 퇴직급여.
+
+    이미 퇴직했는데 결산일까지 지급하지 않은 금액이다. 재직자 채무에는 잡히지
+    않지만 회사가 여전히 지고 있는 의무라 순부채에 더해야 한다."""
 
     @property
     def expected_closing(self) -> float:
@@ -67,14 +72,20 @@ class PlanAssets:
         )
 
     @property
+    def total_obligation(self) -> float:
+        """확정급여채무 + 미지급 퇴직급여."""
+        return self.closing_dbo + self.unpaid_benefits
+
+    @property
     def net_liability(self) -> float:
         """순확정급여부채. 음수면 순확정급여자산(초과적립)이다."""
-        return self.closing_dbo - self.closing_fair_value
+        return self.total_obligation - self.closing_fair_value
 
     @property
     def funded_ratio(self) -> float:
         """적립비율. 채무가 0 이면 0."""
-        return self.closing_fair_value / self.closing_dbo if self.closing_dbo else 0.0
+        total = self.total_obligation
+        return self.closing_fair_value / total if total else 0.0
 
     @property
     def overfunded(self) -> bool:
@@ -94,11 +105,14 @@ class PlanAssets:
 
     def net_rows(self) -> list[tuple[str, float]]:
         """순확정급여부채 표."""
-        return [
-            ("확정급여채무 현재가치", self.closing_dbo),
+        rows = [("확정급여채무 현재가치", self.closing_dbo)]
+        if self.unpaid_benefits:
+            rows.append(("미지급 퇴직급여", self.unpaid_benefits))
+        rows += [
             ("사외적립자산 공정가치", -self.closing_fair_value),
             ("순확정급여부채", self.net_liability),
         ]
+        return rows
 
 
 def build_plan_assets(
@@ -109,6 +123,7 @@ def build_plan_assets(
     benefits_paid: float = 0.0,
     discount_rate: float = 0.0,
     closing_dbo: float = 0.0,
+    unpaid_benefits: float = 0.0,
     period_years: float = 1.0,
 ) -> PlanAssets:
     """자산 증감표를 만든다.
@@ -130,6 +145,7 @@ def build_plan_assets(
         interest_income=interest,
         closing_fair_value=closing_fair_value,
         closing_dbo=closing_dbo,
+        unpaid_benefits=unpaid_benefits,
     )
     # 재측정손익은 나머지로 정한다 — 신탁 명세서의 기말 잔액이 사실이고,
     # 그 값에 맞추려면 얼마가 더 벌리거나 덜 벌렸어야 하는지를 역산한다.

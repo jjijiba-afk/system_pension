@@ -59,6 +59,10 @@ class RollForward:
     직전 그 사람의 채무를 알아야 하므로 프로그램이 혼자 알아낼 수 없다.
     담당자가 전기 개인별 결과에서 합계를 넣어 주면 그때 계산한다.
     """
+    other_paid: float = 0.0
+    """퇴직위로금 등 퇴직급여 이외 지급액. 총지급금액과 별도 칸으로 오는 금액이다."""
+    transfers_in: float = 0.0
+    """전입으로 인수한 금액. 전출 지급액과 짝을 이룬다."""
     experience_adjustment: float = 0.0
     """경험조정에 의한 보험수리적손익."""
     assumption_change: float = 0.0
@@ -81,6 +85,8 @@ class RollForward:
             + self.past_service_cost
             - self.benefits_paid
             - self.settlement_paid
+            - self.other_paid
+            + self.transfers_in
             + self.settlement_gain
         )
 
@@ -103,6 +109,8 @@ class RollForward:
             ("과거근무원가(제도개정)", self.past_service_cost),
             ("급여지급액", -self.benefits_paid),
             ("정산지급액(중간정산·전출)", -self.settlement_paid),
+            ("퇴직위로금 등 지급액", -self.other_paid),
+            ("전입 인수액", self.transfers_in),
             ("정산손익", self.settlement_gain),
             ("보험수리적손익 - 경험조정", self.experience_adjustment),
             ("보험수리적손익 - 가정변경", self.assumption_change),
@@ -121,6 +129,8 @@ def build_rollforward(
     dbo_after_amendment: float | None = None,
     settlement_paid: float = 0.0,
     settlement_obligation: float = 0.0,
+    other_paid: float = 0.0,
+    transfers_in: float = 0.0,
     past_service_cost: float = 0.0,
 ) -> RollForward:
     """증감표를 만든다.
@@ -140,6 +150,8 @@ def build_rollforward(
         interest_cost=interest_cost,
         benefits_paid=benefits_paid,
         settlement_paid=settlement_paid,
+        other_paid=other_paid,
+        transfers_in=transfers_in,
         past_service_cost=past_service_cost,
     )
     if settlement_obligation:

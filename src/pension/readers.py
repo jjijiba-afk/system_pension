@@ -374,6 +374,7 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.deducted_service_years = _number(get("deducted_service_years"))
         member.settlement_amount = _number(get("settlement_amount"))
         member.longterm_amount = _number(get("longterm_amount"))
+        member.declared_nra = int(_number(get("declared_nra")))
         member.transfer_in_amount = _number(get("transfer_in_amount"))
         member.extra_rate = _number(get("extra_rate"))
         member.extra_pay_base_wage = _number(get("extra_pay_base_wage"))
