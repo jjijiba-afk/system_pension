@@ -5,6 +5,7 @@ GUI 와 CLI 는 모두 이 모듈만 호출한다.
 
 from __future__ import annotations
 
+import datetime as _dt
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -64,6 +65,18 @@ class RunOptions:
     roster_path: Path
     assumptions_path: Path
     output_path: Path
+    base_date: _dt.date | None = None
+    """산출기준일을 덮어쓴다. 비우면 명부 ``Input`` 시트의 값을 쓴다.
+
+    명부를 고치지 않고 기준일만 바꿔 보고 싶은 일이 잦다(가결산·기준일 확정 전
+    시산). 엑셀을 열어 고치게 하면 원본 명부가 회차마다 달라진다.
+    """
+    period_start: _dt.date | None = None
+    """산출 시작일(기초일, 보통 직전 결산일). 이자원가를 이 기간으로 환산한다.
+
+    비우면 1년으로 본다. 결산기가 바뀌어 기간이 1년이 아닌 회차에서 이자원가가
+    과대·과소 계상되는 것을 막는다.
+    """
     include_sensitivity: bool = True
     include_longterm: bool = True
     shocks: tuple[Shock, ...] = DEFAULT_SHOCKS
@@ -137,6 +150,7 @@ class PensionRun:
 def load_inputs(
     roster_path: str | Path,
     assumptions_path: str | Path,
+    base_date: _dt.date | None = None,
     *,
     label: str = "당기 가정",
 ) -> tuple[CalculationConfig, Roster, Assumptions, IssueLog]:
@@ -160,6 +174,8 @@ def load_inputs(
     wb = open_workbook(roster_path)
     try:
         config = read_config(wb)
+        if base_date is not None:
+            config = replace(config, base_date=base_date)
         if payout_rules:
             # 직군 배정이 명부를 읽는 도중에 일어나므로 읽기 전에 바꿔 끼워야 한다.
             config = replace(config, job_group_rules=payout_rules, inferred=False)
@@ -195,7 +211,7 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
     """
     progress("명부와 기초율을 읽는 중", 0.05)
     config, roster, assumptions, log = load_inputs(
-        options.roster_path, options.assumptions_path
+        options.roster_path, options.assumptions_path, options.base_date
     )
 
     if log.has_errors() and not options.allow_errors:
@@ -240,6 +256,13 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
     return run
 
 
+def _period_years(base_date: _dt.date, start: _dt.date | None) -> float:
+    """산출 기간(년). 시작일을 주지 않았거나 순서가 뒤집혔으면 1년으로 본다."""
+    if start is None or start >= base_date:
+        return 1.0
+    return (base_date - start).days / 365.25
+
+
 def _build_rollforward(
     run: PensionRun, options: RunOptions, progress: Progress
 ) -> RollForward:
@@ -252,12 +275,15 @@ def _build_rollforward(
     benefits_paid = run.benefits_paid
     settlements = run.settlements_paid
 
-    # 이자원가는 기초채무에 대한 1년치에, 기중 발생한 근무원가·급여지급의
+    # 이자원가는 기초채무에 대한 기간분에, 기중 발생한 근무원가·급여지급의
     # 절반년치를 더해 근사한다(기중 균등발생 가정).
+    #
+    # 기간은 보통 1년이지만 결산기가 바뀌면 아니다. 산출 시작일을 주면 실제
+    # 기간으로 환산한다 — 1년으로 두면 9개월 결산에서 이자원가가 3할 부풀려진다.
+    years = _period_years(run.config.base_date, options.period_start)
     interest_cost = (
-        prior.dbo * rate
-        + service_cost * rate * 0.5
-        - (benefits_paid + settlements) * rate * 0.5
+        prior.dbo * rate * years
+        + (service_cost - benefits_paid - settlements) * rate * years * 0.5
     )
 
     dbo_prior_assumptions: float | None = None

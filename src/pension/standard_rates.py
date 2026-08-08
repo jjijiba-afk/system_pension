@@ -139,4 +139,7 @@ PROMOTION_BY_AGE: Final[list[list[float]]] = [
 DISCOUNT_RATE: Final[list[list[float]]] = [[1, 0.045]]
 
 #: ``[연차, Base-up 상승률]``. 승진·승급을 뺀 공통 인상률.
-SALARY_BASE_UP: Final[list[list[float]]] = [[1, 0.030], [6, 0.025]]
+#:
+#: 전 기간 2%. 한 줄만 두면 마지막 줄 값이 이후 전 구간에 적용되므로 이것이
+#: 곧 '전 기간 2%' 다. 회사의 임금협상 이력이 있으면 그쪽이 우선한다.
+SALARY_BASE_UP: Final[list[list[float]]] = [[1, 0.020]]

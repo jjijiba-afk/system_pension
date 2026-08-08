@@ -250,6 +250,82 @@ def test_backup_restores_on_a_clean_device(browser, app_url, shared_dir) -> None
     context.close()
 
 
+def test_editor_survives_tab_switching(page) -> None:
+    """가정을 입력하다 다른 탭에 다녀와도 값이 남아 있어야 한다."""
+    page.click("#tab-edit")
+    page.click("#ed-subtabs >> text=할인율")
+    first = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    first.nth(0).fill("3")
+    first.nth(1).fill("4.44%")
+
+    # 곧바로 다른 탭으로 — 디바운스가 끝나기 전에 옮긴다.
+    page.click("#tab-lib")
+    page.click("#tab-runs")
+    page.click("#tab-edit")
+
+    page.click("#ed-subtabs >> text=할인율")
+    kept = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    assert kept.nth(0).input_value() == "3"
+    assert kept.nth(1).input_value() == "4.44%"
+
+    # 새로고침해도 남아야 한다(브라우저에 임시 저장).
+    page.reload()
+    page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+    page.click("#tab-edit")
+    page.click("#ed-subtabs >> text=할인율")
+    after = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    assert after.nth(1).input_value() == "4.44%"
+
+
+def test_generator_tab_makes_and_runs_a_case(page) -> None:
+    """시험명부 탭에서 만든 명부로 곧바로 산출까지."""
+    page.click("#tab-gen")
+    page.fill("#gen-seed", "777")
+    page.click("#gen-run")
+    page.wait_for_selector("#gen-cases fieldset", timeout=120_000)
+    assert page.locator("#gen-cases fieldset").count() == 3
+
+    # 특이사항 안내문이 실제 내용을 담고 있어야 한다.
+    page.locator("#gen-cases button", has_text="특이사항 보기").first.click()
+    page.wait_for_selector("#report-dialog[open]")
+    assert "산출 특이사항" in page.inner_text("#report-body")
+    page.click("#report-dialog >> text=닫기")
+
+    with page.expect_download() as captured:
+        page.click("#gen-download")
+    assert Path(captured.value.path()).read_bytes()[:2] == b"PK"
+
+    # '이 명부로 산출 준비' → 파일 선택 없이 그대로 산출된다.
+    page.locator("#gen-cases button", has_text="이 명부로 산출 준비").first.click()
+    page.wait_for_selector("#loaded-run-banner", state="visible")
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    assert "확정급여채무" in page.inner_text("#summary")
+
+
+def test_preset_round_trip_in_the_browser(page) -> None:
+    """가정세트를 저장하고 다시 불러온다."""
+    page.click("#tab-edit")
+    page.click("#ed-subtabs >> text=지급률")
+    cells = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    cells.nth(0).fill("10")
+    cells.nth(1).fill("13")
+
+    page.once("dialog", lambda dialog: dialog.accept("E2E 규정"))
+    page.click("#ed-preset-save")
+    page.wait_for_selector("#ed-status:has-text('저장했습니다')", timeout=60_000)
+
+    # 값을 지운 뒤 되불러오면 돌아와야 한다.
+    page.click("#ed-example")
+    page.select_option("#ed-preset", "E2E 규정")
+    page.click("#ed-preset-load")
+    page.wait_for_selector("#ed-status:has-text('불러왔습니다')", timeout=60_000)
+    page.click("#ed-subtabs >> text=지급률")
+    back = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    assert back.nth(0).input_value() == "10"
+    assert back.nth(1).input_value() == "13"
+
+
 def test_standard_rates_fill_the_grids(page) -> None:
     """내장 표준률 불러오기 — 15~70세 표가 채워져야 한다."""
     page.click("#tab-edit")

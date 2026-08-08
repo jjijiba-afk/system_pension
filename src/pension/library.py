@@ -33,6 +33,7 @@ from .normalize import text
 
 __all__ = [
     "CURVE_KIND",
+    "PRESET_KIND",
     "RATES_KIND",
     "ROSTER_KIND",
     "LibraryEntry",
@@ -50,8 +51,16 @@ CURVE_KIND: Final = "금리표"
 RATES_KIND: Final = "표준률"
 ROSTER_KIND: Final = "명부"
 """올렸던 명부. 같은 단체를 다음 결산에 다시 산출할 때 그대로 꺼내 쓴다."""
+PRESET_KIND: Final = "가정세트"
+"""산출가정 한 벌(지급률·지급규정·직군 매핑까지 포함).
 
-_KINDS: Final = (CURVE_KIND, RATES_KIND, ROSTER_KIND)
+표준률은 퇴직률·승급률·사망률처럼 **회사와 무관한 표** 를 담는 자리다. 그에 비해
+지급률과 지급규정은 회사마다 다르지만, 같은 회사를 매년 산출하거나 규정이 같은
+계열사를 여럿 맡을 때는 그대로 재사용한다. 그래서 편집 화면의 입력 전체를
+이름 붙여 저장해 둔다.
+"""
+
+_KINDS: Final = (CURVE_KIND, RATES_KIND, ROSTER_KIND, PRESET_KIND)
 _SETTINGS: Final = "설정.json"
 
 #: 종류별로 받아 두는 확장자. 명부는 예전 ``.xls`` 로 오는 일이 흔하다.
@@ -59,6 +68,7 @@ _SUFFIXES: Final[dict[str, tuple[str, ...]]] = {
     CURVE_KIND: (".xlsx", ".xlsm"),
     RATES_KIND: (".xlsx", ".xlsm"),
     ROSTER_KIND: (".xlsx", ".xlsm", ".xls"),
+    PRESET_KIND: (".xlsx", ".xlsm"),
 }
 
 

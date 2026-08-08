@@ -110,6 +110,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--grade", default="",
         help="금리표에서 고를 등급 (기본: AA0 → AA+ → AA- 순으로 찾음)",
     )
+    samples.add_argument(
+        "--cases", action="store_true",
+        help="난수로 만든 시험용 명부 3종(표준·복합제도·자료불량)과 짝 기초율도 함께",
+    )
+    samples.add_argument(
+        "--seed", type=int, default=20251231,
+        help="시험용 명부 난수 씨앗. 같은 값이면 같은 명부가 나옵니다",
+    )
 
     lib = sub.add_parser("library", help="금리표·표준률을 시스템에 등록/조회")
     lib.add_argument("action", choices=["list", "add", "remove"], help="할 일")
@@ -355,6 +363,16 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     print(f"기본 파일을 만들었습니다: {args.directory}")
     for path in paths:
         print(f"  {path.name}")
+
+    if args.cases:
+        from .rostergen import CASES, write_case_pack
+
+        made = write_case_pack(args.directory / "시험명부", seed=args.seed)
+        print(f"\n시험용 명부 {len(CASES)}종 (재직 290명 안팎, 난수 씨앗 {args.seed}):")
+        for spec in CASES:
+            print(f"  {spec.title}.xlsx + {spec.title}_기초율.xlsx — {spec.summary}")
+        print(f"  → {args.directory / '시험명부'} ({len(made)}개 파일)")
+
     print(
         "\n바로 돌려 보려면:\n"
         f"  pension calc {paths[0]} {paths[1]} -o 산출결과.xlsx\n"
