@@ -1,0 +1,62 @@
+name: 아이패드 웹앱 배포 (GitHub Pages)
+
+# webapp/dist 를 GitHub Pages 로 배포한다. Pages 는 업로드한 산출물만 서빙하므로
+# 저장소의 명부 자료가 노출되지 않고, 웹앱 휠에서도 예제 명부 CSV 를 빼고 빌드한다.
+on:
+  push:
+    branches: ["claude/pension-actuarial-system-2txkoa"]
+    paths:
+      - "webapp/**"
+      - "src/pension/**"
+      - "pyproject.toml"
+      - ".github/workflows/deploy-webapp.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 웹앱 빌드
+        run: python webapp/build.py
+
+      - name: 예제 명부 미포함 확인
+        run: |
+          python - <<'CHECK'
+          import glob, zipfile
+          wheel = glob.glob("webapp/dist/wheels/pension_actuarial-*.whl")[0]
+          csvs = [n for n in zipfile.ZipFile(wheel).namelist() if n.endswith(".csv")]
+          assert not csvs, f"개인정보 CSV 가 웹앱에 실렸다: {csvs}"
+          print("확인: 웹앱 휠에 명부 CSV 없음")
+          CHECK
+
+      - name: Pages 설정
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: 업로드
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: webapp/dist
+
+      - name: 배포
+        id: deployment
+        uses: actions/deploy-pages@v4
