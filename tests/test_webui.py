@@ -274,6 +274,157 @@ class TestRosterLibrary:
         assert entries_after[0]["suffix"] == ".xls"
 
 
+class TestDefaults:
+    """빈 화면에서 시작해도 말이 되는 산출이 나와야 한다."""
+
+    def test_base_up_is_two_percent_for_all_years(self) -> None:
+        state = call("state_new")["state"]
+        assert state["grids"]["임금상승률"]["rows"] == [["1", "2%"]]
+
+    def test_benefit_defaults_to_statutory(self, tmp_path) -> None:
+        """지급률 표가 비면 법정(배수 = 근속연수, 연속)이어야 한다."""
+        state = call("state_new", groups=["정규직"])["state"]
+        assert state["benefit_rules"]["정규직"]["mode"] == "법정"
+        assert state["grids"]["지급률"]["rows"] == []
+
+        state["grids"]["할인율"]["rows"] = [["1", "4.5%"]]
+        path = str(tmp_path / "기초율.xlsx")
+        assert call("state_write", state=state, path=path)["written"] is True
+
+        loaded = load_assumptions(path)
+        # 12.6년 근속이면 12.6 배 — 정수로 끊기면 안 된다.
+        assert loaded.severance_benefit.multiple("정규직", 12.6) == pytest.approx(12.6)
+
+    def test_filled_table_wins_over_statutory(self, tmp_path) -> None:
+        """누진·수식을 쓰지 않아도 지급률 탭에 넣은 값이 그대로 적용돼야 한다."""
+        state = call("state_new", groups=["정규직"])["state"]
+        state["grids"]["할인율"]["rows"] = [["1", "4.5%"]]
+        state["grids"]["지급률"]["rows"] = [["0", "1"], ["10", "12"], ["20", "26"]]
+        path = str(tmp_path / "기초율.xlsx")
+        call("state_write", state=state, path=path)
+
+        scale = load_assumptions(path).severance_benefit
+        assert scale.multiple("정규직", 5) == pytest.approx(1)
+        assert scale.multiple("정규직", 12.6) == pytest.approx(12)
+        assert scale.multiple("정규직", 25) == pytest.approx(26)
+
+    def test_standard_state_keeps_statutory_default(self) -> None:
+        state = call("standard_state", groups=["정규직", "임원"])["state"]
+        assert state["benefit_rules"]["정규직"]["mode"] == "법정"
+        assert state["grids"]["지급률"]["rows"] == []
+        assert state["grids"]["임금상승률"]["rows"] == [["1", "0.02"]]
+
+
+class TestDates:
+    """산출기준일·시작일 입력란."""
+
+    def test_base_date_override(self, tmp_path, roster_path) -> None:
+        """명부를 고치지 않고 기준일만 바꿔 산출할 수 있어야 한다."""
+        state = form.example_state(["1정규직", "2임원", "3계약직"])
+        assumptions = str(tmp_path / "기초율.xlsx")
+        call("state_write", state=state, path=assumptions)
+
+        base = call("run", roster=str(roster_path), assumptions=assumptions,
+                    work=str(tmp_path), force=True, sensitivity=False, longterm=False)
+        moved = call("run", roster=str(roster_path), assumptions=assumptions,
+                     work=str(tmp_path / "b"), force=True, sensitivity=False,
+                     longterm=False, base_date="2026-12-31")
+
+        assert base["values"]["base_date"] == "2025-12-31"
+        assert moved["values"]["base_date"] == "2026-12-31"
+        # 한 해 더 근무했으므로 채무가 늘어야 한다.
+        assert moved["values"]["dbo"] > base["values"]["dbo"]
+
+    def test_period_start_scales_interest(self, tmp_path, roster_path) -> None:
+        """기간이 1년이 아니면 이자원가도 그 기간만큼이어야 한다."""
+        state = form.example_state(["1정규직", "2임원", "3계약직"])
+        assumptions = str(tmp_path / "기초율.xlsx")
+        call("state_write", state=state, path=assumptions)
+
+        common = dict(roster=str(roster_path), assumptions=assumptions, force=True,
+                      sensitivity=False, longterm=False, prior_dbo=10_000_000_000,
+                      prior_rate=0.045)
+        full = call("run", work=str(tmp_path / "1"), **common)
+        half = call("run", work=str(tmp_path / "2"),
+                    base_date="2025-12-31", period_start="2025-07-01", **common)
+
+        def gain(report):
+            return next(v for label, v in report["summary"] if label == "보험수리적손익")
+
+        # 이자원가가 줄면 기대 기말채무가 줄고, 그만큼 손익이 커진다.
+        assert gain(half) != gain(full)
+
+    def test_bad_date_is_reported(self, tmp_path, roster_path) -> None:
+        assert "날짜를 읽지 못했습니다" in call_error(
+            "run", roster=str(roster_path), assumptions=str(roster_path),
+            work=str(tmp_path), base_date="어제",
+        )
+
+
+class TestPresets:
+    """지급률 등 가정 한 벌을 기본가정에 저장해 두고 다시 쓴다."""
+
+    def test_save_and_load(self, tmp_path) -> None:
+        state = call("state_new", groups=["정규직", "임원"])["state"]
+        state["grids"]["할인율"]["rows"] = [["1", "4.2%"]]
+        state["grids"]["지급률"]["rows"] = [["0", "1", "1"], ["10", "12", "15"]]
+        state["payout"]["임원"]["withdrawal"] = "미반영"
+        state["mapping"] = [["사원", "정규사원", "정규직"], ["대표", "임원", "임원"]]
+
+        saved = call("preset_save", name="A사 퇴직금규정", state=state)
+        assert saved["saved"] is True
+        assert [e["name"] for e in saved["library"]["가정세트"]["entries"]] == ["A사 퇴직금규정"]
+
+        back = call("preset_state", name="A사 퇴직금규정")["state"]
+        assert back["grids"]["지급률"]["rows"] == [["0", "1", "1"], ["10", "12", "15"]]
+        assert back["payout"]["임원"]["withdrawal"] == "미반영"
+        assert back["mapping"] == state["mapping"]
+
+    def test_bad_state_is_refused(self) -> None:
+        broken = call("state_new", groups=["정규직"])["state"]
+        broken["benefit_rules"]["정규직"] = {"mode": "수식", "formula": ""}
+        result = call("preset_save", name="틀린것", state=broken)
+        assert result["saved"] is False and result["problems"]
+
+    def test_name_is_required(self) -> None:
+        state = call("state_new")["state"]
+        assert "이름" in call_error("preset_save", name="  ", state=state)
+
+
+class TestGenerator:
+    """시험용 난수 명부를 시스템 안에서 만든다."""
+
+    def test_makes_pack_with_reports(self, tmp_path) -> None:
+        result = call("gen_cases", work=str(tmp_path), seed=42)
+        assert Path(result["path"]).exists()
+        assert len(result["files"]) == 9        # 사례 3종 × (명부·기초율·안내문)
+        assert len(result["cases"]) == 3
+
+        dirty = next(c for c in result["cases"] if c["force"])
+        assert "일부러 심어 둔 자료 오류" in dirty["report"]
+        clean = next(c for c in result["cases"] if not c["force"])
+        assert "산출 특이사항" in clean["report"]
+        assert Path(clean["roster"]).exists() and Path(clean["assumptions"]).exists()
+
+    def test_generated_case_runs_end_to_end(self, tmp_path) -> None:
+        made = call("gen_cases", work=str(tmp_path), seed=42)
+        case = next(c for c in made["cases"] if not c["force"])
+        report = call("run", roster=case["roster"], assumptions=case["assumptions"],
+                      work=str(tmp_path), sensitivity=False, longterm=True)
+        assert report["run"] is True
+        assert report["values"]["dbo"] > 0
+
+    def test_register_puts_them_in_the_lists(self, tmp_path) -> None:
+        call("gen_cases", work=str(tmp_path), seed=42)
+        result = call("gen_case_register", work=str(tmp_path))
+        assert len(result["registered"]) == 3
+        assert len(result["library"]["명부"]["entries"]) == 3
+        assert len(result["library"]["가정세트"]["entries"]) == 3
+
+    def test_register_without_generating_says_so(self, tmp_path) -> None:
+        assert "먼저" in call_error("gen_case_register", work=str(tmp_path / "빈곳"))
+
+
 class TestBackup:
     """브라우저 저장소는 지워질 수 있다 — 기기 밖으로 내보내고 되살린다."""
 

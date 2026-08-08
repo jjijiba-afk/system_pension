@@ -240,6 +240,15 @@ class SalaryScale:
         return SalaryScale(base_up=self.base_up.shifted(delta), promotion=self.promotion)
 
 
+STATUTORY_MODE: Final = "법정"
+"""기본 방식. 지급률 표를 비워 두면 법정 퇴직금(배수 = 근속연수, 연속)이고,
+표에 값을 넣으면 그 값을 누적 배수로 쓴다.
+
+``누적`` 과 엔진 동작이 같다. 이름을 따로 둔 이유는 화면에서 **아무것도 설정하지
+않았을 때 무엇이 적용되는지** 를 보이게 하기 위해서다. '누적' 이라고만 적혀
+있으면 표가 비었을 때 배수가 0 이 되는지 법정이 되는지 알 수 없다.
+"""
+
 CUMULATIVE: Final = "누적"
 """지급률 방식 — 표 값이 해당 근속연수의 **누적** 배수 그 자체."""
 
@@ -249,7 +258,7 @@ PROGRESSIVE: Final = "누진"
 FORMULA: Final = "수식"
 """지급률 방식 — 배수를 수식으로 직접 계산."""
 
-BENEFIT_MODES: Final = (CUMULATIVE, PROGRESSIVE, FORMULA)
+BENEFIT_MODES: Final = (STATUTORY_MODE, CUMULATIVE, PROGRESSIVE, FORMULA)
 
 
 def _progressive_multiple(curve: RateCurve, service: float) -> float:

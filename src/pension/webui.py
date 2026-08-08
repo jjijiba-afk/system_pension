@@ -31,6 +31,7 @@ from .formula import FUNCTIONS, VARIABLES
 from .jobgroup import DEFAULT_GROUPS, scan_roster, suggest_group
 from .library import (
     CURVE_KIND,
+    PRESET_KIND,
     RATES_KIND,
     ROSTER_KIND,
     entries,
@@ -43,6 +44,7 @@ from .library import (
     write_settings,
 )
 from .normalize import text
+from .rostergen import CASES
 from .yieldcurve import INVESTMENT_GRADES, pick_curve, read_yield_curves
 
 __all__ = ["api"]
@@ -85,6 +87,13 @@ def _meta(_request: dict) -> dict[str, Any]:
         "benefit_modes": list(BENEFIT_MODES),
         "longterm_types": list(LONGTERM_TYPES),
         "grades": [*INVESTMENT_GRADES, "국고채"],
+        "kinds": {"curve": CURVE_KIND, "rates": RATES_KIND,
+                  "roster": ROSTER_KIND, "preset": PRESET_KIND},
+        "cases": [
+            {"key": spec.key, "title": spec.title, "summary": spec.summary,
+             "active": spec.active, "retired": spec.retired}
+            for spec in CASES
+        ],
         "formula_variables": dict(VARIABLES),
         "formula_functions": sorted(FUNCTIONS),
     }
@@ -151,7 +160,7 @@ def _formula_preview(request: dict) -> dict[str, Any]:
 def _library_list(_request: dict) -> dict[str, Any]:
     settings = read_settings()
     result: dict[str, Any] = {}
-    for kind in (CURVE_KIND, RATES_KIND, ROSTER_KIND):
+    for kind in (CURVE_KIND, RATES_KIND, ROSTER_KIND, PRESET_KIND):
         default = resolve_default(kind)
         result[kind] = {
             "entries": [
@@ -238,6 +247,31 @@ def _curve_rows(request: dict) -> dict[str, Any]:
         "label": curve.label,
         "base_date": str(curve.base_date or ""),
     }
+
+
+def _preset_save(request: dict) -> dict[str, Any]:
+    """지금 편집 중인 산출가정 한 벌을 이름 붙여 등록한다.
+
+    지급률·지급규정·직군 매핑까지 통째로 들어간다. 같은 회사를 다음 결산에
+    다시 산출하거나 규정이 같은 계열사를 맡을 때 그대로 꺼내 쓴다.
+    """
+    name = text(request.get("name"))
+    if not name:
+        raise ValueError("가정세트 이름을 입력하세요 (예: A사 퇴직금규정)")
+    problems = form.state_problems(request["state"])
+    if problems:
+        return {"problems": problems, "saved": False}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = form.write_state(request["state"], Path(tmp) / f"{name}.xlsx")
+        entry = register(PRESET_KIND, path, name=name)
+    return {"problems": [], "saved": True, "name": entry.name, **_library_list({})}
+
+
+def _preset_state(request: dict) -> dict[str, Any]:
+    """등록된 가정세트를 편집 화면으로 되돌린다."""
+    path = _registered_path(PRESET_KIND, text(request.get("name")))
+    return {"state": form.read_state(path)}
 
 
 def _rates_state(request: dict) -> dict[str, Any]:
@@ -339,6 +373,8 @@ def _run(request: dict) -> dict[str, Any]:
             roster_path=Path(request["roster"]),
             assumptions_path=Path(request["assumptions"]),
             output_path=out,
+            base_date=_as_date(request.get("base_date")),
+            period_start=_as_date(request.get("period_start")),
             include_sensitivity=bool(request.get("sensitivity", True)),
             include_longterm=bool(request.get("longterm", True)),
             allow_errors=bool(request.get("force", False)),
@@ -550,6 +586,85 @@ def _run_delete(request: dict) -> dict[str, Any]:
     return _run_list({})
 
 
+def _as_date(token: object) -> _dt.date | None:
+    """``2025-12-31`` 같은 날짜 문자열. 비었거나 못 읽으면 ``None``."""
+    value = text(token)
+    if not value:
+        return None
+    from .dates import DateParseError, parse_roster_date
+
+    try:
+        # 화면에서 오는 값은 ``2025-12-31`` 이라 두 자리 연도 피벗은 쓰이지 않는다.
+        parsed = parse_roster_date(value, _dt.date.today().year)
+    except DateParseError:
+        parsed = None
+    if parsed is None:
+        raise ValueError(f"날짜를 읽지 못했습니다: {value} (예: 2025-12-31)")
+    return parsed
+
+
+# ── 시험용 난수 명부 ─────────────────────────────────────────────
+
+def _gen_cases(request: dict) -> dict[str, Any]:
+    """난수 명부 세 사례를 만들어 zip 하나로 묶는다.
+
+    명부·짝이 되는 기초율·특이사항 안내문이 한 벌로 나온다. 안내문이 없으면
+    난수 명부를 열어 봐도 무엇을 시험하려는 자료인지 알 수 없다.
+    """
+    from .rostergen import write_case_pack
+
+    seed = int(request.get("seed") or 20251231)
+    work = Path(request.get("work", "/work"))
+    folder = work / "시험명부"
+    if folder.exists():
+        shutil.rmtree(folder)
+    made = write_case_pack(folder, seed=seed)
+
+    target = work / f"시험명부_{seed}.zip"
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in made:
+            archive.write(path, path.name)
+
+    return {
+        "path": str(target), "filename": target.name,
+        "size": target.stat().st_size,
+        "files": [path.name for path in made],
+        "cases": [
+            {
+                "key": spec.key, "title": spec.title, "summary": spec.summary,
+                "roster": str(folder / f"{spec.title}.xlsx"),
+                "assumptions": str(folder / f"{spec.title}_기초율.xlsx"),
+                "report": (folder / f"{spec.title}_특이사항.txt").read_text(
+                    encoding="utf-8"
+                ),
+                "force": bool(spec.flags.get("dirty")),
+            }
+            for spec in CASES
+        ],
+    }
+
+
+def _gen_case_register(request: dict) -> dict[str, Any]:
+    """만든 시험 명부를 그대로 [저장된 명부]·[가정세트] 목록에 넣는다."""
+    from .rostergen import CASES as _CASES
+
+    work = Path(request.get("work", "/work"))
+    folder = work / "시험명부"
+    wanted = text(request.get("key"))
+    made = []
+    for spec in _CASES:
+        if wanted and spec.key != wanted:
+            continue
+        roster = folder / f"{spec.title}.xlsx"
+        assumptions = folder / f"{spec.title}_기초율.xlsx"
+        if not roster.exists():
+            raise ValueError("먼저 [시험 명부 만들기] 를 눌러 주세요")
+        register(ROSTER_KIND, roster, name=spec.title)
+        register(PRESET_KIND, assumptions, name=f"{spec.title}_기초율")
+        made.append(spec.title)
+    return {"registered": made, **_library_list({})}
+
+
 def _as_number(token: object) -> float:
     """'20,143,311,276 원' · '4.170% (수익률곡선기법…)' 처럼 서식이 붙은 값에서 숫자만."""
     match = re.search(r"-?[\d,]+(?:\.\d+)?", str(token))
@@ -675,6 +790,10 @@ _OPS = {
     "curve_grades": _curve_grades,
     "curve_rows": _curve_rows,
     "rates_state": _rates_state,
+    "preset_save": _preset_save,
+    "preset_state": _preset_state,
+    "gen_cases": _gen_cases,
+    "gen_case_register": _gen_case_register,
     "roster_scan": _roster_scan,
     "roster_groups": _roster_groups,
     "general_info": _general_info,

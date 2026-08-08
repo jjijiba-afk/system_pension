@@ -39,7 +39,6 @@ from .assumption_form import state_to_sheets as _state_to_sheets
 from .assumptions import (
     BENEFIT_MODES,
     BENEFIT_SHEET,
-    CUMULATIVE,
     DISCOUNT_SHEET,
     FORMULA,
     LONGTERM_SHEET,
@@ -49,6 +48,7 @@ from .assumptions import (
     MORTALITY_SHEET,
     PROMOTION_SHEET,
     SALARY_SHEET,
+    STATUTORY_MODE,
     WITHDRAWAL_SHEET,
 )
 from .formula import FUNCTIONS, VARIABLES, Formula, FormulaError
@@ -290,7 +290,7 @@ class _BenefitRuleTab(ttk.Frame):
 
         for index, group in enumerate(self.job_groups, start=1):
             saved = previous.get(group, {})
-            mode_var = tk.StringVar(value=saved.get("mode", CUMULATIVE))
+            mode_var = tk.StringVar(value=saved.get("mode", STATUTORY_MODE))
             formula_var = tk.StringVar(value=saved.get("formula", ""))
 
             ttk.Label(self._body, text=group).grid(row=index, column=0, sticky="w", padx=2)
@@ -406,7 +406,7 @@ class _BenefitRuleTab(ttk.Frame):
             row = self._rows.get(group)
             if row is None:
                 continue
-            row["mode"].set(item.get("mode") or CUMULATIVE)
+            row["mode"].set(item.get("mode") or STATUTORY_MODE)
             row["formula"].set(item.get("formula", ""))
             self._sync_row(group)
 

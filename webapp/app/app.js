@@ -96,15 +96,28 @@ boot();
 
 // ── 큰 탭 ────────────────────────────────────────────────────────
 const PAGES = [["tab-calc", "page-calc"], ["tab-edit", "page-edit"],
-               ["tab-lib", "page-lib"], ["tab-runs", "page-runs"]];
+               ["tab-lib", "page-lib"], ["tab-runs", "page-runs"],
+               ["tab-gen", "page-gen"]];
 for (const [tab, page] of PAGES) {
   $(tab).addEventListener("click", () => {
+    // 탭을 옮기기 전에 편집 중이던 가정을 먼저 확정 저장한다. 디바운스만
+    // 믿으면 마지막 몇 초의 입력이 사라진다 — 아이패드는 배경으로 밀린 페이지를
+    // 통째로 버리기도 한다.
+    flushEditor();
     for (const [t, p] of PAGES) {
       $(t).classList.toggle("on", t === tab);
       $(p).classList.toggle("on", p === page);
     }
   });
 }
+
+// 앱이 배경으로 가거나 닫힐 때도 저장한다.
+for (const event of ["pagehide", "beforeunload"]) {
+  window.addEventListener(event, flushEditor);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushEditor();
+});
 
 // ═════════ 산출가정 편집기 ═══════════════════════════════════════
 // 화면이 곧 자료다: DOM 의 입력 값을 collectState() 로 모으고,
@@ -117,6 +130,9 @@ let ruleBody = null;        // 지급률 규정
 let ltBody = null;          // 장기급여 유형
 let mapData = [];           // 직군 매핑 행 [{source, kind, normalized, active, retired, target, suggest}]
 const MIN_ROWS = 8;
+
+/** (명부직군, 임직원구분) 짝을 Map 키로. 이름에 무엇이 들어와도 겹치지 않게 JSON 으로. */
+const pairKey = (source, kind) => JSON.stringify([source || "", kind || ""]);
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -169,14 +185,27 @@ function buildEditor() {
   $("ed-grade").value = "AA0";
 
   // 입력이 바뀌면 잠시 뒤 브라우저에 임시 저장한다. 탭을 닫아도 살아 있도록.
-  let timer = null;
-  $("page-edit").addEventListener("input", () => {
-    clearTimeout(timer);
-    timer = setTimeout(saveEditorLocal, 1500);
-  });
+  // 칸을 빠져나가거나(change) 목록을 고르면 기다리지 않고 바로 저장한다.
+  $("page-edit").addEventListener("input", scheduleEditorSave);
+  $("page-edit").addEventListener("change", flushEditor);
+  $("page-edit").addEventListener("focusout", flushEditor);
+}
+
+let saveTimer = null;
+
+function scheduleEditorSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveEditorLocal, 800);
+}
+
+/** 예약된 저장을 기다리지 않고 지금 저장한다. */
+function flushEditor() {
+  clearTimeout(saveTimer);
+  saveEditorLocal();
 }
 
 function saveEditorLocal() {
+  if (!META || !payoutBody) return;   // 화면이 아직 만들어지기 전
   try {
     localStorage.setItem(EDITOR_STORE, JSON.stringify(collectState()));
     syncEditorHint();
@@ -525,11 +554,11 @@ async function scanRoster() {
   try {
     const path = await rosterIntoFS();
     const { found } = py("roster_scan", { path, groups });
-    const previous = new Map(mapData.map((r) => [r.source + " " + r.kind, r.target]));
+    const previous = new Map(mapData.map((r) => [pairKey(r.source, r.kind), r.target]));
     mapData = found.map((f) => ({
       source: f.source, kind: f.kind, normalized: f.normalized,
       active: f.active, retired: f.retired, suggest: f.suggest,
-      target: previous.get(f.source + " " + f.kind) || f.suggest,
+      target: previous.get(pairKey(f.source, f.kind)) || f.suggest,
     }));
     renderMap();
     saveEditorLocal();
@@ -573,9 +602,9 @@ function renderState(state) {
   renderPayout(state.payout || {});
   renderRules(state.benefit_rules || {});
   renderLongterm(state.longterm_rules || {});
-  const scanned = new Map(mapData.map((r) => [r.source + " " + r.kind, r]));
+  const scanned = new Map(mapData.map((r) => [pairKey(r.source, r.kind), r]));
   mapData = (state.mapping || []).map(([source, kind, target]) => {
-    const seen = scanned.get(source + " " + kind);
+    const seen = scanned.get(pairKey(source, kind));
     return { source, kind, target,
              normalized: seen?.normalized || "", active: seen?.active || 0,
              retired: seen?.retired || 0, suggest: seen?.suggest || target };
@@ -617,6 +646,41 @@ $("ed-groups-roster").addEventListener("click", async () => {
     applyGroups(result.groups);
   } catch (error) {
     alert("명부에서 직군을 읽지 못했습니다.\n\n" + error.message);
+  }
+});
+
+// ── 가정세트 ──
+// 지급률·지급규정·직군 매핑까지 통째로 저장해 두고 다음 결산에 그대로 쓴다.
+$("ed-preset-save").addEventListener("click", async () => {
+  const suggestion = $("ed-preset").value || "";
+  const name = prompt("가정세트 이름을 정하세요. (예: A사 퇴직금규정)", suggestion);
+  if (name === null || !name.trim()) return;
+  try {
+    flushEditor();
+    const result = py("preset_save", { name: name.trim(), state: collectState() });
+    if (!result.saved) {
+      alert("저장하기 전에 고쳐 주세요.\n\n· " + result.problems.join("\n· "));
+      return;
+    }
+    await persistHome();
+    refreshLibrary();
+    $("ed-preset").value = result.name;
+    $("ed-status").textContent =
+      `가정세트 '${result.name}' 을(를) 저장했습니다. 다른 단체에서도 골라 쓸 수 있습니다.`;
+  } catch (error) {
+    alert("저장하지 못했습니다.\n\n" + error.message);
+  }
+});
+
+$("ed-preset-load").addEventListener("click", () => {
+  const name = $("ed-preset").value;
+  if (!name) { alert("불러올 가정세트가 없습니다. 먼저 [현재 가정 저장] 으로 만드세요."); return; }
+  try {
+    renderState(py("preset_state", { name }).state);
+    flushEditor();
+    $("ed-status").textContent = `가정세트 '${name}' 을(를) 불러왔습니다.`;
+  } catch (error) {
+    alert(error.message);
   }
 });
 
@@ -718,6 +782,19 @@ function refreshLibrary() {
   renderLibraryList("금리표", library["금리표"], $("lib-curve-list"));
   renderLibraryList("표준률", library["표준률"], $("lib-rates-list"));
   renderLibraryList("명부", library["명부"], $("lib-roster-list"), { pin: false });
+  renderLibraryList("가정세트", library["가정세트"], $("lib-preset-list"));
+
+  const preset = $("ed-preset");
+  const chosenPreset = preset.value;
+  preset.replaceChildren(
+    ...library["가정세트"].entries.map((e) => el("option", { value: e.name }, e.name)));
+  if (!library["가정세트"].entries.length) {
+    preset.replaceChildren(el("option", { value: "" }, "(저장된 가정세트 없음)"));
+  } else if (library["가정세트"].entries.some((e) => e.name === chosenPreset)) {
+    preset.value = chosenPreset;
+  } else if (library["가정세트"].default) {
+    preset.value = library["가정세트"].default;
+  }
 
   // 산출 탭의 저장된 명부 목록.
   const savedRoster = $("roster-saved");
@@ -812,6 +889,8 @@ $("lib-rates-add").addEventListener("click", () =>
   registerAsset("표준률", $("lib-rates-file"), $("lib-rates-name")));
 $("lib-roster-add").addEventListener("click", () =>
   registerAsset("명부", $("lib-roster-file"), $("lib-roster-name")));
+$("lib-preset-add").addEventListener("click", () =>
+  registerAsset("가정세트", $("lib-preset-file"), $("lib-preset-name")));
 
 // ── 저장된 명부 ──
 // 목록에서 고르면 그 파일을 그대로 산출에 쓴다. 새 파일을 올리면 그쪽이 이긴다.
@@ -921,13 +1000,19 @@ $("form").addEventListener("submit", async (event) => {
     const options = {
       force: $("force").checked, sensitivity: $("sensitivity").checked,
       longterm: $("longterm").checked,
+      base_date: $("base_date").value, period_start: $("period_start").value,
       prior_dbo: $("prior_dbo").value, prior_rate: $("prior_rate").value,
       prior_run: $("prior-run").value,
     };
+    if (options.base_date && options.period_start
+        && options.period_start >= options.base_date) {
+      throw new Error("산출 시작일은 산출기준일보다 앞서야 합니다.");
+    }
     const report = py("run", {
       roster: rosterPath, assumptions: assumptionsPath,
       force: options.force, sensitivity: options.sensitivity,
       longterm: options.longterm,
+      base_date: options.base_date, period_start: options.period_start,
       prior_dbo: parseNumber(options.prior_dbo),
       prior_rate: parseRate(options.prior_rate),
       prior_service_cost: priorLink ? priorLink.values.service_cost : 0,
@@ -1074,6 +1159,8 @@ function restoreRun(name) {
     if ("force" in options) $("force").checked = Boolean(options.force);
     if ("sensitivity" in options) $("sensitivity").checked = Boolean(options.sensitivity);
     if ("longterm" in options) $("longterm").checked = Boolean(options.longterm);
+    $("base_date").value = options.base_date || "";
+    $("period_start").value = options.period_start || "";
     $("prior_dbo").value = options.prior_dbo || "";
     $("prior_rate").value = options.prior_rate || "";
     $("run-name").value = name;
@@ -1187,3 +1274,91 @@ async function importBackup(replace) {
 
 $("backup-import").addEventListener("click", () => importBackup(false));
 $("backup-replace").addEventListener("click", () => importBackup(true));
+
+$("base-date-clear").addEventListener("click", () => { $("base_date").value = ""; });
+
+// ═════════ 시험용 난수 명부 ══════════════════════════════════════
+// 실제 명부 없이 프로그램을 두드려 보거나 화면을 익힐 때 쓴다. 명부마다 짝이
+// 되는 기초율과 '무엇이 들어 있는지' 적은 안내문이 함께 나온다.
+
+let generated = null;
+
+$("gen-run").addEventListener("click", () => {
+  try {
+    status("시험 명부를 만드는 중… (몇 초 걸립니다)");
+    const seed = parseInt($("gen-seed").value, 10) || 20251231;
+    generated = py("gen_cases", { work: "/work", seed });
+    renderGenerated();
+    $("gen-download").disabled = false;
+    status(`시험 명부 ${generated.cases.length}종을 만들었습니다.`);
+  } catch (error) {
+    status("만들지 못했습니다: " + (error.message || error));
+    alert(error.message || error);
+  }
+});
+
+$("gen-download").addEventListener("click", () => {
+  if (!generated) return;
+  download(generated.path, generated.filename, "application/zip");
+});
+
+function renderGenerated() {
+  const target = $("gen-cases");
+  target.replaceChildren(...generated.cases.map((item) => {
+    const box = el("fieldset", {},
+      el("legend", {}, item.title),
+      el("div", { class: "hint" }, item.summary),
+      el("div", { class: "toolbar" },
+        el("button", { class: "small primary", type: "button",
+          onclick: () => useGenerated(item) }, "이 명부로 산출 준비"),
+        el("button", { class: "small", type: "button",
+          onclick: () => showReport(item) }, "특이사항 보기"),
+        el("button", { class: "small", type: "button",
+          onclick: () => registerGenerated(item) }, "목록에 등록")));
+    if (item.force) {
+      box.append(el("div", { class: "warn-box" },
+        "자료 오류를 일부러 심은 명부입니다 — [검증 오류가 있어도 산출 강행] 을 켜야 끝까지 돕니다."));
+    }
+    return box;
+  }));
+}
+
+function useGenerated(item) {
+  // 생성한 파일을 그대로 산출 입력으로 물린다. 업로드를 거치지 않는다.
+  loadedRun = {
+    name: item.title, roster: item.roster, assumptions: item.assumptions,
+    rosterName: item.title + ".xlsx",
+  };
+  $("roster").value = "";
+  $("roster-saved").value = "";
+  $("asrc-saved").disabled = false;
+  $("asrc-saved").checked = true;
+  $("saved-asrc-hint").textContent = `— ${item.title} 의 짝 기초율`;
+  $("force").checked = Boolean(item.force);
+  $("base_date").value = "";
+  $("period_start").value = "";
+  $("loaded-run-text").textContent =
+    `시험 명부 '${item.title}' 과(와) 짝 기초율을 사용합니다.` +
+    (item.force ? " 자료 오류가 있어 [강행] 을 켜 두었습니다." : "");
+  $("loaded-run-banner").style.display = "block";
+  $("roster-hint").textContent = "시험 명부를 사용합니다. 새 파일을 고르면 대체됩니다.";
+  $("tab-calc").click();
+  status(`시험 명부 '${item.title}' 을(를) 산출 탭에 넣었습니다. [산출 실행]을 누르세요.`);
+}
+
+function showReport(item) {
+  $("report-title").textContent = `${item.title} — 특이사항`;
+  $("report-body").textContent = item.report;
+  $("report-dialog").showModal();
+}
+
+async function registerGenerated(item) {
+  try {
+    py("gen_case_register", { work: "/work", key: item.key });
+    await persistHome();
+    refreshLibrary();
+    status(`'${item.title}' 을(를) [저장된 명부]·[가정세트] 목록에 등록했습니다.`);
+  } catch (error) {
+    alert(error.message);
+  }
+}

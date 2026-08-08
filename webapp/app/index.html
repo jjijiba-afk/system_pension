@@ -21,6 +21,7 @@
   <button id="tab-edit">산출가정 입력</button>
   <button id="tab-lib">기본가정 관리</button>
   <button id="tab-runs">산출 내역</button>
+  <button id="tab-gen">시험명부</button>
 </nav>
 
 <!-- ════════ 산출 ════════ -->
@@ -51,7 +52,22 @@
   <input type="file" id="assumptions" accept=".xlsx,.xlsm">
   <div class="hint">할인율 · 승급률 · 퇴직률 · 사망률 · 지급률 · 지급규정 시트가 든 워크북</div>
 </fieldset>
-<fieldset><legend>3. 산출 옵션</legend>
+<fieldset><legend>3. 산출 기준일</legend>
+  <div class="row">
+    <span style="font-weight:600;min-width:92px">산출기준일</span>
+    <input type="date" id="base_date">
+    <button class="small" type="button" id="base-date-clear">명부 값 사용</button>
+  </div>
+  <div class="hint">비우면 명부 Input 시트의 산출기준일을 씁니다. 여기에 넣으면
+  명부를 고치지 않고 기준일만 바꿔 산출합니다(가결산·시산).</div>
+  <div class="row" style="margin-top:10px">
+    <span style="font-weight:600;min-width:92px">산출 시작일</span>
+    <input type="date" id="period_start">
+  </div>
+  <div class="hint">직전 결산일(기초일)입니다. 넣으면 증감분석의 이자원가를 그
+  기간으로 환산합니다. 비우면 1년으로 봅니다.</div>
+</fieldset>
+<fieldset><legend>4. 산출 옵션</legend>
   <div class="check"><input type="checkbox" id="force">
     <label for="force" style="margin:0">검증 오류가 있어도 산출 강행 (검토용)</label></div>
   <div class="check"><input type="checkbox" id="sensitivity" checked>
@@ -59,7 +75,7 @@
   <div class="check"><input type="checkbox" id="longterm" checked>
     <label for="longterm" style="margin:0">기타장기종업원급여 별도 산출</label></div>
 </fieldset>
-<fieldset><legend>4. 전기 산출 결과 (증감분석용 · 최초 평가면 비워 두세요)</legend>
+<fieldset><legend>5. 전기 산출 결과 (증감분석용 · 최초 평가면 비워 두세요)</legend>
   <div class="lib-line">
     <span style="font-weight:600">저장된 산출에서</span>
     <select id="prior-run"><option value="">(직접 입력)</option></select>
@@ -100,6 +116,15 @@
 <!-- ════════ 산출가정 입력 ════════ -->
 <section class="page" id="page-edit">
 <fieldset><legend>시스템 등록 자료</legend>
+  <div class="lib-line">
+    <span style="font-weight:600">가정세트</span>
+    <select id="ed-preset"></select>
+    <button class="small" id="ed-preset-load">불러오기</button>
+    <button class="small primary" id="ed-preset-save">현재 가정 저장</button>
+  </div>
+  <div class="hint">지금 화면의 입력 전체(지급률·지급규정·직군 매핑까지)를 이름 붙여
+  저장합니다. 같은 회사를 다음 결산에 다시 산출하거나 규정이 같은 계열사를 맡을 때
+  그대로 꺼내 씁니다.</div>
   <div class="lib-line">
     <span style="font-weight:600">표준률</span>
     <select id="ed-rates"></select>
@@ -147,6 +172,17 @@
 여기 등록해 두면 [산출가정 입력] 화면에서 목록으로 골라 쓸 수 있고, 이 기기의
 브라우저 안에 저장되어 다음에 열어도 남아 있습니다. 따로 지정하지 않으면
 <b>가장 최근 등록한 것</b>이 기본으로 잡힙니다.</p>
+
+<fieldset><legend>가정세트 (지급률·지급규정 포함 산출가정 한 벌)</legend>
+  <div class="lib-line">
+    <input type="file" id="lib-preset-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-preset-name" placeholder="등록 이름 (예: A사 퇴직금규정)" style="min-width:180px">
+    <button class="small primary" id="lib-preset-add">등록</button>
+  </div>
+  <div class="hint">[산출가정 입력] 탭에서 [현재 가정 저장] 을 눌러도 여기에 쌓입니다.
+  기초율 워크북 파일을 직접 올려도 됩니다.</div>
+  <div id="lib-preset-list"></div>
+</fieldset>
 
 <fieldset><legend>금리표 (KIS-Net 등급별 기간구조)</legend>
   <div class="lib-line">
@@ -210,6 +246,34 @@
   전체 교체는 지금 것을 비우고 보관함 그대로 되돌립니다.</div>
 </fieldset>
 </section>
+
+<!-- ════════ 시험명부 ════════ -->
+<section class="page" id="page-gen">
+<p class="notice">난수로 만든 시험용 명부 세 벌입니다. 프로그램이 제대로 도는지
+확인하거나, 실제 명부 없이 화면을 익힐 때 씁니다. 명부마다 <b>짝이 되는 기초율</b>과
+무엇이 들어 있는지 적은 <b>특이사항 안내문</b>이 함께 나옵니다.
+성명·사번은 지어낸 것이라 실제 인물과 무관합니다.</p>
+
+<fieldset><legend>만들기</legend>
+  <div class="lib-line">
+    <span style="font-weight:600">난수 씨앗</span>
+    <input type="text" id="gen-seed" inputmode="numeric" value="20251231" style="width:130px">
+    <button class="small primary" type="button" id="gen-run">시험 명부 만들기</button>
+    <button class="small" type="button" id="gen-download" disabled>zip 내려받기</button>
+  </div>
+  <div class="hint">씨앗이 같으면 언제 만들어도 같은 명부가 나옵니다 — 산출 결과를
+  비교하려면 명부가 매번 바뀌면 안 되기 때문입니다. 다른 명부를 보고 싶으면
+  숫자를 바꾸세요.</div>
+</fieldset>
+
+<div id="gen-cases"></div>
+</section>
+
+<dialog id="report-dialog">
+  <h1 style="font-size:1.05rem" id="report-title"></h1>
+  <pre id="report-body" style="white-space:pre-wrap;font-size:0.86rem;line-height:1.5"></pre>
+  <button class="big secondary" onclick="this.closest('dialog').close()">닫기</button>
+</dialog>
 
 <p class="notice">모든 계산은 이 기기의 브라우저 안에서 이루어집니다. 명부·기초율은
 어디로도 전송되지 않습니다. Safari 공유 버튼 → <b>홈 화면에 추가</b> 를 누르면

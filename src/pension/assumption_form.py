@@ -31,7 +31,6 @@ from .actuarial import FRACTION_HALF, FRACTION_KEEP, SERVICE_DAILY
 from .assumptions import (
     BENEFIT_RULE_SHEET,
     BENEFIT_SHEET,
-    CUMULATIVE,
     DISCOUNT_SHEET,
     FORMULA,
     LONGTERM_RULE_SHEET,
@@ -40,12 +39,14 @@ from .assumptions import (
     MORTALITY_SHEET,
     PROMOTION_SHEET,
     SALARY_SHEET,
+    STATUTORY_MODE,
     WITHDRAWAL_SHEET,
     write_assumptions,
 )
 from .formula import Formula, FormulaError
 from .jobgroup import DEFAULT_GROUPS
 from .normalize import text
+from .standard_rates import SALARY_BASE_UP
 
 __all__ = [
     "APPLY_CHOICES",
@@ -147,15 +148,22 @@ def default_payout() -> dict[str, Any]:
 
 
 def empty_state(job_groups: list[str] | None = None) -> dict[str, Any]:
+    """빈 화면의 출발점.
+
+    아무것도 안 채운 상태에서도 **말이 되는 산출** 이 나와야 한다. 그래서
+    Base-up 은 전 기간 2%, 지급률은 법정(배수 = 근속연수)으로 두고 시작한다.
+    지급률 표에 값을 넣는 순간 그 값이 대신 쓰인다.
+    """
     groups = [text(g) for g in (job_groups or DEFAULT_GROUPS) if text(g)]
+    grids = {spec["sheet"]: {"key": spec["key"], "rows": []} for spec in FORM_SHEETS}
+    grids[SALARY_SHEET]["rows"] = [[f"{years:g}", f"{rate * 100:g}%"]
+                                   for years, rate in SALARY_BASE_UP]
     return {
         "job_groups": groups,
-        "grids": {
-            spec["sheet"]: {"key": spec["key"], "rows": []} for spec in FORM_SHEETS
-        },
+        "grids": grids,
         "payout": {group: default_payout() for group in groups},
         "benefit_rules": {
-            group: {"mode": CUMULATIVE, "formula": ""} for group in groups
+            group: {"mode": STATUTORY_MODE, "formula": ""} for group in groups
         },
         "longterm_rules": {
             group: {"kind": LT_VACATION, "escalation": "", "note": ""}
@@ -170,7 +178,6 @@ def example_state(job_groups: list[str] | None = None) -> dict[str, Any]:
     state = empty_state(job_groups)
     count = len(state["job_groups"])
     state["grids"][DISCOUNT_SHEET]["rows"] = [["1", "4.5%"]]
-    state["grids"][SALARY_SHEET]["rows"] = [["1", "3.0%"], ["6", "2.5%"]]
     state["grids"][PROMOTION_SHEET]["rows"] = [
         ["20", *["2.0%"] * count], ["40", *["1.0%"] * count], ["55", *["0.0%"] * count]
     ]
@@ -278,7 +285,7 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
 
     rules = {
         group: (
-            text(item.get("mode")) or CUMULATIVE,
+            text(item.get("mode")) or STATUTORY_MODE,
             text(item.get("formula")),
         )
         for group, item in state.get("benefit_rules", {}).items()
@@ -390,8 +397,10 @@ def read_state(path: str | Path) -> dict[str, Any]:
                 values = [_cell_text(ws.cell(row, c).value) for c in range(1, width + 1)]
                 if not any(values):
                     continue
-                # 양식 파일이 표 아래에 적어 두는 설명 줄은 값이 아니다.
-                if values[0][:1] in _NOTE_PREFIXES:
+                # 표 아래에 적어 둔 설명·경고 줄은 값이 아니다. 첫 칸은 연차·연령·
+                # 근속연수라 반드시 숫자다 — 숫자로 읽히지 않으면 자료가 아니다.
+                # (앞글자만 보고 거르면 '[필수 확인] …' 같은 줄이 표에 섞여 들어온다.)
+                if not _is_number(values[0]):
                     continue
                 rows.append(values)
             grid["rows"] = rows
@@ -450,7 +459,7 @@ def read_state(path: str | Path) -> dict[str, Any]:
                 if not name or name[:1] in _NOTE_PREFIXES:
                     continue
                 state["benefit_rules"][name] = {
-                    "mode": text(ws.cell(row, 2).value) or CUMULATIVE,
+                    "mode": text(ws.cell(row, 2).value) or STATUTORY_MODE,
                     "formula": text(ws.cell(row, 3).value),
                 }
         return state
@@ -477,6 +486,14 @@ def _as_float(token: object, default: float) -> float:
         return float(str(token).strip())
     except (TypeError, ValueError):
         return default
+
+
+def _is_number(token: str) -> bool:
+    try:
+        float(token.replace(",", ""))
+    except (AttributeError, ValueError):
+        return False
+    return True
 
 
 def _cell_text(value: object) -> str:
