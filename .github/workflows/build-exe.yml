@@ -68,7 +68,7 @@ jobs:
           # 기본 파일만으로 산출이 끝까지 도는지 확인한다. 받는 사람이 처음
           # 여는 파일이 곧바로 실패하면 안 된다.
           & "$pack/pension-cli.exe" calc `
-              "$pack/기본자료/명부_양식.xlsx" `
+              "$pack/기본자료/명부_기본.xlsx" `
               "$pack/기본자료/기초율_기본값.xlsx" `
               -o "$env:RUNNER_TEMP/연습산출.xlsx"
 

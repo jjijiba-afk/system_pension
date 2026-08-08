@@ -125,7 +125,11 @@ def _summary_sheet(wb, run: PensionRun) -> None:
 
     section("0. 산출 기준")
     line("산출기준일", run.config.base_date, _DATE)
-    line("적용 할인율", run.assumptions.discount.level_rate, _RATE)
+    line(
+        "적용 할인율",
+        run.assumptions.discount.representative_rate(run.valuation.duration),
+        _RATE,
+    )
     line("가중평균 잔존만기(듀레이션)", run.valuation.duration, _YEARS, "년")
     line("기초율 가정", run.assumptions.label)
     row += 1

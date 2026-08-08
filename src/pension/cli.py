@@ -95,6 +95,14 @@ def _build_parser() -> argparse.ArgumentParser:
     samples.add_argument(
         "--job-groups", default="", help="직군을 쉼표로. 생략하면 정규직,계약직,임원"
     )
+    samples.add_argument(
+        "--yield-curve", type=Path, metavar="금리표",
+        help="할인율로 쓸 채권 금리표(KIS-Net 등). 만기별 현물이자율을 그대로 옮깁니다",
+    )
+    samples.add_argument(
+        "--grade", default="",
+        help="금리표에서 고를 등급 (기본: AA0 → AA+ → AA- 순으로 찾음)",
+    )
 
     upload = sub.add_parser("upload", help="업로드 명부만 생성")
     upload.add_argument("roster", type=Path)
@@ -176,7 +184,11 @@ def _cmd_calc(args: argparse.Namespace) -> int:
     v = run.valuation
     print("\n── 산출 결과 " + "─" * 44)
     print(f"  산출기준일     {run.config.base_date}")
-    print(f"  적용 할인율    {run.assumptions.discount.level_rate:.3%}")
+    rate = run.assumptions.discount.representative_rate(v.duration)
+    if run.assumptions.discount.flat is None:
+        print(f"  적용 할인율    {rate:.3%}  (듀레이션 {v.duration:.1f}년 시점 현물이자율)")
+    else:
+        print(f"  적용 할인율    {rate:.3%}")
     print(f"  산출대상 인원  {v.headcount:,}명")
     print(f"  확정급여채무   {v.dbo:>18,.0f} 원")
     print(f"  당기근무원가   {v.service_cost:>18,.0f} 원")
@@ -280,7 +292,12 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     from .samples import write_sample_pack
 
     groups = tuple(g.strip() for g in args.job_groups.split(",") if g.strip())
-    paths = write_sample_pack(args.directory, job_groups=groups or DEFAULT_GROUPS)
+    paths = write_sample_pack(
+        args.directory,
+        job_groups=groups or DEFAULT_GROUPS,
+        yield_curve_path=args.yield_curve,
+        grade=args.grade,
+    )
 
     print(f"기본 파일을 만들었습니다: {args.directory}")
     for path in paths:
@@ -288,8 +305,14 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     print(
         "\n바로 돌려 보려면:\n"
         f"  pension calc {paths[0]} {paths[1]} -o 산출결과.xlsx\n"
-        "\n기초율_기본값의 할인율·퇴직률·승급률은 회사 값으로 바꿔야 합니다. "
-        "사망률은 통계청 공표치라 그대로 써도 됩니다."
+    )
+    if args.yield_curve:
+        print(f"할인율은 {Path(args.yield_curve).name} 의 현물이자율 곡선을 옮겼습니다.")
+    else:
+        print("할인율은 자리값(4.5%)입니다. --yield-curve 로 결산일 금리표를 주세요.")
+    print(
+        "퇴직률·승급률은 표준률입니다. 회사 경험률이 있으면 그쪽이 우선입니다.\n"
+        "사망률은 남녀 구분 없는 표준사망률이라 그대로 쓸 수 있습니다."
     )
     return 0
 

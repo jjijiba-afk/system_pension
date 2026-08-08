@@ -221,9 +221,9 @@ def value_member(
         result.excluded_reason = "30일 평균임금 없음"
         return result
 
-    rule = member.rules.severance_benefit
-    withdrawal_rule = member.rules.severance_withdrawal
-    salary_rule = member.rules.severance_salary_increase
+    rule = member.rules.severance_benefit or member.job_group
+    withdrawal_rule = member.rules.severance_withdrawal or member.job_group
+    salary_rule = member.rules.severance_salary_increase or member.job_group
 
     past_service = result.past_service
     years = _projection_years(member, assumptions)
