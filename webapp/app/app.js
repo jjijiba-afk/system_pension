@@ -82,6 +82,7 @@ from pension.webui import api
     const saved = localStorage.getItem(EDITOR_STORE);
     renderState(saved ? JSON.parse(saved) : py("state_new").state);
     refreshLibrary();
+    refreshRuns();
 
     status("준비 완료. 명부를 고르고 기초율을 정한 뒤 [산출 실행]을 누르세요.");
     $("run").disabled = false;
@@ -92,7 +93,8 @@ from pension.webui import api
 boot();
 
 // ── 큰 탭 ────────────────────────────────────────────────────────
-const PAGES = [["tab-calc", "page-calc"], ["tab-edit", "page-edit"], ["tab-lib", "page-lib"]];
+const PAGES = [["tab-calc", "page-calc"], ["tab-edit", "page-edit"],
+               ["tab-lib", "page-lib"], ["tab-runs", "page-runs"]];
 for (const [tab, page] of PAGES) {
   $(tab).addEventListener("click", () => {
     for (const [t, p] of PAGES) {
@@ -814,12 +816,18 @@ function fillTable(table, rows, numericFrom) {
   }
 }
 
+// 산출 내역에서 불러온 입력. 파일을 새로 고르면 그쪽이 우선한다.
+let loadedRun = null;   // {name, roster, assumptions, rosterName}
+let lastRun = null;     // 방금 마친 산출 — 저장 버튼이 이것을 보관한다
+
 async function rosterIntoFS() {
   const file = $("roster").files[0];
-  if (!file) throw new Error("[산출] 탭에서 명부 파일을 먼저 골라 주세요.");
-  const suffix = file.name.toLowerCase().match(/\.(xls[xm]?)$/);
-  const path = "/work/명부." + (suffix ? suffix[1] : "xlsx");
-  return intoFS(file, path);
+  if (file) {
+    const suffix = file.name.toLowerCase().match(/\.(xls[xm]?)$/);
+    return intoFS(file, "/work/명부." + (suffix ? suffix[1] : "xlsx"));
+  }
+  if (loadedRun) return loadedRun.roster;
+  throw new Error("[산출] 탭에서 명부 파일을 먼저 골라 주세요.");
 }
 
 $("form").addEventListener("submit", async (event) => {
@@ -839,18 +847,26 @@ $("form").addEventListener("submit", async (event) => {
         $("errors").append(el("div", { class: "error" }, "· " + saved.problems.join("\n· ")));
         return;
       }
+    } else if ($("asrc-saved").checked) {
+      if (!loadedRun) throw new Error("[산출 내역] 탭에서 먼저 저장된 산출을 불러오세요.");
+      assumptionsPath = loadedRun.assumptions;
     } else {
       const file = $("assumptions").files[0];
       if (!file) throw new Error("기초율 파일을 고르거나, 산출가정 입력 화면을 사용하세요.");
       await intoFS(file, assumptionsPath);
     }
 
-    const report = py("run", {
-      roster: rosterPath, assumptions: assumptionsPath,
+    const options = {
       force: $("force").checked, sensitivity: $("sensitivity").checked,
       longterm: $("longterm").checked,
-      prior_dbo: parseNumber($("prior_dbo").value),
-      prior_rate: parseRate($("prior_rate").value),
+      prior_dbo: $("prior_dbo").value, prior_rate: $("prior_rate").value,
+    };
+    const report = py("run", {
+      roster: rosterPath, assumptions: assumptionsPath,
+      force: options.force, sensitivity: options.sensitivity,
+      longterm: options.longterm,
+      prior_dbo: parseNumber(options.prior_dbo),
+      prior_rate: parseRate(options.prior_rate),
     });
 
     if (!report.run) {
@@ -869,6 +885,15 @@ $("form").addEventListener("submit", async (event) => {
       [["직군", "인원", "확정급여채무", "당기근무원가"], ...report.groups], 1);
     $("issues").textContent = report.issues +
       (report.excluded.length ? "\n산출 제외: " + report.excluded.join(" · ") : "");
+
+    const rosterFile = $("roster").files[0];
+    lastRun = {
+      roster: rosterPath, assumptions: assumptionsPath,
+      rosterName: rosterFile ? rosterFile.name : (loadedRun?.rosterName || ""),
+      report, options,
+    };
+    if (!$("run-name").value && loadedRun) $("run-name").value = loadedRun.name;
+
     $("result").style.display = "block";
     status("산출을 마쳤습니다.");
     $("result").scrollIntoView({ behavior: "smooth" });
@@ -881,3 +906,137 @@ $("form").addEventListener("submit", async (event) => {
 
 $("dl-result").addEventListener("click", () => download("/work/산출결과.xlsx", "산출결과.xlsx"));
 $("dl-members").addEventListener("click", () => download("/work/개인별결과.xlsx", "개인별결과.xlsx"));
+
+// ═════════ 산출 내역 ═════════════════════════════════════════════
+// 산출 하나(명부·가정·결과·요약)를 이름 붙여 IndexedDB 에 보관한다.
+// "2412 1번단체" 를 저장해 두면 다음 결산 때 전기 입력을 그대로 끌어온다.
+
+$("run-save").addEventListener("click", async () => {
+  if (!lastRun) { alert("먼저 산출을 실행하세요."); return; }
+  const name = $("run-name").value.trim();
+  if (!name) { alert("산출명을 입력하세요. 예: 2412 1번단체"); return; }
+  try {
+    py("run_save", {
+      name, roster: lastRun.roster, assumptions: lastRun.assumptions,
+      work: "/work", report: lastRun.report, options: lastRun.options,
+      roster_name: lastRun.rosterName,
+      saved: new Date().toLocaleString("sv-SE").slice(0, 16),
+    });
+    await persistHome();
+    refreshRuns();
+    status(`산출 '${name}' 을(를) 이 기기에 저장했습니다. [산출 내역] 탭에서 볼 수 있습니다.`);
+  } catch (error) {
+    alert("저장하지 못했습니다.\n\n" + error.message);
+  }
+});
+
+function refreshRuns() {
+  const { runs } = py("run_list");
+  const target = $("runs-list");
+  if (!runs.length) {
+    target.replaceChildren(el("p", { class: "notice" },
+      "아직 저장된 산출이 없습니다. 산출을 마친 뒤 결과 아래 [이 산출을 기기에 저장] 에서 이름을 붙여 저장하세요."));
+    return;
+  }
+  const header = el("tr", {}, ...["산출명", "저장일", "기준일", "인원", "DBO", ""]
+    .map((h) => el("th", {}, h)));
+  const rows = runs.map((run) => {
+    const show = el("button", { class: "small", type: "button",
+      onclick: () => showRun(run.name) }, "결과 보기");
+    show.disabled = !run.has_results;
+    return el("tr", {},
+      el("td", {}, el("b", {}, run.name),
+        run.roster_name ? el("div", { class: "hint" }, run.roster_name) : ""),
+      el("td", {}, run.saved),
+      el("td", {}, run.base_date),
+      el("td", { class: "num" }, run.headcount),
+      el("td", { class: "num" }, run.dbo),
+      el("td", {},
+        el("button", { class: "small primary", type: "button",
+          onclick: () => restoreRun(run.name) }, "입력 불러오기"), " ",
+        show, " ",
+        el("button", { class: "small", type: "button",
+          onclick: () => deleteRun(run.name) }, "삭제")));
+  });
+  target.replaceChildren(el("div", { class: "scroll-x" },
+    el("table", { class: "data" }, header, ...rows)));
+}
+
+function restoreRun(name) {
+  try {
+    const restored = py("run_restore", { name, work: "/work" });
+    loadedRun = {
+      name, roster: restored.roster, assumptions: restored.assumptions,
+      rosterName: restored.meta.roster_name || "",
+    };
+    const options = restored.meta.options || {};
+    if ("force" in options) $("force").checked = Boolean(options.force);
+    if ("sensitivity" in options) $("sensitivity").checked = Boolean(options.sensitivity);
+    if ("longterm" in options) $("longterm").checked = Boolean(options.longterm);
+    $("prior_dbo").value = options.prior_dbo || "";
+    $("prior_rate").value = options.prior_rate || "";
+    $("run-name").value = name;
+
+    $("asrc-saved").disabled = false;
+    $("asrc-saved").checked = true;
+    $("saved-asrc-hint").textContent = `— '${name}' 의 기초율`;
+    $("roster").value = "";
+    $("loaded-run-text").textContent =
+      `산출 내역 '${name}' 의 입력을 사용 중입니다 (명부` +
+      (loadedRun.rosterName ? `: ${loadedRun.rosterName}` : "") +
+      " · 기초율). 다른 명부 파일을 고르면 그 파일이 우선합니다.";
+    $("loaded-run-banner").style.display = "block";
+    $("roster-hint").textContent = "저장된 산출의 명부를 사용합니다. 새 파일을 고르면 대체됩니다.";
+    $("tab-calc").click();
+    status(`산출 '${name}' 의 입력을 불러왔습니다. [산출 실행]을 누르면 그대로 다시 산출합니다.`);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+$("loaded-run-clear").addEventListener("click", () => {
+  loadedRun = null;
+  $("loaded-run-banner").style.display = "none";
+  $("roster-hint").textContent = "Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서";
+  $("asrc-saved").disabled = true;
+  $("saved-asrc-hint").textContent = "— [산출 내역] 탭에서 불러오면 열립니다";
+  if ($("asrc-saved").checked) $("asrc-file").checked = true;
+});
+
+function showRun(name) {
+  try {
+    const { meta } = py("run_restore", { name, work: "/work" });
+    const report = meta.report || {};
+    $("run-dialog-title").textContent = `${name} — 저장된 산출 결과`;
+    fillTable($("run-dialog-summary"), report.summary || [], 1);
+    fillTable($("run-dialog-groups"),
+      [["직군", "인원", "확정급여채무", "당기근무원가"], ...(report.groups || [])], 1);
+    $("run-dl-result").onclick = () => downloadRunFile(name, "산출결과.xlsx");
+    $("run-dl-members").onclick = () => downloadRunFile(name, "개인별결과.xlsx");
+    $("run-dialog").showModal();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function downloadRunFile(name, filename) {
+  try {
+    const { files } = py("run_results", { name, work: "/work" });
+    if (!files[filename]) { alert("저장된 " + filename + " 이(가) 없습니다."); return; }
+    download(files[filename], `${name}_${filename}`);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function deleteRun(name) {
+  if (!confirm(`산출 내역 '${name}' 을(를) 삭제할까요?\n저장된 명부·가정·결과가 함께 지워집니다.`)) return;
+  try {
+    py("run_delete", { name });
+    await persistHome();
+    refreshRuns();
+    if (loadedRun && loadedRun.name === name) $("loaded-run-clear").click();
+  } catch (error) {
+    alert(error.message);
+  }
+}
