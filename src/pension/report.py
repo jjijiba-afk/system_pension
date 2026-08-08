@@ -350,6 +350,168 @@ def _upload_sheet(wb, title: str, headers: tuple[str, ...], rows: list[list[Any]
     _write_table(ws, headers, rows or [[""] * len(headers)], formats=formats)
 
 
+def _cashflow_sheet(wb, run: PensionRun) -> None:
+    """기대 급여 현금흐름과 단일할인율·듀레이션의 검산.
+
+    단일할인율은 "곡선으로 할인한 채무와 같은 현재가치를 내는 이자율" 인데,
+    그 뒤의 현금흐름이 보이지 않으면 검산할 방법이 없다. 감사인이 이 시트의
+    두 열(기대지급액, 현가계수)만으로 채무·단일할인율·듀레이션을 전부 재계산할
+    수 있어야 근거자료가 된다.
+    """
+    flows = run.valuation.cash_flows()
+    if not flows:
+        return
+
+    st = _styles()
+    ws = wb.create_sheet("기대현금흐름")
+    ws["B2"] = "기대 급여 현금흐름 (퇴직급여 확정급여채무)"
+    ws["B2"].font = st["title"]
+    ws.cell(3, 2, "탈퇴는 연 중앙(t-0.5)에, 정년퇴직은 연말에 일어난 것으로 봅니다. "
+                  "금액은 탈퇴확률과 근속귀속(PUC)을 반영한 할인 전 기대지급액입니다."
+            ).font = st["section"]
+
+    discount = run.assumptions.discount
+    single = run.valuation.single_discount_rate()
+
+    headers = ["지급시점(년)", "기대 급여지급액", "현가계수(곡선)", "현재가치",
+               f"단일할인율 {single:.4%} 현가"]
+    rows = []
+    total_pv = 0.0
+    total_single = 0.0
+    weighted = 0.0
+    for timing, amount in flows.items():
+        factor = discount.discount_factor(timing)
+        pv = amount * factor
+        pv_single = amount / (1.0 + single) ** timing if single else pv
+        total_pv += pv
+        total_single += pv_single
+        weighted += pv * timing
+        rows.append([timing, amount, factor, pv, pv_single])
+
+    next_row = _write_table(
+        ws, headers, rows,
+        start_row=5,
+        formats={1: _YEARS, 2: _MONEY, 3: "0.000000", 4: _MONEY, 5: _MONEY},
+        widths={1: 14, 2: 20, 3: 16, 4: 20, 5: 22},
+    )
+
+    def line(label: str, value, fmt: str = _MONEY) -> None:
+        nonlocal next_row
+        ws.cell(next_row, 2, label).font = st["total"]
+        cell = ws.cell(next_row, 4, value)
+        cell.number_format = fmt
+        cell.font = st["total"]
+        cell.fill = st["total_fill"]
+        next_row += 1
+
+    next_row += 1
+    dbo = run.valuation.dbo
+    line("현재가치 합계", total_pv)
+    line("확정급여채무 (검산 대상)", dbo)
+    line("차이", total_pv - dbo)
+    line("단일할인율 재할인 합계", total_single)
+    line("단일할인율", single, _RATE)
+    line("듀레이션 (Σ현가×시점 ÷ Σ현가)", weighted / total_pv if total_pv else 0.0, _YEARS)
+
+
+def _assumption_sheet(wb, run: PensionRun) -> None:
+    """산출에 실제로 적용한 가정 일체의 사본.
+
+    결과 파일은 담당자 → 회사 → 감사인 사이를 메일로 돌아다니는 동안 기초율
+    파일과 분리되기 마련이다. "이 숫자가 어떤 가정에서 나왔나" 에 결과 파일
+    혼자 답할 수 있어야 하므로, 적용 시점의 가정을 통째로 남긴다.
+    """
+    st = _styles()
+    ws = wb.create_sheet("적용가정")
+    ws["B2"] = "적용 가정 (산출에 실제 사용한 값)"
+    ws["B2"].font = st["title"]
+    ws.column_dimensions["A"].width = 4
+
+    row = 4
+
+    def section(title: str) -> None:
+        nonlocal row
+        cell = ws.cell(row, 2, title)
+        cell.font = st["section"]
+        cell.fill = st["section_fill"]
+        row += 1
+
+    def table(headers: list, data: list[list]) -> None:
+        nonlocal row
+        for col, title in enumerate(headers, start=2):
+            cell = ws.cell(row, col, title)
+            cell.font = st["header"]
+            cell.fill = st["header_fill"]
+            cell.border = st["border"]
+        row += 1
+        for values in data:
+            for col, value in enumerate(values, start=2):
+                ws.cell(row, col, value).border = st["border"]
+            row += 1
+        row += 1
+
+    def curve_table(title: str, key_label: str, curves: dict) -> None:
+        """규정명별 곡선 묶음을 키(연령/근속) × 규정 열의 한 표로."""
+        names = [n for n, c in curves.items() if c]
+        if not names:
+            return
+        keys = sorted({k for n in names for k in curves[n].points})
+        section(title)
+        table(
+            [key_label, *names],
+            [[key, *[curves[n].points.get(key, "") for n in names]] for key in keys],
+        )
+
+    a = run.assumptions
+
+    section("할인율")
+    if a.discount.flat is not None:
+        table(["구분", "값"], [["단일 할인율", a.discount.flat]])
+    else:
+        table(["연차", "현물이자율"], [[k, v] for k, v in sorted(a.discount.spot.points.items())])
+
+    section("임금상승률 (Base-up)")
+    table(["연차", "상승률"], [[k, v] for k, v in sorted(a.salary.base_up.points.items())])
+
+    curve_table(f"승급률 (기준: {a.salary.promotion.basis})",
+                a.salary.promotion.basis, a.salary.promotion.curves)
+    curve_table(f"퇴직률 (기준: {a.withdrawal.basis})", a.withdrawal.basis, a.withdrawal.curves)
+    curve_table("사망률 qx", "연령", {"남자": a.mortality.male, "여자": a.mortality.female})
+    curve_table("지급률", "근속연수", a.severance_benefit.curves)
+
+    modes = [
+        [name, a.severance_benefit.mode(name),
+         getattr(a.severance_benefit.formulas.get(name), "source", "")]
+        for name in a.severance_benefit.curves
+    ]
+    if modes:
+        section("지급률 방식")
+        table(["규정명", "방식", "수식"], modes)
+
+    rules = run.config.job_group_rules
+    if rules:
+        section("직군별 규정")
+        table(
+            ["명부직군", "임직원구분", "변환직군", "정년", "임원정년", "가산연령",
+             "가입자격(년)", "근속산정", "단수처리", "산출제외",
+             "Base-up", "승급률", "퇴직률", "사망률"],
+            [
+                [r.source_name, r.employee_type_filter, r.mapped_name,
+                 r.severance_nra, r.executive_nra or "", r.over_nra_add_age,
+                 r.min_service_years, r.service_basis, r.service_fraction,
+                 "제외" if r.excluded else "",
+                 *["반영" if flag else "미반영" for flag in
+                   (r.apply_base_up, r.apply_promotion, r.apply_withdrawal, r.apply_mortality)]]
+                for r in rules
+            ],
+        )
+
+    ws.cell(row, 2, f"기초율 가정: {a.label}").font = st["section"]
+    for col in range(2, 16):
+        letter = ws.cell(1, col).column_letter
+        ws.column_dimensions[letter].width = 13
+
+
 def write_report(run: PensionRun, path: str | Path) -> Path:
     """산출 결과를 엑셀 한 권으로 저장한다."""
     import openpyxl
@@ -363,6 +525,8 @@ def write_report(run: PensionRun, path: str | Path) -> Path:
     _summary_sheet(wb, run)
     _rollforward_sheet(wb, run)
     _sensitivity_sheet(wb, run)
+    _cashflow_sheet(wb, run)
+    _assumption_sheet(wb, run)
     _member_sheet(wb, run)
     _longterm_sheet(wb, run)
     _issues_sheet(wb, run)

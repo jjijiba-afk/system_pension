@@ -220,18 +220,6 @@ class DiscountCurve:
         """이자원가 계산 등에 쓰는 대표 할인율(1년 시점 기준)."""
         return self.rate(1)
 
-    def representative_rate(self, duration: float = 0.0) -> float:
-        """공시용 대표 할인율.
-
-        단일 할인율이면 그 값이다. 현물이자율 곡선이면 **채무의 듀레이션 시점**
-        이자율을 쓴다. 곡선을 넣었는데 1년 이자율을 대표값으로 내보이면, 만기가
-        긴 채무를 짧은 금리로 설명하는 셈이라 주석 수치가 실제 할인 결과와
-        어긋나 보인다. 실제 산출은 어느 쪽이든 곡선 전체를 그대로 쓴다.
-        """
-        if self.flat is not None or duration <= 0:
-            return self.level_rate
-        return self.rate(duration)
-
 
 @dataclass(slots=True)
 class SalaryScale:

@@ -80,6 +80,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser("check", help="명부 검증만 실행")
     check.add_argument("roster", type=Path)
+    check.add_argument(
+        "assumptions", type=Path, nargs="?",
+        help="기초율 워크북. 주면 그 안의 '지급규정' 시트(직군 매핑)를 적용해 "
+             "검증합니다 — calc 와 같은 조건이 됩니다",
+    )
     check.add_argument("-o", "--output", type=Path, help="검증 결과 CSV 경로")
 
     template = sub.add_parser("template", help="기초율 양식 생성")
@@ -135,17 +140,34 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _print_issue_list(issues: list, limit: int = 30) -> None:
-    """이슈 목록을 오류 먼저, 최대 ``limit`` 건까지 출력한다."""
+    """이슈 목록 출력. 오류는 낱낱이, 경고가 많으면 코드별로 묶는다.
+
+    실제 명부에서는 같은 성격의 경고가 수십 건씩 나온다(근속 1년 미만 퇴직자
+    37건, DC 가입자 32건…). 이것을 한 줄씩 나열하면 화면이 그것으로 차서 정작
+    조치가 필요한 오류가 스크롤 위로 밀려난다. 오류는 행 단위 조치가 필요하니
+    전부 보여 주되, 경고는 많아지면 "무엇이 몇 건" 으로 접는다.
+    """
     errors = [i for i in issues if i.severity is Severity.ERROR]
     warnings = [i for i in issues if i.severity is Severity.WARNING]
     notices = [i for i in issues if i.severity is Severity.INFO]
-    for issue in (errors + warnings)[:limit]:
-        print(f"  {issue}")
-    total = len(errors) + len(warnings)
-    if total > limit:
-        print(f"  … 외 {total - limit}건")
 
-    # 안내는 확인할 것이 없으므로 잘라내지 않고 끝에 모아 보여 준다.
+    for issue in errors[:limit]:
+        print(f"  {issue}")
+    if len(errors) > limit:
+        print(f"  … 외 오류 {len(errors) - limit}건 (검증 리포트 참조)")
+
+    if len(warnings) <= 15:
+        for issue in warnings:
+            print(f"  {issue}")
+    else:
+        print(f"\n  경고 요약 ({len(warnings)}건 — 상세는 결과 파일의 검증리포트 시트)")
+        grouped: dict[str, list] = {}
+        for issue in warnings:
+            grouped.setdefault(issue.code, []).append(issue)
+        for code, group in sorted(grouped.items(), key=lambda kv: -len(kv[1])):
+            print(f"    {len(group):>4}건  {code:<28} 예) {group[0].message}")
+
+    # 안내는 확인할 것이 없으므로 끝에 모아 보여 준다.
     for issue in notices:
         print(f"  {issue}")
     print(f"\n오류 {len(errors)}건 / 경고 {len(warnings)}건 / 안내 {len(notices)}건")
@@ -227,7 +249,14 @@ def _cmd_calc(args: argparse.Namespace) -> int:
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
+    """명부 검증.
+
+    기초율 워크북을 함께 주면 그 ``지급규정`` 시트를 적용한다. 안 주면 명부의
+    ``Input`` 만 보게 되는데, 직군 매핑을 지급규정에 둔 경우 check 는 직군
+    미매칭 오류를 내고 calc 는 통과하는 — 서로 다른 판정이 나오는 함정이 있었다.
+    """
     import csv
+    from dataclasses import replace as _replace
 
     from .config import read_config
     from .errors import IssueLog
@@ -235,9 +264,21 @@ def _cmd_check(args: argparse.Namespace) -> int:
     from .validation import validate_roster
     from .workbook import open_workbook
 
+    payout_rules = []
+    if args.assumptions:
+        from .config import read_payout_rules
+
+        assumptions_wb = open_workbook(args.assumptions)
+        try:
+            payout_rules = read_payout_rules(assumptions_wb)
+        finally:
+            assumptions_wb.close()
+
     wb = open_workbook(args.roster)
     try:
         config = read_config(wb)
+        if payout_rules:
+            config = _replace(config, job_group_rules=payout_rules, inferred=False)
         log = IssueLog()
         roster = read_roster(wb, config, log)
     finally:

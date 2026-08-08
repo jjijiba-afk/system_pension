@@ -141,3 +141,79 @@ def test_percent_argument_accepts_both_forms(
     assert _percent("4.8%") == pytest.approx(0.048)
     assert _percent("0.048") == pytest.approx(0.048)
     assert _percent("4.8") == pytest.approx(0.048)
+
+
+class TestCheckWithAssumptions:
+    """check 에 기초율을 주면 calc 와 같은 조건으로 검증한다.
+
+    직군 매핑을 기초율의 `지급규정` 시트에 둔 경우, check 가 명부의 Input 만
+    보면 직군 미매칭 오류를 내고 calc 는 통과하는 — 서로 다른 판정이 나오는
+    함정이 있었다.
+    """
+
+    def _roster_without_input(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        for sheet in ("재직자명부", "퇴직자명부"):
+            ws = wb.create_sheet(sheet)
+            ws.cell(1, 1, "작성기준일")
+            ws.cell(1, 2, "2025-12-31")
+            for col, title in (
+                (2, "순번"), (3, "사번"), (4, "임직원구분"), (5, "직군"), (6, "성명"),
+                (7, "성별"), (8, "생년월일"), (9, "입사일자"), (10, "퇴사일"),
+                (13, "제도구분"), (14, "30일 평균임금"),
+            ):
+                ws.cell(3, col, title)
+        ws = wb["재직자명부"]
+        # 직군이 '과장' — Input 시트가 없으니 지급규정 없이는 잠정 규칙뿐이다.
+        for col, value in ((2, 1), (3, "A1"), (4, "정규사원"), (5, "과장"), (7, "남"),
+                           (8, "19850101"), (9, "20100101"), (13, "DB"), (14, 3_000_000)):
+            ws.cell(4, col, value)
+        del wb["Sheet"]
+        path = tmp_path / "명부.xlsx"
+        wb.save(path)
+        return path
+
+    def _assumptions_with_mapping(self, tmp_path):
+        from pension.assumptions import write_assumptions
+        from pension.config import PAYOUT_SHEET
+
+        return write_assumptions(
+            tmp_path / "기초율.xlsx",
+            {
+                "할인율": (["연차", "할인율"], [[1, 0.045]]),
+                "지급률": (["근속연수", "정규직"], [[0, 1.0]]),
+                PAYOUT_SHEET: (
+                    [f"c{i}" for i in range(1, 23)],
+                    [["과장", "정규직", 60, 60, 2, *[""] * 8, 0, 0, 2, "",
+                      "일할", "그대로", 0, "반올림", "정규사원"]],
+                ),
+            },
+            None, None,
+        )
+
+    def test_matches_calc_when_assumptions_are_given(self, tmp_path, capsys) -> None:
+        roster = self._roster_without_input(tmp_path)
+        assumptions = self._assumptions_with_mapping(tmp_path)
+
+        assert main(["check", str(roster), str(assumptions)]) == 0
+        assert "오류 0건" in capsys.readouterr().out
+
+    def test_grouped_warning_summary_kicks_in_when_noisy(self, tmp_path, capsys) -> None:
+        """경고가 15건을 넘으면 코드별 요약으로 접는다."""
+        import openpyxl
+
+        roster = self._roster_without_input(tmp_path)
+        wb = openpyxl.load_workbook(roster)
+        ws = wb["재직자명부"]
+        for i in range(2, 22):   # DC 20명, 임금 공란 → 경고 20건
+            for col, value in ((2, i), (3, f"A{i}"), (4, "정규사원"), (5, "과장"),
+                               (7, "남"), (8, "19900101"), (9, "20150101"), (13, "DC")):
+                ws.cell(3 + i, col, value)
+        wb.save(roster)
+
+        main(["check", str(roster), str(self._assumptions_with_mapping(tmp_path))])
+        out = capsys.readouterr().out
+        assert "경고 요약" in out
+        assert "JAE_WAGE_MISSING_DC" in out
