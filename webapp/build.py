@@ -84,11 +84,34 @@ def _build_wheels(target: Path) -> list[str]:
          "--no-deps", "-d", str(target), "-q"],
         check=True,
     )
+    _strip_personal_data(next(target.glob("pension_actuarial-*.whl")))
+
     names = sorted(p.name for p in target.glob("*.whl"))
     impure = [n for n in names if not n.endswith(("py3-none-any.whl", "py2.py3-none-any.whl"))]
     if impure:
         raise SystemExit(f"순수 파이썬 휠이 아니라 브라우저에서 못 쓴다: {impure}")
     return names
+
+
+def _strip_personal_data(wheel: Path) -> None:
+    """엔진 휠에서 기본 명부 CSV 를 뺀다.
+
+    기본 명부는 실제 평가 사례라 생년월일·임금이 들어 있다. PC 배포판에는
+    담당자용 예제로 들어가지만, **웹에 호스팅되는 앱** 에 실으면 주소를 아는
+    누구나 내려받을 수 있게 된다. 웹앱은 사용자가 자기 명부를 올려 쓰는
+    물건이라 예제 명부가 필요하지도 않다.
+    """
+    import zipfile
+
+    kept = []
+    with zipfile.ZipFile(wheel) as archive:
+        for info in archive.infolist():
+            if "/data/" in info.filename and info.filename.endswith(".csv"):
+                continue
+            kept.append((info, archive.read(info)))
+    with zipfile.ZipFile(wheel, "w", zipfile.ZIP_DEFLATED) as archive:
+        for info, payload in kept:
+            archive.writestr(info, payload)
 
 
 def _png(size: int) -> bytes:
