@@ -37,15 +37,27 @@ def app_url():
 
 
 @pytest.fixture(scope="module")
-def page(app_url):
-    """엔진 부팅이 오래 걸리므로 한 번 띄운 페이지를 모듈 전체가 나눠 쓴다."""
+def shared_dir(tmp_path_factory):
+    """테스트끼리 주고받는 파일(보관함 zip)을 두는 곳."""
+    return tmp_path_factory.mktemp("웹앱공유")
+
+
+@pytest.fixture(scope="module")
+def browser():
     with playwright_api.sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROMIUM))
-        page = browser.new_page()
-        page.goto(app_url)
-        page.wait_for_selector("#run:not([disabled])", timeout=120_000)
-        yield page
+        yield browser
         browser.close()
+
+
+@pytest.fixture(scope="module")
+def page(browser, app_url):
+    """엔진 부팅이 오래 걸리므로 한 번 띄운 페이지를 모듈 전체가 나눠 쓴다."""
+    page = browser.new_page()
+    page.goto(app_url)
+    page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+    yield page
+    page.close()
 
 
 def test_upload_run_download(page, tmp_path) -> None:
@@ -162,6 +174,80 @@ def test_run_history_save_and_restore(page, tmp_path) -> None:
     page.wait_for_selector("#run-dialog[open]")
     assert "확정급여채무" in page.inner_text("#run-dialog-summary")
     page.click("#run-dialog >> text=닫기")
+
+
+def test_saved_roster_and_prior_link_and_backup(page, tmp_path, shared_dir) -> None:
+    """올렸던 명부 재사용 · 전기 DBO 연결 · 기기 밖 보관함까지."""
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    # 전기 산출을 하나 만들어 저장한다.
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+
+    # 명부를 목록에 저장 — prompt 로 이름을 묻는다.
+    page.once("dialog", lambda dialog: dialog.accept("1번단체 명부"))
+    page.click("#roster-save")
+    page.wait_for_selector("text=목록에 저장했습니다", timeout=30_000)
+
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    page.fill("#run-name", "2312 1번단체")
+    page.click("#run-save")
+    page.wait_for_selector("text=저장했습니다", timeout=30_000)
+
+    # 저장된 명부만으로 (파일 재선택 없이) 당기를 돌린다.
+    page.reload()
+    page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+    page.select_option("#roster-saved", "1번단체 명부")
+    page.set_input_files("#assumptions", str(assumptions))
+
+    # 전기 산출을 고르면 DBO·할인율이 자동으로 채워진다.
+    page.select_option("#prior-run", "2312 1번단체")
+    assert page.input_value("#prior_dbo").replace(",", "").isdigit()
+    assert page.input_value("#prior_rate").endswith("%")
+
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    assert "보험수리적손익" in page.inner_text("#summary")
+
+    # 보관함 내보내기 — 기기 밖에 둘 zip 이 실제로 떨어져야 한다.
+    page.click("#tab-runs")
+    with page.expect_download() as captured:
+        page.click("#backup-export")
+    archive = shared_dir / "보관함.zip"
+    captured.value.save_as(str(archive))
+    assert archive.read_bytes()[:2] == b"PK"
+
+
+def test_backup_restores_on_a_clean_device(browser, app_url, shared_dir) -> None:
+    """저장소가 빈 기기(=새 브라우저 컨텍스트)에서 보관함으로 되살린다."""
+    archive = shared_dir / "보관함.zip"
+    if not archive.exists():
+        pytest.skip("앞 테스트에서 보관함을 만들지 못했다")
+
+    context = browser.new_context()   # 저장소가 비어 있는 '다른 기기'
+    fresh = context.new_page()
+    fresh.goto(app_url)
+    fresh.wait_for_selector("#run:not([disabled])", timeout=120_000)
+
+    fresh.click("#tab-runs")
+    assert "저장된 산출이 없습니다" in fresh.inner_text("#runs-list")
+
+    fresh.on("dialog", lambda dialog: dialog.accept())
+    fresh.set_input_files("#backup-file", str(archive))
+    fresh.click("#backup-replace")
+    fresh.wait_for_selector("#runs-list >> text=2312 1번단체", timeout=60_000)
+
+    # 등록 자료(명부)도 함께 돌아와야 한다.
+    fresh.click("#tab-calc")
+    assert "1번단체 명부" in fresh.inner_text("#roster-saved")
+    context.close()
 
 
 def test_standard_rates_fill_the_grids(page) -> None:

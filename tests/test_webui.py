@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import openpyxl
@@ -236,6 +237,102 @@ class TestLibraryOps:
         assert "등록" in call_error("curve_rows", grade="AA0")
 
 
+class TestRosterLibrary:
+    """올렸던 명부를 목록에 두고 다음 결산에 그대로 꺼내 쓴다."""
+
+    def test_register_and_run_from_library(self, tmp_path, roster_path) -> None:
+        call("library_register", kind="명부", path=str(roster_path), name="1번단체 2412")
+        listing = call("library_list")["library"]["명부"]
+        assert [e["name"] for e in listing["entries"]] == ["1번단체 2412"]
+
+        stored = call("library_path", kind="명부", name="1번단체 2412")["path"]
+        state = form.example_state(["1정규직", "2임원", "3계약직"])
+        assumptions = str(tmp_path / "기초율.xlsx")
+        call("state_write", state=state, path=assumptions)
+
+        result = call(
+            "run", roster=stored, assumptions=assumptions, work=str(tmp_path),
+            force=True, sensitivity=False, longterm=False,
+        )
+        assert result["run"] is True
+
+    def test_old_xls_keeps_its_suffix(self, tmp_path) -> None:
+        """.xls 를 .xlsx 로 이름만 바꿔 두면 여는 쪽이 서식을 잘못 짚는다."""
+        source = tmp_path / "옛날명부.xls"
+        source.write_bytes(b"\xd0\xcf\x11\xe0")  # BIFF 헤더 흉내
+        call("library_register", kind="명부", path=str(source), name="옛날명부")
+        stored = call("library_path", kind="명부", name="옛날명부")["path"]
+        assert stored.endswith(".xls")
+
+    def test_reregistering_replaces_rather_than_duplicates(self, tmp_path, roster_path) -> None:
+        call("library_register", kind="명부", path=str(roster_path), name="같은이름")
+        old = tmp_path / "같은이름.xls"
+        old.write_bytes(b"\xd0\xcf\x11\xe0")
+        call("library_register", kind="명부", path=str(old), name="같은이름")
+        entries_after = call("library_list")["library"]["명부"]["entries"]
+        assert [e["name"] for e in entries_after] == ["같은이름"]
+        assert entries_after[0]["suffix"] == ".xls"
+
+
+class TestBackup:
+    """브라우저 저장소는 지워질 수 있다 — 기기 밖으로 내보내고 되살린다."""
+
+    def test_export_and_restore_everything(self, tmp_path, roster_path, monkeypatch) -> None:
+        curve = _kis_book(tmp_path / "금리.xlsx")
+        call("library_register", kind="금리표", path=str(curve), name="KIS_2025")
+        call("library_register", kind="명부", path=str(roster_path), name="1번단체")
+        state = form.example_state(["1정규직", "2임원", "3계약직"])
+        assumptions = str(tmp_path / "기초율.xlsx")
+        call("state_write", state=state, path=assumptions)
+        report = call(
+            "run", roster=str(roster_path), assumptions=assumptions,
+            work=str(tmp_path), force=True, sensitivity=False, longterm=False,
+        )
+        call("run_save", name="2412 1번단체", roster=str(roster_path),
+             assumptions=assumptions, work=str(tmp_path), report=report)
+
+        exported = call("backup_export", work=str(tmp_path))
+        archive = Path(exported["path"])
+        assert archive.exists() and exported["filename"].startswith("연금계리보관함_")
+        assert call("library_list")["backup"] == exported["stamp"]
+
+        # 저장소를 통째로 잃은 기기(=새 PENSION_HOME)에서 되살린다.
+        monkeypatch.setenv("PENSION_HOME", str(tmp_path / "새기기"))
+        assert call("library_list")["library"]["금리표"]["entries"] == []
+
+        restored = call("backup_import", path=str(archive))
+        assert [e["name"] for e in restored["library"]["금리표"]["entries"]] == ["KIS_2025"]
+        assert [e["name"] for e in restored["library"]["명부"]["entries"]] == ["1번단체"]
+        assert [r["name"] for r in restored["runs"]] == ["2412 1번단체"]
+        # 되살린 산출의 입력이 실제로 열려야 한다.
+        again = call("run_restore", name="2412 1번단체", work=str(tmp_path / "w"))
+        assert Path(again["roster"]).exists()
+
+    def test_merge_keeps_what_the_archive_does_not_have(self, tmp_path, monkeypatch) -> None:
+        call("library_register", kind="금리표", path=str(_kis_book(tmp_path / "a.xlsx")),
+             name="예전금리표")
+        archive = Path(call("backup_export", work=str(tmp_path))["path"])
+
+        monkeypatch.setenv("PENSION_HOME", str(tmp_path / "다른기기"))
+        call("library_register", kind="금리표", path=str(_kis_book(tmp_path / "b.xlsx")),
+             name="이기기금리표")
+        merged = call("backup_import", path=str(archive))
+        assert {e["name"] for e in merged["library"]["금리표"]["entries"]} == {
+            "예전금리표", "이기기금리표",
+        }
+
+        replaced = call("backup_import", path=str(archive), replace=True)
+        assert [e["name"] for e in replaced["library"]["금리표"]["entries"]] == ["예전금리표"]
+
+    def test_rejects_a_random_zip(self, tmp_path) -> None:
+        import zipfile
+
+        bogus = tmp_path / "아무거나.zip"
+        with zipfile.ZipFile(bogus, "w") as archive:
+            archive.writestr("hello.txt", "hi")
+        assert "보관함 파일이 아닙니다" in call_error("backup_import", path=str(bogus))
+
+
 class TestRosterOps:
     def test_scan_and_groups(self, roster_path) -> None:
         found = call("roster_scan", path=str(roster_path), groups=[])["found"]
@@ -307,6 +404,43 @@ class TestRunHistory:
         self._saved_run(tmp_path, roster_path)
         assert call("run_delete", name="2412 1번단체")["runs"] == []
         assert "없습니다" in call_error("run_restore", name="2412 1번단체")
+
+    def test_prior_link_carries_numbers_and_assumptions(self, tmp_path, roster_path) -> None:
+        """저장된 산출을 전기로 끌어오면 DBO·할인율이 서식 없이 그대로 와야 한다."""
+        self._saved_run(tmp_path, roster_path)
+        prior = call("run_prior", name="2412 1번단체")
+
+        assert prior["values"]["dbo"] > 0
+        assert 0 < prior["values"]["discount_rate"] < 1  # 4.5% → 0.045
+        assert Path(prior["assumptions"]).exists()
+
+        # 그 값으로 당기를 돌리면 증감분석이 붙는다.
+        current = call(
+            "run", roster=str(roster_path), assumptions=prior["assumptions"],
+            work=str(tmp_path / "당기"), force=True, sensitivity=False, longterm=False,
+            prior_dbo=prior["values"]["dbo"],
+            prior_rate=prior["values"]["discount_rate"],
+            prior_service_cost=prior["values"]["service_cost"],
+            prior_assumptions=prior["assumptions"],
+        )
+        assert current["run"] is True
+        assert "보험수리적손익" in [row[0] for row in current["summary"]]
+
+    def test_prior_link_falls_back_to_summary_text(self, tmp_path, roster_path) -> None:
+        """숫자를 남기지 않던 예전 저장본도 요약 문자열에서 되짚어야 한다."""
+        import json as _json
+
+        self._saved_run(tmp_path, roster_path)
+        folder = Path(os.environ["PENSION_HOME"]) / "산출내역" / "2412 1번단체"
+        meta = _json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+        meta["report"].pop("values")
+        (folder / "meta.json").write_text(
+            _json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        )
+
+        prior = call("run_prior", name="2412 1번단체")
+        assert prior["values"]["dbo"] > 0
+        assert prior["values"]["discount_rate"] == pytest.approx(0.045, abs=1e-4)
 
     def test_name_is_required_and_sanitized(self, tmp_path, roster_path) -> None:
         assert "산출명" in call_error(
