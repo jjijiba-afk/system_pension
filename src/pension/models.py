@@ -103,6 +103,8 @@ class ActiveMember:
     """
     extra_rate: float = 0.0
     """가산(감소) 지급률."""
+    declared_nra: int = 0
+    """명부에 개인별로 적어 온 정년연령. 0 이면 직군 규정을 따른다."""
     extra_pay_base_date: _dt.date | None = None
     """전별금 등 추가지급 기준일."""
     extra_pay_base_wage: float = 0.0

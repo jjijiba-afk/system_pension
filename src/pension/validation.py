@@ -227,6 +227,29 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
                       "(DB / DC / 퇴직금제도 중 하나로 적어 주세요)",
                       column=_col(sheet, "plan"), value=member.plan_raw, **kw)
 
+        # 추가지급 기본급은 '기본급' 인데 산출은 이것을 **정액 지급액** 으로
+        # 급여에 더한다. 원본 VBA 의 배수 규칙을 알 수 없어 그대로 두었으므로,
+        # 값이 있는 사람은 담당자가 의도를 확인해야 한다.
+        if member.extra_pay_base_wage:
+            log.warning(
+                "JAE_EXTRA_PAY_CHECK",
+                f"추가지급 기본급 {member.extra_pay_base_wage:,.0f}원이 "
+                "모든 퇴직 시점의 지급액에 정액으로 더해집니다 "
+                "(중도퇴직·정년퇴직 구분 없음). 규정과 맞는지 확인하세요",
+                column=_col(sheet, "extra_pay_base_wage"),
+                value=member.extra_pay_base_wage, **kw,
+            )
+
+        if member.honorary_wage:
+            log.warning(
+                "JAE_HONORARY_WAGE_UNUSED",
+                f"명예퇴직 산정용 임금 {member.honorary_wage:,.0f}원은 "
+                "산출에 반영되지 않습니다. 명예퇴직 급여를 채무에 넣으려면 "
+                "지급률 규정(수식)이나 추가지급 기본급으로 옮기세요",
+                column=_col(sheet, "honorary_wage"),
+                value=member.honorary_wage, **kw,
+            )
+
         if member.accrued_benefit < 0:
             log.warning("JAE_ACCRUED_NEGATIVE", "퇴직급여추계액이 음수입니다",
                         column=_col(sheet, "accrued_benefit"),
@@ -248,6 +271,7 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
                 member.age, rule,
                 wage_peak_age=member.wage_peak_age,
                 is_executive=member.employee_type is EmployeeType.EXECUTIVE,
+                declared_nra=member.declared_nra,
             )
             member.longterm_nra = longterm_retirement_age(member.age, rule)
 

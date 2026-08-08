@@ -1009,6 +1009,7 @@ $("form").addEventListener("submit", async (event) => {
       asset_contributions: $("asset_contributions").value,
       asset_paid: $("asset_paid").value,
       asset_closing: $("asset_closing").value,
+      unpaid_benefits: $("unpaid_benefits").value,
     };
     if (options.base_date && options.period_start
         && options.period_start >= options.base_date) {
@@ -1029,6 +1030,7 @@ $("form").addEventListener("submit", async (event) => {
       asset_contributions: parseNumber(options.asset_contributions),
       asset_paid: parseNumber(options.asset_paid),
       asset_closing: parseNumber(options.asset_closing),
+      unpaid_benefits: parseNumber(options.unpaid_benefits),
     });
 
     if (!report.run) {
@@ -1191,7 +1193,7 @@ function restoreRun(name) {
     $("prior_rate").value = options.prior_rate || "";
     for (const key of ["past_service_cost", "settlement_obligation",
                        "asset_opening", "asset_contributions",
-                       "asset_paid", "asset_closing"]) {
+                       "asset_paid", "asset_closing", "unpaid_benefits"]) {
       $(key).value = options[key] || "";
     }
     $("run-name").value = name;

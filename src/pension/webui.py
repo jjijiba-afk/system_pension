@@ -391,6 +391,7 @@ def _run(request: dict) -> dict[str, Any]:
                 closing_fair_value=float(request.get("asset_closing") or 0),
                 contributions=float(request.get("asset_contributions") or 0),
                 benefits_paid=float(request.get("asset_paid") or 0),
+                unpaid_benefits=float(request.get("unpaid_benefits") or 0),
             ),
         ))
     except PensionDataError as exc:
