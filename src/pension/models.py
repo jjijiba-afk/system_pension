@@ -127,6 +127,15 @@ class ActiveMember:
     """근속기간 산정방법. 직군 규칙에서 받아 온다."""
     service_fraction: str = "그대로"
     """근속연수 단수 처리. 직군 규칙에서 받아 온다."""
+    apply_base_up: bool = True
+    apply_promotion: bool = True
+    apply_withdrawal: bool = True
+    apply_mortality: bool = True
+    """직군별 가정 적용 여부. 직군 규칙에서 받아 온다.
+
+    끄면 그 가정의 요율을 0 으로 둔다. 예를 들어 임원을 정년까지 근무한다고
+    보아 퇴직률을 적용하지 않는 회사가 있다.
+    """
 
     def effective_daily_base_pay(self) -> float:
         """업로드 명부에 쓸 일 기본급.

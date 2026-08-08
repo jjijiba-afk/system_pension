@@ -125,11 +125,13 @@ def _summary_sheet(wb, run: PensionRun) -> None:
 
     section("0. 산출 기준")
     line("산출기준일", run.config.base_date, _DATE)
-    line(
-        "적용 할인율",
-        run.assumptions.discount.representative_rate(run.valuation.duration),
-        _RATE,
-    )
+    curve = run.assumptions.discount
+    if curve.flat is None:
+        line("적용 할인율 (단일할인율)", run.valuation.single_discount_rate(), _RATE)
+        ws.cell(row - 1, 4, "수익률곡선기법")
+        line("  듀레이션 시점 현물이자율", curve.rate(run.valuation.duration), _RATE)
+    else:
+        line("적용 할인율", curve.level_rate, _RATE)
     line("가중평균 잔존만기(듀레이션)", run.valuation.duration, _YEARS, "년")
     line("기초율 가정", run.assumptions.label)
     row += 1

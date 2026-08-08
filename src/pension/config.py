@@ -75,6 +75,23 @@ class JobGroupRule:
     benefit_rounding_mode: str = "반올림"
     """지급액 반올림 방식. ``Input`` V열."""
 
+    # ── 직군별 가정 적용 여부 ────────────────────────────────────
+    # 어떤 가정을 쓸지가 직군마다 다른 경우가 실제로 있다. 임원은 정년까지
+    # 근무한다고 보아 퇴직률을 적용하지 않거나, 호봉표가 없는 계약직에 승급률을
+    # 주지 않거나, 임금이 계약으로 고정돼 Base-up 을 반영하지 않는 식이다.
+    #
+    # 미반영은 **그 가정의 요율을 0 으로 두는 것** 과 같다. 기초율 표를 직군마다
+    # 0 으로 채워도 결과는 같지만, 그러면 '값이 0 인 것' 과 '적용하지 않기로 한 것'
+    # 을 나중에 구별할 수 없다. 근거자료로 남으려면 의도가 드러나야 한다.
+    apply_base_up: bool = True
+    """Base-up(공통 임금인상률) 적용 여부."""
+    apply_promotion: bool = True
+    """승급률(호봉·승진 인상) 적용 여부."""
+    apply_withdrawal: bool = True
+    """중도퇴직률 적용 여부. 끄면 정년까지 전원 근무한다고 본다."""
+    apply_mortality: bool = True
+    """사망률 적용 여부."""
+
     excluded: bool = False
     """이 직군을 퇴직급여 산출에서 통째로 뺄지. ``Input`` R열.
 
@@ -239,6 +256,17 @@ class CalculationConfig:
         return self._by_any_source.get(job)
 
 
+#: 적용 여부 칸에서 '미반영' 으로 읽을 표기. 비어 있으면 **반영** 이 기본이다 —
+#: 기존 파일에는 이 칸이 아예 없으므로 빈 값이 곧 종전 동작이어야 한다.
+_NOT_APPLIED = frozenset({"미반영", "미적용", "N", "NO", "아니오", "아니요", "0", "FALSE", "X", "제외"})
+
+
+def _apply(value: object) -> bool:
+    """직군별 가정 적용 여부 칸. 비면 적용한다."""
+    token = text(value).upper()
+    return token not in _NOT_APPLIED if token else True
+
+
 PAYOUT_SHEET = "지급규정"
 """가정 입력 화면이 저장하는 지급규정 시트. ``Input`` 과 열 배치가 같다."""
 
@@ -291,6 +319,10 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
                 benefit_rounding_unit=_int(ws.cell(row, 20).value),
                 benefit_rounding_mode=text(ws.cell(row, 21).value) or "반올림",
                 employee_type_filter=text(ws.cell(row, 22).value),
+                apply_base_up=_apply(ws.cell(row, 23).value),
+                apply_promotion=_apply(ws.cell(row, 24).value),
+                apply_withdrawal=_apply(ws.cell(row, 25).value),
+                apply_mortality=_apply(ws.cell(row, 26).value),
             )
         )
     return rules

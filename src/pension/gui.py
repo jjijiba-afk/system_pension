@@ -553,9 +553,10 @@ class PensionApp(tk.Tk):
         self._write("", "muted")
         self._write("── 산출 결과 요약 " + "─" * 40, "head")
         self._write(f"  산출기준일        {run.config.base_date}")
-        rate = run.assumptions.discount.representative_rate(run.valuation.duration)
-        tail = "" if run.assumptions.discount.flat is not None else \
-            f"  (듀레이션 {run.valuation.duration:.1f}년 시점 현물이자율)"
+        if run.assumptions.discount.flat is None:
+            rate, tail = run.valuation.single_discount_rate(), "  (수익률곡선기법 단일할인율)"
+        else:
+            rate, tail = run.assumptions.discount.level_rate, ""
         self._write(f"  적용 할인율       {rate:.3%}{tail}")
         self._write(f"  산출대상 인원     {v.headcount:,}명")
         self._write(f"  확정급여채무      {v.dbo:>18,.0f} 원", "ok")

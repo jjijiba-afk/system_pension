@@ -14,12 +14,7 @@ from pension.samples import (
     TEMPLATE_ASSUMPTIONS,
     write_sample_pack,
 )
-from pension.standard_rates import (
-    MORTALITY_MALE_SHARE,
-    STANDARD_TABLE,
-    mortality_table,
-    unisex_qx,
-)
+from pension.standard_rates import STANDARD_TABLE, mortality_table
 
 
 @pytest.fixture
@@ -99,37 +94,25 @@ class TestOutOfTheBox:
 
 
 class TestMortality:
-    """표준사망률은 남녀를 구분하지 않는 단일 표다."""
+    """표준사망률은 남녀를 나눠 쓴다."""
 
     def test_covers_the_supplied_age_range(self) -> None:
         assert [row[0] for row in mortality_table()] == [r[0] for r in STANDARD_TABLE]
 
-    def test_both_columns_are_identical(self) -> None:
-        """남녀를 구분하지 않으므로 두 열의 값이 같아야 한다.
+    def test_columns_are_male_then_female(self) -> None:
+        for (age, _w, _p, male, female), row in zip(
+            STANDARD_TABLE, mortality_table(), strict=True
+        ):
+            assert row == [age, male, female]
 
-        산출 엔진은 성별로 열을 골라 읽는다. 두 열이 같아야 성별이 결과를
-        바꾸지 않는다.
-        """
-        assert all(row[1] == row[2] for row in mortality_table())
-
-    def test_is_the_population_average_not_a_company_mix(self) -> None:
-        """표준률이므로 전체 인구 기준(남녀 단순평균)이다.
-
-        특정 회사의 성별 구성으로 가중하면 그것은 표준률이 아니라 그 회사의
-        경험률이고, 회사가 바뀔 때마다 표가 달라져 '표준' 이 성립하지 않는다.
-        """
-        assert MORTALITY_MALE_SHARE == 0.50
-        blended = {row[0]: row[1] for row in mortality_table()}
-        for age, _w, _p, male, female in STANDARD_TABLE:
-            assert blended[age] == round((male + female) / 2, 6)
+    def test_women_die_later(self) -> None:
+        assert all(row[2] < row[1] for row in mortality_table())
 
     def test_rates_increase_with_age(self) -> None:
-        rates = [row[1] for row in mortality_table()]
-        assert rates == sorted(rates)
-        assert all(0.0 < r < 1.0 for r in rates)
-
-    def test_unisex_blend(self) -> None:
-        assert unisex_qx(0.002, 0.001) == pytest.approx(0.0015)
+        for column in (1, 2):
+            rates = [row[column] for row in mortality_table()]
+            assert rates == sorted(rates)
+            assert all(0.0 < r < 1.0 for r in rates)
 
 
 class TestStandardTable:
@@ -157,13 +140,13 @@ class TestStandardTable:
 
 
 class TestDefaultRoster:
-    """기본 명부는 실제 평가 사례를 비식별 처리한 것이다.
+    """기본 명부는 실제 평가 사례의 명부를 그대로 옮긴 것이다.
 
     작성 예시 두 줄짜리 양식으로는 DC 혼재·근속 1년 미만 퇴직자·임원의 직군
     표기 같은 실제 형태를 볼 수 없다.
     """
 
-    def test_reads_back_at_full_size(self, pack) -> None:
+    def _roster(self, pack):
         from pension.config import read_config
         from pension.errors import IssueLog
         from pension.readers import read_roster
@@ -172,16 +155,32 @@ class TestDefaultRoster:
 
         book = open_workbook(pack / ROSTER_DEFAULT)
         try:
-            roster = read_roster(book, read_config(book), IssueLog())
+            return read_roster(book, read_config(book), IssueLog())
         finally:
             book.close()
 
+    def test_reads_back_at_full_size(self, pack) -> None:
+        roster = self._roster(pack)
         assert len(roster.active) == 275
         assert len(roster.retired) == 247
 
-    def test_calculates_without_errors(self, pack, tmp_path) -> None:
-        """받는 사람이 처음 여는 파일이 곧바로 실패하면 안 된다."""
-        from pension.normalize import BenefitPlan
+    def test_carries_the_shapes_a_two_row_sample_cannot(self, pack) -> None:
+        """실제 명부에서 마주치는 형태가 들어 있어야 쓸모가 있다."""
+        from pension.normalize import BenefitPlan, EmployeeType
+
+        roster = self._roster(pack)
+        # DC 가 섞여 있다 — 산출대상에서 빠지는 사람이 생긴다.
+        assert any(m.plan is BenefitPlan.DC for m in roster.active)
+        # 임원의 직군이 '정규직' 으로 적혀 온다 — 직군만으로는 갈라낼 수 없다.
+        assert any(
+            m.employee_type is EmployeeType.EXECUTIVE and m.job_group_raw == "정규직"
+            for m in roster.active
+        )
+        # 근속 1년 미만 퇴직자 — 법정 지급 대상이 아니라 금액이 비어 있다.
+        assert any(0 < m.service_years() < 1.0 for m in roster.retired)
+
+    def test_calculates(self, pack, tmp_path) -> None:
+        """원본 명부이므로 검증 오류가 남아 있다. 그래도 산출은 끝까지 돌아야 한다."""
         from pension.pipeline import RunOptions, run_valuation
         from pension.samples import ROSTER_DEFAULT
 
@@ -189,53 +188,74 @@ class TestDefaultRoster:
             roster_path=pack / ROSTER_DEFAULT,
             assumptions_path=pack / STANDARD_ASSUMPTIONS,
             output_path=tmp_path / "결과.xlsx",
+            allow_errors=True,
         ))
-        assert not run.issues.has_errors()
         assert run.valuation.dbo > 0
-        # DC 가입자가 섞여 있어 산출대상이 전체보다 적다.
         assert 0 < run.valuation.headcount < len(run.roster.active)
-        assert any(m.plan is BenefitPlan.DC for m in run.roster.active)
 
-    def test_is_deidentified(self, pack) -> None:
-        """성명이 없고 사번은 새로 매긴 것이어야 한다."""
-        from pension.config import read_config
-        from pension.errors import IssueLog
-        from pension.readers import read_roster
+    def test_validation_report_has_something_to_show(self, pack) -> None:
+        """실제 명부라 제도구분 누락 등이 그대로 있다. 검증 화면을 보여 주기에 좋다."""
+        from pension.pipeline import load_inputs
         from pension.samples import ROSTER_DEFAULT
-        from pension.workbook import open_workbook
 
-        book = open_workbook(pack / ROSTER_DEFAULT)
-        try:
-            roster = read_roster(book, read_config(book), IssueLog())
-        finally:
-            book.close()
+        _cfg, _roster, _a, log = load_inputs(
+            pack / ROSTER_DEFAULT, pack / STANDARD_ASSUMPTIONS
+        )
+        assert log.has_errors()
+        assert log.warnings
 
-        assert not any(m.name for m in roster.active)
-        assert not any(m.name for m in roster.retired)
-        assert all(m.employee_id.startswith("A") for m in roster.active)
-        assert all(m.employee_id.startswith("T") for m in roster.retired)
 
-    def test_dates_stay_inside_the_valuation_period(self, pack) -> None:
-        """비식별 처리로 날짜를 옮길 때 기준일을 넘거나 순서가 뒤집히면 안 된다."""
-        import datetime as _dt
+class TestSingleDiscountRate:
+    """수익률곡선기법 — 곡선으로 할인한 채무와 같은 현가를 내는 단일 이자율.
 
-        from pension.config import read_config
-        from pension.errors import IssueLog
-        from pension.readers import read_roster
+    K-IFRS 1019 문단 85 의 '단일 가중평균 할인율' 이다.
+    """
+
+    def test_reproduces_the_present_value(self) -> None:
+        from pension.valuation import single_equivalent_rate
+
+        flows = {1.0: 100.0, 5.0: 300.0, 10.0: 600.0}
+        target = 100 / 1.03 + 300 / 1.035**5 + 600 / 1.042**10
+
+        rate = single_equivalent_rate(flows, target)
+        assert sum(a / (1 + rate) ** t for t, a in flows.items()) == pytest.approx(target)
+
+    def test_lands_between_the_curve_rates(self) -> None:
+        """단일 이자율은 곡선의 최저·최고 사이에 있어야 한다."""
+        from pension.valuation import single_equivalent_rate
+
+        flows = {1.0: 100.0, 5.0: 300.0, 10.0: 600.0}
+        target = 100 / 1.03 + 300 / 1.035**5 + 600 / 1.042**10
+        assert 0.03 < single_equivalent_rate(flows, target) < 0.042
+
+    def test_flat_curve_gives_that_rate_back(self) -> None:
+        from pension.valuation import single_equivalent_rate
+
+        flows = {1.0: 100.0, 5.0: 300.0, 10.0: 600.0}
+        target = sum(a / 1.04**t for t, a in flows.items())
+        assert single_equivalent_rate(flows, target) == pytest.approx(0.04)
+
+    def test_no_liability_is_not_an_error(self) -> None:
+        """전원 DC 라 채무가 0 이면 할인율이 정의되지 않는다."""
+        from pension.valuation import single_equivalent_rate
+
+        assert single_equivalent_rate({}, 0.0) == 0.0
+        assert single_equivalent_rate({5.0: 100.0}, 0.0) == 0.0
+
+    def test_matches_the_valuation(self, pack, tmp_path) -> None:
+        from pension.pipeline import RunOptions, run_valuation
         from pension.samples import ROSTER_DEFAULT
-        from pension.workbook import open_workbook
 
-        base = _dt.date(2025, 12, 31)
-        book = open_workbook(pack / ROSTER_DEFAULT)
-        try:
-            roster = read_roster(book, read_config(book), IssueLog())
-        finally:
-            book.close()
-
-        for member in roster.active:
-            assert member.birth_date < member.hire_date <= base
-        for member in roster.retired:
-            assert member.birth_date < member.hire_date < member.exit_date <= base
+        run = run_valuation(RunOptions(
+            roster_path=pack / ROSTER_DEFAULT,
+            assumptions_path=pack / STANDARD_ASSUMPTIONS,
+            output_path=tmp_path / "결과.xlsx",
+            include_sensitivity=False, include_longterm=False, allow_errors=True,
+        ))
+        v = run.valuation
+        rate = v.single_discount_rate()
+        restated = sum(a / (1 + rate) ** t for t, a in v.cash_flows().items() if t > 0)
+        assert restated == pytest.approx(v.dbo, rel=1e-9)
 
 
 class TestYieldCurve:

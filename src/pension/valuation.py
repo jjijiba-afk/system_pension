@@ -42,9 +42,44 @@ from .normalize import BenefitPlan
 __all__ = [
     "MemberValuation",
     "ValuationResult",
+    "single_equivalent_rate",
     "value_member",
     "value_roster",
 ]
+
+
+def single_equivalent_rate(
+    cash_flows: dict[float, float], target_pv: float, *, tolerance: float = 1e-10
+) -> float:
+    """``target_pv`` 와 같은 현재가치를 내는 단일 이자율(수익률곡선기법).
+
+    ``Σ CF_t / (1+r)^t = target_pv`` 를 ``r`` 에 대해 푼다. 현재가치는 이자율에
+    대해 단조감소하므로 이분법이면 충분하고, 뉴턴법처럼 발산할 여지가 없다.
+
+    현금흐름이 모두 양수이므로 해가 하나뿐이라는 것도 보장된다. 다만 채무가
+    0 이거나(전원 DC) 현금흐름이 없으면 정의되지 않으므로 0 을 돌려준다.
+    """
+    flows = [(t, amount) for t, amount in cash_flows.items() if amount and t > 0]
+    if not flows or target_pv <= 0:
+        return 0.0
+
+    def present_value(rate: float) -> float:
+        return sum(amount / (1.0 + rate) ** t for t, amount in flows)
+
+    low, high = -0.99, 1.0
+    # 목표 현가가 구간 밖이면 풀 수 없다(이론상 나오지 않지만 방어한다).
+    if present_value(high) > target_pv or present_value(low) < target_pv:
+        return 0.0
+
+    for _ in range(200):
+        mid = (low + high) / 2
+        if present_value(mid) > target_pv:
+            low = mid
+        else:
+            high = mid
+        if high - low < tolerance:
+            break
+    return (low + high) / 2
 
 
 @dataclass(slots=True)
@@ -93,6 +128,12 @@ class MemberValuation:
     """미래 급여의 총 현가(귀속 전). 부채비율 점검용."""
     duration: float = 0.0
     """가중평균 잔존만기(년). 할인율 회사채 만기 선택 근거로 쓴다."""
+    cash_flows: dict[float, float] = field(default_factory=dict)
+    """``{지급시점(년): 기대 급여지급액}``. **할인 전** 금액이다.
+
+    단일할인율을 역산할 때 쓴다(IAS 19.85). 곡선으로 할인한 채무와 같은 값을
+    내는 하나의 이자율을 찾으려면 시점별 현금흐름이 있어야 한다.
+    """
 
     min_service_years: float = 0.0
     """적용한 가입자격(최소 근속연수). 0 이면 제한 없음."""
@@ -146,6 +187,26 @@ class ValuationResult:
         if not total:
             return 0.0
         return sum(m.dbo * m.duration for m in self.members) / total
+
+    def cash_flows(self) -> dict[float, float]:
+        """전체 기대 급여지급액을 시점별로 합친다. 할인 전 금액이다."""
+        total: dict[float, float] = {}
+        for m in self.members:
+            for timing, amount in m.cash_flows.items():
+                total[timing] = total.get(timing, 0.0) + amount
+        return dict(sorted(total.items()))
+
+    def single_discount_rate(self) -> float:
+        """수익률곡선기법으로 역산한 **단일할인율**.
+
+        곡선으로 할인한 채무와 **같은 현재가치** 를 내는 하나의 이자율이다.
+        K-IFRS 1019 문단 85 는 "급여지급의 예상 시기와 금액을 반영하는 단일
+        가중평균 할인율" 을 쓸 수 있다고 하는데, 그 단일 이자율이 이것이다.
+
+        만기별로 다른 이자율로 할인해 놓고 주석에는 하나만 적어야 하므로,
+        임의로 한 만기의 이자율을 고르는 대신 채무 자체가 정하게 한다.
+        """
+        return single_equivalent_rate(self.cash_flows(), self.dbo)
 
     def exclusion_summary(self) -> dict[str, int]:
         """산출에서 빠진 사유별 인원.
@@ -287,15 +348,26 @@ def value_member(
         age_t = member.age + t - 1
         service_t = past_service + t - 1
 
-        # 임금은 해당 연도 초에 인상된다고 본다.
-        wage *= 1.0 + assumptions.salary.rate(
-            salary_rule, year=t, age=age_t, service=service_t
-        )
+        # 임금은 해당 연도 초에 인상된다고 본다. 직군 규칙에서 끈 항목은 0 이다.
+        increase = 0.0
+        if member.apply_base_up:
+            increase += assumptions.salary.base_up.rate(t)
+        if member.apply_promotion:
+            increase += assumptions.salary.promotion.rate(
+                salary_rule, age=age_t, service=service_t
+            )
+        wage *= 1.0 + increase
 
-        withdrawal = assumptions.withdrawal.rate(
-            withdrawal_rule, age=age_t, service=service_t
+        withdrawal = (
+            assumptions.withdrawal.rate(withdrawal_rule, age=age_t, service=service_t)
+            if member.apply_withdrawal
+            else 0.0
         )
-        mortality = assumptions.mortality.qx(member.gender, age_t)
+        mortality = (
+            assumptions.mortality.qx(member.gender, age_t)
+            if member.apply_mortality
+            else 0.0
+        )
         withdrawal = min(max(withdrawal, 0.0), 1.0)
 
         is_final = t == years
@@ -323,6 +395,10 @@ def value_member(
             service_cost += weighted * unit_attribution
             benefit_pv += weighted
             weighted_time += weighted * attribution * timing
+            # 할인 전 현금흐름. 단일할인율 역산에 쓴다.
+            flow = benefit * exit_probability * attribution
+            if flow:
+                result.cash_flows[timing] = result.cash_flows.get(timing, 0.0) + flow
 
         survival *= (1.0 - withdrawal) * (1.0 - mortality)
         if survival <= 0.0:
@@ -348,4 +424,11 @@ def value_roster(
         if member.hire_date is not None and member.hire_date > config.base_date:
             continue  # 기준일 이후 입사자는 산출 대상이 아니다.
         result.members.append(value_member(member, config, assumptions))
+
+    # 이자원가는 개인별로 1년 이자율을 써 두었다. 곡선을 쓴 경우 대표 이자율은
+    # 채무 전체에서 역산한 단일할인율이므로, 다 모은 뒤 그것으로 다시 잡는다.
+    if assumptions.discount.flat is None:
+        rate = result.single_discount_rate()
+        for member_result in result.members:
+            member_result.interest_cost = member_result.dbo * rate
     return result
