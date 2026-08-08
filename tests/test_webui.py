@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import openpyxl
 import pytest
@@ -264,3 +265,60 @@ class TestRunOp:
         assert "확정급여채무 (DBO)" in labels
         assert (tmp_path / "산출결과.xlsx").exists()
         assert (tmp_path / "개인별결과.xlsx").exists()
+
+
+class TestRunHistory:
+    """산출 내역 — 이름 붙여 보관하고 다음 결산 때 끌어온다."""
+
+    def _saved_run(self, tmp_path, roster_path) -> dict:
+        state = form.example_state(["1정규직", "2임원", "3계약직"])
+        assumptions = str(tmp_path / "기초율.xlsx")
+        call("state_write", state=state, path=assumptions)
+        report = call(
+            "run", roster=str(roster_path), assumptions=assumptions,
+            work=str(tmp_path), force=True, sensitivity=False, longterm=False,
+        )
+        return call(
+            "run_save", name="2412 1번단체", roster=str(roster_path),
+            assumptions=assumptions, work=str(tmp_path),
+            report=report, options={"force": True},
+        )
+
+    def test_save_list_restore(self, tmp_path, roster_path) -> None:
+        listing = self._saved_run(tmp_path, roster_path)["runs"]
+        assert [r["name"] for r in listing] == ["2412 1번단체"]
+        assert listing[0]["dbo"]  # 요약에서 DBO 를 뽑아 보여 준다
+        assert listing[0]["has_results"] is True
+
+        restored = call("run_restore", name="2412 1번단체", work=str(tmp_path / "w"))
+        assert Path(restored["roster"]).exists()
+        assert Path(restored["assumptions"]).exists()
+        assert restored["meta"]["options"] == {"force": True}
+
+        results = call("run_results", name="2412 1번단체", work=str(tmp_path / "w"))
+        assert "산출결과.xlsx" in results["files"]
+
+    def test_same_name_overwrites(self, tmp_path, roster_path) -> None:
+        self._saved_run(tmp_path, roster_path)
+        listing = self._saved_run(tmp_path, roster_path)["runs"]
+        assert len(listing) == 1
+
+    def test_delete(self, tmp_path, roster_path) -> None:
+        self._saved_run(tmp_path, roster_path)
+        assert call("run_delete", name="2412 1번단체")["runs"] == []
+        assert "없습니다" in call_error("run_restore", name="2412 1번단체")
+
+    def test_name_is_required_and_sanitized(self, tmp_path, roster_path) -> None:
+        assert "산출명" in call_error(
+            "run_save", name="  ", roster=str(roster_path),
+            assumptions=str(roster_path),
+        )
+        # 경로 문자가 든 이름도 폴더 이름으로 안전해야 한다.
+        state = form.example_state()
+        assumptions = str(tmp_path / "a.xlsx")
+        call("state_write", state=state, path=assumptions)
+        saved = call(
+            "run_save", name="24/12: 1번*단체", roster=str(roster_path),
+            assumptions=assumptions, work=str(tmp_path), report={},
+        )
+        assert saved["runs"][0]["name"] == "24 12  1번 단체"

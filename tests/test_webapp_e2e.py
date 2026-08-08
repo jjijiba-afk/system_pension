@@ -125,6 +125,45 @@ def test_library_registers_curve_into_editor(page, tmp_path) -> None:
     assert first_key.input_value() == "0.25"
 
 
+def test_run_history_save_and_restore(page, tmp_path) -> None:
+    """산출 → 이름 붙여 저장 → 목록 → 입력 불러와 재산출까지."""
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+
+    page.fill("#run-name", "2412 1번단체")
+    page.click("#run-save")
+    page.wait_for_selector("text=저장했습니다", timeout=30_000)
+
+    page.click("#tab-runs")
+    listing = page.inner_text("#runs-list")
+    assert "2412 1번단체" in listing and "확정급여채무" not in listing
+
+    # 입력을 불러오면 산출 탭으로 돌아오고, 파일을 고르지 않아도 재산출된다.
+    page.click("#runs-list >> text=입력 불러오기")
+    page.wait_for_selector("#loaded-run-banner", state="visible")
+    assert page.is_checked("#asrc-saved")
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    assert "확정급여채무" in page.inner_text("#summary")
+
+    # 저장된 결과 보기 대화상자.
+    page.click("#tab-runs")
+    page.click("#runs-list >> text=결과 보기")
+    page.wait_for_selector("#run-dialog[open]")
+    assert "확정급여채무" in page.inner_text("#run-dialog-summary")
+    page.click("#run-dialog >> text=닫기")
+
+
 def test_standard_rates_fill_the_grids(page) -> None:
     """내장 표준률 불러오기 — 15~70세 표가 채워져야 한다."""
     page.click("#tab-edit")

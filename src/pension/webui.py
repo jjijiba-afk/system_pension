@@ -15,7 +15,10 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
+import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -30,6 +33,7 @@ from .library import (
     RATES_KIND,
     entries,
     find_entry,
+    library_dir,
     read_settings,
     register,
     remove,
@@ -369,6 +373,151 @@ def _run(request: dict) -> dict[str, Any]:
     }
 
 
+# ── 산출 내역 ────────────────────────────────────────────────────
+# 산출 하나(명부 + 기초율 + 결과 + 요약)를 이름 붙여 통째로 보관한다.
+# 등록 자료와 같은 PENSION_HOME 아래라, 브라우저에서는 IndexedDB 에 남는다.
+# "2412 1번단체" 처럼 결산기·단체명으로 이름을 지어 두면 다음 결산 때
+# 전기 입력을 그대로 끌어올 수 있다.
+
+_RUN_ROSTER_SUFFIXES = (".xlsx", ".xlsm", ".xls")
+
+
+def _runs_dir() -> Path:
+    path = library_dir() / "산출내역"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _safe_run_name(name: str) -> str:
+    """산출명을 폴더 이름으로. 경로 문자만 걷어내고 나머지는 그대로 둔다."""
+    cleaned = re.sub(r'[\\/:*?"<>|]', " ", text(name)).strip()
+    if not cleaned:
+        raise ValueError("산출명을 입력하세요 (예: 2412 1번단체)")
+    return cleaned
+
+
+def _run_meta(folder: Path) -> dict[str, Any] | None:
+    try:
+        return json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _saved_roster(folder: Path) -> Path | None:
+    for suffix in _RUN_ROSTER_SUFFIXES:
+        candidate = folder / f"명부{suffix}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _run_save(request: dict) -> dict[str, Any]:
+    """방금 마친 산출을 이름 붙여 보관한다. 같은 이름이 있으면 덮어쓴다."""
+    name = _safe_run_name(request.get("name", ""))
+    roster = Path(request["roster"])
+    assumptions = Path(request["assumptions"])
+    if not roster.exists() or not assumptions.exists():
+        raise ValueError("저장할 명부·기초율이 없습니다. 먼저 산출을 실행하세요")
+
+    folder = _runs_dir() / name
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
+
+    shutil.copy2(roster, folder / f"명부{roster.suffix.lower()}")
+    shutil.copy2(assumptions, folder / "기초율.xlsx")
+    work = Path(request.get("work", "/work"))
+    for result_name in ("산출결과.xlsx", "개인별결과.xlsx"):
+        source = work / result_name
+        if source.exists():
+            shutil.copy2(source, folder / result_name)
+
+    meta = {
+        "name": name,
+        "saved": text(request.get("saved"))
+                 or _dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "roster_name": text(request.get("roster_name")) or roster.name,
+        "report": request.get("report") or {},
+        "options": request.get("options") or {},
+    }
+    (folder / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    return _run_list({})
+
+
+def _run_list(_request: dict) -> dict[str, Any]:
+    runs = []
+    base = _runs_dir()
+    for folder in base.iterdir():
+        if not folder.is_dir():
+            continue
+        meta = _run_meta(folder)
+        if meta is None:
+            continue
+        summary = dict(meta.get("report", {}).get("summary", []))
+        runs.append({
+            "name": meta.get("name", folder.name),
+            "saved": meta.get("saved", ""),
+            "roster_name": meta.get("roster_name", ""),
+            "base_date": summary.get("산출기준일", ""),
+            "headcount": summary.get("산출대상 인원", ""),
+            "dbo": summary.get("확정급여채무 (DBO)", ""),
+            "has_results": (folder / "산출결과.xlsx").exists(),
+        })
+    runs.sort(key=lambda r: r["saved"], reverse=True)
+    return {"runs": runs}
+
+
+def _run_folder(request: dict) -> Path:
+    name = _safe_run_name(request.get("name", ""))
+    folder = _runs_dir() / name
+    if not folder.is_dir() or _run_meta(folder) is None:
+        raise ValueError(f"저장된 산출 '{name}' 이(가) 없습니다")
+    return folder
+
+
+def _run_restore(request: dict) -> dict[str, Any]:
+    """저장된 산출의 입력(명부·기초율)을 작업 폴더로 되가져온다."""
+    folder = _run_folder(request)
+    meta = _run_meta(folder)
+    work = Path(request.get("work", "/work"))
+    work.mkdir(parents=True, exist_ok=True)
+
+    roster = _saved_roster(folder)
+    if roster is None:
+        raise ValueError("저장본에 명부가 없습니다")
+    roster_target = work / f"저장명부{roster.suffix}"
+    shutil.copy2(roster, roster_target)
+    shutil.copy2(folder / "기초율.xlsx", work / "기초율저장본.xlsx")
+    return {
+        "meta": meta,
+        "roster": str(roster_target),
+        "assumptions": str(work / "기초율저장본.xlsx"),
+    }
+
+
+def _run_results(request: dict) -> dict[str, Any]:
+    """저장된 결과 파일을 내려받을 수 있게 작업 폴더로 꺼낸다."""
+    folder = _run_folder(request)
+    work = Path(request.get("work", "/work"))
+    files = {}
+    for result_name in ("산출결과.xlsx", "개인별결과.xlsx"):
+        source = folder / result_name
+        if source.exists():
+            target = work / f"저장_{result_name}"
+            shutil.copy2(source, target)
+            files[result_name] = str(target)
+    if not files:
+        raise ValueError("이 산출에는 저장된 결과 파일이 없습니다")
+    return {"files": files}
+
+
+def _run_delete(request: dict) -> dict[str, Any]:
+    shutil.rmtree(_run_folder(request))
+    return _run_list({})
+
+
 _OPS = {
     "meta": _meta,
     "state_new": _state_new,
@@ -390,4 +539,9 @@ _OPS = {
     "roster_groups": _roster_groups,
     "general_info": _general_info,
     "run": _run,
+    "run_save": _run_save,
+    "run_list": _run_list,
+    "run_restore": _run_restore,
+    "run_results": _run_results,
+    "run_delete": _run_delete,
 }
