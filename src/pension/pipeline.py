@@ -17,6 +17,7 @@ from .errors import IssueLog, PensionDataError
 from .longterm import LongTermResult, value_longterm
 from .models import Roster
 from .normalize import BenefitPlan, RetirementReason
+from .planassets import PlanAssets, build_plan_assets
 from .readers import read_roster
 from .rollforward import RollForward, build_rollforward, initial_period
 from .sensitivity import DEFAULT_SHOCKS, SensitivityResult, Shock, run_sensitivity
@@ -25,6 +26,7 @@ from .valuation import ValuationResult, value_roster
 
 __all__ = [
     "PensionRun",
+    "PlanAssetInput",
     "PriorPeriod",
     "RunOptions",
     "load_inputs",
@@ -52,10 +54,38 @@ class PriorPeriod:
     assumptions_path: str = ""
     """전기 기초율 파일. 주면 경험조정과 가정변경효과를 나눠 계산한다."""
     past_service_cost: float = 0.0
-    """당기 제도개정으로 생긴 과거근무원가."""
+    """당기 제도개정으로 생긴 과거근무원가.
+
+    비워 두면 전기 기초율을 준 경우에 한해 **지급률 규정 변경분을 자동으로**
+    계산한다. 정년 연장처럼 지급률 밖에서 일어난 개정은 프로그램이 알 수 없으니
+    직접 넣어야 하고, 넣으면 자동 계산 대신 그 값을 쓴다.
+    """
+    settlement_obligation: float = 0.0
+    """정산(중간정산·전출)으로 **소멸한** 확정급여채무.
+
+    전기 개인별 결과에서 해당자의 채무를 합쳐 넣는다. 지급액과의 차이가
+    정산손익이 된다. 0 이면 정산손익을 인식하지 않는다(종전 동작)."""
 
     def is_empty(self) -> bool:
         return self.dbo == 0.0 and self.service_cost == 0.0
+
+
+@dataclass(slots=True)
+class PlanAssetInput:
+    """사외적립자산 입력. 신탁회사 명세서에서 그대로 옮긴다."""
+
+    opening_fair_value: float = 0.0
+    """기초 공정가치(전기말 잔액)."""
+    closing_fair_value: float = 0.0
+    """기말 공정가치(결산일 잔액)."""
+    contributions: float = 0.0
+    """당기 부담금 납입액."""
+    benefits_paid: float = 0.0
+    """자산에서 직접 지급된 퇴직급여. 0 이면 명부의 사외자산 지급액을 쓴다."""
+
+    def is_empty(self) -> bool:
+        return not (self.opening_fair_value or self.closing_fair_value
+                    or self.contributions)
 
 
 @dataclass(slots=True)
@@ -81,6 +111,8 @@ class RunOptions:
     include_longterm: bool = True
     shocks: tuple[Shock, ...] = DEFAULT_SHOCKS
     prior: PriorPeriod = field(default_factory=PriorPeriod)
+    plan_assets: PlanAssetInput = field(default_factory=PlanAssetInput)
+    """사외적립자산. 비우면 자산 표를 만들지 않는다(채무만 산출)."""
     fill_missing_ids: bool = True
     allow_errors: bool = False
     """검증 오류가 있어도 산출을 강행할지. 기본은 중단."""
@@ -98,6 +130,8 @@ class PensionRun:
     longterm: LongTermResult | None = None
     sensitivity: SensitivityResult | None = None
     rollforward: RollForward | None = None
+    plan_assets: PlanAssets | None = None
+    """사외적립자산 증감과 순확정급여부채. 입력이 없으면 ``None``."""
     active_upload: list[list[Any]] = field(default_factory=list)
     retired_upload: list[list[Any]] = field(default_factory=list)
 
@@ -251,6 +285,7 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
 
     progress("증감분석을 만드는 중", 0.90)
     run.rollforward = _build_rollforward(run, options, progress)
+    run.plan_assets = _build_plan_assets(run, options)
 
     progress("산출을 마쳤습니다", 1.0)
     return run
@@ -270,10 +305,38 @@ def _build_rollforward(
     if prior.is_empty():
         return initial_period(run.valuation.dbo, run.valuation.service_cost)
 
-    service_cost = prior.service_cost or run.valuation.service_cost
-    rate = prior.discount_rate or run.assumptions.discount.level_rate
     benefits_paid = run.benefits_paid
     settlements = run.settlements_paid
+
+    # ── 전기 가정으로 다시 산출 ──────────────────────────────────
+    # 두 벌이 필요하다. 하나는 전기 가정 그대로(A), 하나는 전기 계리가정에
+    # **당기 지급률 규정만** 얹은 것(B). 그 차이가 제도개정 효과다.
+    prior_assumptions = None
+    dbo_prior_all: float | None = None
+    dbo_after_amendment: float | None = None
+    service_cost_prior_basis = 0.0
+    if prior.assumptions_path:
+        progress("전기 가정으로 다시 산출하는 중", 0.93)
+        prior_assumptions = load_assumptions(prior.assumptions_path, label="전기 가정")
+        prior_run = value_roster(run.roster, run.config, prior_assumptions)
+        dbo_prior_all = prior_run.dbo
+        service_cost_prior_basis = prior_run.service_cost
+
+        amended = prior_assumptions.replace(
+            severance_benefit=run.assumptions.severance_benefit,
+            label="전기 계리가정 + 당기 지급률",
+        )
+        dbo_after_amendment = value_roster(run.roster, run.config, amended).dbo
+
+    # 당기근무원가는 **기초 가정** 으로 재는 것이 원칙이다(문단 57). 전기 가정을
+    # 주지 않았으면 당기 것으로 갈음할 수밖에 없다.
+    service_cost = (
+        prior.service_cost or service_cost_prior_basis or run.valuation.service_cost
+    )
+
+    # 이자원가에 쓸 할인율. 곡선을 썼을 때 ``level_rate`` 는 1년 만기 이자율이라
+    # 채무 전체의 단일할인율보다 한참 낮다 — 그대로 쓰면 이자원가가 크게 준다.
+    rate = prior.discount_rate or _fallback_rate(run)
 
     # 이자원가는 기초채무에 대한 기간분에, 기중 발생한 근무원가·급여지급의
     # 절반년치를 더해 근사한다(기중 균등발생 가정).
@@ -286,13 +349,11 @@ def _build_rollforward(
         + (service_cost - benefits_paid - settlements) * rate * years * 0.5
     )
 
-    dbo_prior_assumptions: float | None = None
-    if prior.assumptions_path:
-        progress("전기 가정으로 다시 산출하는 중", 0.93)
-        prior_assumptions = load_assumptions(prior.assumptions_path, label="전기 가정")
-        dbo_prior_assumptions = value_roster(
-            run.roster, run.config, prior_assumptions
-        ).dbo
+    # 제도개정 효과. 손으로 넣은 값이 있으면 그것을 존중한다 — 지급률 규정
+    # 밖에서 일어난 개정(정년 연장 등)은 프로그램이 알 수 없기 때문이다.
+    past_service_cost = prior.past_service_cost
+    if not past_service_cost and dbo_after_amendment is not None:
+        past_service_cost = dbo_after_amendment - (dbo_prior_all or 0.0)
 
     return build_rollforward(
         opening_dbo=prior.dbo,
@@ -300,7 +361,41 @@ def _build_rollforward(
         interest_cost=interest_cost,
         benefits_paid=benefits_paid,
         settlement_paid=settlements,
+        settlement_obligation=prior.settlement_obligation,
         closing_dbo=run.valuation.dbo,
-        dbo_with_prior_assumptions=dbo_prior_assumptions,
-        past_service_cost=prior.past_service_cost,
+        dbo_with_prior_assumptions=dbo_prior_all,
+        dbo_after_amendment=dbo_after_amendment,
+        past_service_cost=past_service_cost,
     )
+
+
+def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | None:
+    """사외적립자산 증감표. 입력이 없으면 만들지 않는다."""
+    given = options.plan_assets
+    if given.is_empty():
+        return None
+
+    return build_plan_assets(
+        opening_fair_value=given.opening_fair_value,
+        closing_fair_value=given.closing_fair_value,
+        contributions=given.contributions,
+        # 명부에 사외자산 지급액이 적혀 있으면 그것을 쓴다. 따로 넣은 값이 있으면
+        # 그쪽이 우선이다 — 명부에 안 잡히는 지급이 있을 수 있다.
+        benefits_paid=given.benefits_paid or run.fund_assets_paid,
+        discount_rate=options.prior.discount_rate or _fallback_rate(run),
+        closing_dbo=run.valuation.dbo,
+        period_years=_period_years(run.config.base_date, options.period_start),
+    )
+
+
+def _fallback_rate(run: PensionRun) -> float:
+    """전기말 할인율을 안 줬을 때 쓸 이자율.
+
+    곡선을 썼으면 채무 전체에서 역산한 단일할인율을 쓴다. ``level_rate`` 는
+    1년 만기 이자율이라, 우상향 곡선에서는 실제보다 1%p 넘게 낮게 잡힌다.
+    """
+    if run.assumptions.discount.flat is None:
+        single = run.valuation.single_discount_rate()
+        if single:
+            return single
+    return run.assumptions.discount.level_rate

@@ -33,7 +33,7 @@ from __future__ import annotations
 import datetime as _dt
 from dataclasses import dataclass, field
 
-from .actuarial import FRACTION_HALF, round_amount
+from .actuarial import FRACTION_HALF, apply_fraction, round_amount
 from .assumptions import Assumptions
 from .config import CalculationConfig
 from .models import ActiveMember, Roster
@@ -290,6 +290,16 @@ def value_member(
     years = _projection_years(member, assumptions)
     result.projection_years = years
 
+    # 미래 시점의 근속에도 회사의 단수 처리 규칙을 다시 적용해야 한다.
+    # 기준일 근속에만 절사하고 이후로는 소수 근속을 그대로 더하면, '1년 미만
+    # 단수는 버린다' 는 회사에서 미래 급여가 반년치가량 부풀어 오른다.
+    # 단수 처리 전 원래 근속을 따로 들고 있다가 시점마다 다시 깎는다.
+    raw_past_service = member.raw_service_years(config.base_date)
+
+    def service_at(elapsed: float) -> float:
+        """기준일로부터 ``elapsed`` 년 뒤 시점의 근속(단수 처리 반영)."""
+        return apply_fraction(raw_past_service + elapsed, member.service_fraction)
+
     # 수식 방식 지급률 규정이 참조하는 변수들. 표 방식이면 무시된다.
     context = {
         "N": float(member.severance_nra),
@@ -318,6 +328,16 @@ def value_member(
     extra_payment = max(0.0, member.extra_pay_base_wage)
     result.extra_payment = extra_payment
 
+    def multiple_at(service: float, age: float) -> float:
+        """근속 ``service`` 년까지 쌓인 지급배수. 가입자격 문턱은 보지 않는다.
+
+        귀속비율을 재는 자다. 가입자격을 못 채운 구간을 0 으로 깎으면 요건 직전
+        직원의 채무가 통째로 0 이 되는데, 그것은 틀리다 — 문단 72 는 급여를 받게
+        되는 근무가 **시작된 때** 부터 귀속하라고 한다. 요건 미달로 못 받는 것은
+        그 시나리오의 급여액이 0 이 되는 것으로 이미 반영된다.
+        """
+        return assumptions.severance_benefit.multiple(rule, service, x=age, **context)
+
     def benefit_at(service: float, age: float, wage: float) -> float:
         """퇴직 시점 지급액.
 
@@ -328,11 +348,38 @@ def value_member(
         """
         if minimum > 0 and service < minimum:
             return 0.0
-        amount = assumptions.severance_benefit.multiple(
-            rule, service, x=age, **context
-        ) * wage
+        amount = multiple_at(service, age) * wage
         # 전별금·위로금 등 정액 추가지급. 금액이 적힌 사람만 대상이다.
         return round_amount(amount + extra_payment, rounding_unit, rounding_mode)
+
+    def attribution_at(total_service: float, age: float) -> tuple[float, float]:
+        """(기준일까지 귀속비율, 당기 1년치 귀속비율).
+
+        급여식이 근속에 비례하지 않으면 ``과거근속 ÷ 총근속`` 이 틀린다.
+        30년 상한 규정에서 근속 35년인 사람은 더 일해도 급여가 늘지 않으므로
+        이미 전액이 귀속돼 있어야 하는데, 근속비로 재면 총근속이 늘수록 오히려
+        귀속비율이 줄어 채무가 과소계상된다(문단 70: 추가 근무가 유의적인 급여
+        증가를 낳지 않는 시점에 귀속을 멈춘다).
+
+        그래서 근속이 아니라 **급여식이 내는 배수** 로 잰다. 배수가 근속에
+        비례하는 법정 퇴직금에서는 두 방식이 정확히 같은 값을 낸다.
+        임금은 분자·분모에 똑같이 곱해지므로 배수만 보면 된다.
+        """
+        if total_service <= 0:
+            return 0.0, 0.0
+
+        total_multiple = multiple_at(total_service, age)
+        if total_multiple <= 0:
+            # 배수가 0 이거나 음수인 규정(가감 규정 등)은 근속비로 되돌린다.
+            return min(1.0, past_service / total_service), 1.0 / total_service
+
+        earned = multiple_at(past_service, age)
+        # 당기 1년치는 '한 해 더 일했을 때 배수가 얼마나 느는가'.
+        next_year = multiple_at(min(past_service + 1.0, total_service), age)
+
+        attributed = min(1.0, max(0.0, earned / total_multiple))
+        unit = max(0.0, (next_year - earned) / total_multiple)
+        return attributed, unit
 
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
     result.accrued_benefit = benefit_at(past_service, float(member.age), member.monthly_wage)
@@ -375,20 +422,18 @@ def value_member(
             # 정년 도달자는 전원 퇴직한다.
             exit_probability = survival
             timing = float(t)
-            total_service = past_service + t
         else:
             exit_probability = survival * (1.0 - (1.0 - withdrawal) * (1.0 - mortality))
             timing = t - 0.5
-            total_service = past_service + t - 0.5
+        total_service = service_at(timing)
 
         if exit_probability > 0.0:
             # 퇴직 시점의 연령·근속으로 평가한다. 정년 임박자 감액 같은 규정이
             # 기준일이 아니라 실제 퇴직 시점을 보고 판단해야 하기 때문이다.
-            benefit = benefit_at(total_service, member.age + timing, wage)
+            exit_age = member.age + timing
+            benefit = benefit_at(total_service, exit_age, wage)
             discount = assumptions.discount.discount_factor(timing)
-            attribution = min(1.0, past_service / total_service) if total_service > 0 else 0.0
-            # 근무원가는 "1년치 근속이 더 쌓이는 몫". 총근속이 0 이면 귀속할 것이 없다.
-            unit_attribution = (1.0 / total_service) if total_service > 0 else 0.0
+            attribution, unit_attribution = attribution_at(total_service, exit_age)
 
             weighted = benefit * exit_probability * discount
             dbo += weighted * attribution

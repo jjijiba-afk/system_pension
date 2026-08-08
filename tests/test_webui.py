@@ -607,3 +607,78 @@ class TestRunHistory:
             assumptions=assumptions, work=str(tmp_path), report={},
         )
         assert saved["runs"][0]["name"] == "24 12  1번 단체"
+
+
+class TestPlanAssetsAndAmendment:
+    """사외적립자산과 제도개정 — 재무제표에 바로 들어가는 숫자들."""
+
+    def _pack(self, tmp_path):
+        made = call("gen_cases", work=str(tmp_path), seed=4242)
+        return next(c for c in made["cases"] if not c["force"])
+
+    def test_plan_assets_roll_and_net_liability(self, tmp_path) -> None:
+        case = self._pack(tmp_path)
+        report = call(
+            "run", roster=case["roster"], assumptions=case["assumptions"],
+            work=str(tmp_path), sensitivity=False, longterm=False,
+            asset_opening=15_000_000_000, asset_contributions=1_500_000_000,
+            asset_paid=900_000_000, asset_closing=17_200_000_000,
+            prior_rate=0.045,
+        )
+        assert report["run"] is True
+        rows = dict(report["assets"])
+        assert rows["기초 사외적립자산 공정가치"] == 15_000_000_000
+        assert rows["기말 사외적립자산 공정가치"] == 17_200_000_000
+        # 기초 + 부담금 - 지급 + 이자 + 재측정 = 기말
+        assert (
+            rows["기초 사외적립자산 공정가치"] + rows["이자수익"]
+            + rows["부담금 납입액"] + rows["급여지급액"] + rows["자산 재측정손익"]
+        ) == pytest.approx(rows["기말 사외적립자산 공정가치"])
+        # 순확정급여부채 = 채무 - 자산
+        assert rows["순확정급여부채"] == pytest.approx(
+            report["values"]["dbo"] - 17_200_000_000
+        )
+
+    def test_no_asset_input_means_no_asset_table(self, tmp_path) -> None:
+        case = self._pack(tmp_path)
+        report = call("run", roster=case["roster"], assumptions=case["assumptions"],
+                      work=str(tmp_path), sensitivity=False, longterm=False)
+        assert report["assets"] == []
+
+    def test_benefit_change_becomes_past_service_cost(self, tmp_path) -> None:
+        """지급률을 바꾸면 그 효과가 가정변경이 아니라 과거근무원가로 잡혀야 한다."""
+        case = self._pack(tmp_path)
+        prior = form.read_state(case["assumptions"])
+        current = form.read_state(case["assumptions"])
+        for group in current["benefit_rules"]:
+            current["benefit_rules"][group] = {"mode": "수식", "formula": "=t*1.5"}
+        prior_path = str(tmp_path / "전기.xlsx")
+        current_path = str(tmp_path / "당기.xlsx")
+        form.write_state(prior, prior_path)
+        form.write_state(current, current_path)
+
+        base = call("run", roster=case["roster"], assumptions=prior_path,
+                    work=str(tmp_path / "a"), sensitivity=False, longterm=False)
+        after = call(
+            "run", roster=case["roster"], assumptions=current_path,
+            work=str(tmp_path / "b"), sensitivity=False, longterm=False,
+            prior_dbo=base["values"]["dbo"], prior_rate=0.045,
+            prior_assumptions=prior_path,
+        )
+        rows = dict(after["rollforward"])
+        assert rows["과거근무원가(제도개정)"] > 0
+        assert rows["보험수리적손익 - 가정변경"] == pytest.approx(0, abs=1)
+        # 표가 실제 기말채무와 맞아야 한다.
+        assert rows["기말 확정급여채무"] == pytest.approx(after["values"]["dbo"])
+
+    def test_settlement_gain_is_recognised(self, tmp_path) -> None:
+        case = self._pack(tmp_path)
+        report = call(
+            "run", roster=case["roster"], assumptions=case["assumptions"],
+            work=str(tmp_path), sensitivity=False, longterm=False,
+            prior_dbo=15_000_000_000, prior_rate=0.045,
+            settlement_obligation=500_000_000,
+        )
+        rows = dict(report["rollforward"])
+        paid = -rows["정산지급액(중간정산·전출)"]
+        assert rows["정산손익"] == pytest.approx(paid - 500_000_000)

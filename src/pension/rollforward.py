@@ -51,12 +51,25 @@ class RollForward:
     """당기 급여지급액(퇴직자에게 실제 지급된 퇴직급여)."""
     settlement_paid: float = 0.0
     """중간정산·전출 등 정산 지급액."""
+    settlement_gain: float = 0.0
+    """정산손익. 소멸한 채무가 지급액보다 크면 **이익**(음수로 채무를 줄인다).
+
+    문단 109~112 는 정산 시점에 소멸하는 확정급여채무와 정산가격의 차이를
+    정산손익으로 **당기손익** 에 인식하도록 한다. 소멸 채무를 알려면 정산
+    직전 그 사람의 채무를 알아야 하므로 프로그램이 혼자 알아낼 수 없다.
+    담당자가 전기 개인별 결과에서 합계를 넣어 주면 그때 계산한다.
+    """
     experience_adjustment: float = 0.0
     """경험조정에 의한 보험수리적손익."""
     assumption_change: float = 0.0
     """가정변경에 의한 보험수리적손익."""
     past_service_cost: float = 0.0
-    """제도개정에 의한 과거근무원가."""
+    """제도개정에 의한 과거근무원가.
+
+    지급률 규정이 전기와 다르면 그 차이가 여기로 온다. 보험수리적손익과 달리
+    **당기손익** 으로 즉시 인식하므로(문단 103), 가정변경효과에 섞이면 영업이익이
+    달라진다.
+    """
 
     @property
     def expected_closing_dbo(self) -> float:
@@ -68,6 +81,7 @@ class RollForward:
             + self.past_service_cost
             - self.benefits_paid
             - self.settlement_paid
+            + self.settlement_gain
         )
 
     @property
@@ -89,6 +103,7 @@ class RollForward:
             ("과거근무원가(제도개정)", self.past_service_cost),
             ("급여지급액", -self.benefits_paid),
             ("정산지급액(중간정산·전출)", -self.settlement_paid),
+            ("정산손익", self.settlement_gain),
             ("보험수리적손익 - 경험조정", self.experience_adjustment),
             ("보험수리적손익 - 가정변경", self.assumption_change),
             ("기말 확정급여채무", self.closing_dbo),
@@ -103,14 +118,21 @@ def build_rollforward(
     benefits_paid: float,
     closing_dbo: float,
     dbo_with_prior_assumptions: float | None = None,
+    dbo_after_amendment: float | None = None,
     settlement_paid: float = 0.0,
+    settlement_obligation: float = 0.0,
     past_service_cost: float = 0.0,
 ) -> RollForward:
     """증감표를 만든다.
 
-    :param dbo_with_prior_assumptions: 당기말 명부를 **전기 가정** 으로 산출한
-        확정급여채무. 주면 보험수리적손익이 경험조정과 가정변경으로 나뉜다.
+    :param dbo_with_prior_assumptions: 당기말 명부를 **전기 가정 그대로** 산출한
+        확정급여채무(A). 주면 보험수리적손익이 경험조정과 가정변경으로 나뉜다.
         주지 않으면 전액을 경험조정으로 잡고 가정변경은 0 으로 둔다.
+    :param dbo_after_amendment: 당기말 명부를 **전기 계리가정 + 당기 지급률** 로
+        산출한 확정급여채무(B). 주면 ``B − A`` 를 제도개정 효과로 떼어 내고,
+        남은 ``기말 − B`` 만 가정변경효과로 본다.
+    :param settlement_obligation: 정산으로 소멸한 확정급여채무. 주면
+        ``지급액 − 소멸채무`` 를 정산손익으로 인식한다.
     """
     roll = RollForward(
         opening_dbo=opening_dbo,
@@ -120,15 +142,26 @@ def build_rollforward(
         settlement_paid=settlement_paid,
         past_service_cost=past_service_cost,
     )
+    if settlement_obligation:
+        # 소멸한 채무보다 적게 주고 끝냈으면 그만큼 이익(채무 감소)이다.
+        roll.settlement_gain = settlement_paid - settlement_obligation
+
     expected = roll.expected_closing_dbo
 
     if dbo_with_prior_assumptions is None:
         roll.experience_adjustment = closing_dbo - expected
         roll.assumption_change = 0.0
-    else:
-        roll.experience_adjustment = dbo_with_prior_assumptions - expected
-        roll.assumption_change = closing_dbo - dbo_with_prior_assumptions
+        return roll
 
+    # 제도개정을 떼어냈으면 기준점도 **개정 후** 채무여야 한다. 기대 기말채무에
+    # 이미 과거근무원가가 들어가 있으므로, 개정 전 채무(A)와 비교하면 개정분이
+    # 두 번 빠져 표가 맞지 않는다.
+    reference = (
+        dbo_after_amendment if dbo_after_amendment is not None
+        else dbo_with_prior_assumptions
+    )
+    roll.experience_adjustment = reference - expected
+    roll.assumption_change = closing_dbo - reference
     return roll
 
 

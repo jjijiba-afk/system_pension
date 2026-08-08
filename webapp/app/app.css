@@ -1,15 +1,21 @@
 /* 연금계리 산출 웹앱 — 아이패드 Safari 기준.
    터치 표적은 44px 안팎, 넓은 표는 가로 스크롤 컨테이너 안에서만 움직인다. */
-:root { color-scheme: light dark;
+/* 기기가 다크 모드여도 이 앱은 항상 밝게 쓴다. 숫자표가 많아 밝은 배경이
+   읽기 쉽고, 화면을 캡처해 감사인·담당자에게 그대로 보내는 일이 잦다. */
+:root { color-scheme: light;
   --navy: #1F3864; --navy-soft: #44546A; --line: #C4CBD8; --hint: #5B6478;
-  --bg-soft: #EEF3F8; }
-@media (prefers-color-scheme: dark) {
-  :root { --navy: #9DB6E0; --navy-soft: #8494B0; --line: #4A5568;
-          --hint: #98A2B8; --bg-soft: #263041; }
-}
+  --bg-soft: #EEF3F8; --paper: #FFFFFF; --ink: #1A1D23; }
 * { box-sizing: border-box; }
+html { background: var(--paper); }
 body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
-       max-width: 980px; margin: 0 auto; padding: 20px 14px 64px; line-height: 1.55; }
+       max-width: 980px; margin: 0 auto; line-height: 1.55;
+       background: var(--paper); color: var(--ink);
+       /* 홈 화면 앱으로 열면 제목이 상태표시줄(시계·배터리) 밑으로 들어간다.
+          노치·다이내믹 아일랜드 높이만큼 더 내린다. */
+       padding: calc(env(safe-area-inset-top, 0px) + 26px)
+                calc(env(safe-area-inset-right, 0px) + 14px)
+                calc(env(safe-area-inset-bottom, 0px) + 64px)
+                calc(env(safe-area-inset-left, 0px) + 14px); }
 h1 { font-size: 1.45rem; color: var(--navy); margin: 0 0 2px; }
 h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display: block; }
 
@@ -42,13 +48,11 @@ select { padding: 10px 8px; border: 1px solid var(--line); border-radius: 8px;
 button.big { display: block; width: 100%; padding: 16px; margin-top: 14px;
   background: var(--navy); color: #fff; border: 0; border-radius: 10px;
   font-size: 1.12rem; font-weight: bold; }
-@media (prefers-color-scheme: dark) { button.big { color: #10141c; } }
 button.big:disabled { background: #A9B2C4; }
 button.big.secondary { background: var(--navy-soft); }
 button.small { padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px;
   background: transparent; color: inherit; font-size: 0.94rem; font-weight: 600; }
 button.small.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
-@media (prefers-color-scheme: dark) { button.small.primary { color: #10141c; } }
 
 #status { background: var(--bg-soft); border-radius: 8px; padding: 10px 14px;
           margin: 10px 0; font-size: 0.92rem; white-space: pre-line; }
@@ -73,7 +77,6 @@ nav.subtabs button { padding: 10px 13px; white-space: nowrap; font-size: 0.94rem
   font-weight: 600; border: 1px solid var(--line); border-radius: 8px 8px 0 0;
   border-bottom: none; background: transparent; color: inherit; }
 nav.subtabs button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
-@media (prefers-color-scheme: dark) { nav.subtabs button.on { color: #10141c; } }
 .subpage { display: none; border: 1px solid var(--line); border-radius: 0 10px 10px 10px;
            padding: 12px; }
 .subpage.on { display: block; }
@@ -95,7 +98,6 @@ table.grid { border-collapse: collapse; margin: 10px 0; }
 .lib-line select { min-width: 150px; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem;
          background: var(--navy); color: #fff; }
-@media (prefers-color-scheme: dark) { .badge { color: #10141c; } }
 
 #formula-preview table { margin-top: 8px; }
 dialog { border: 1px solid var(--line); border-radius: 12px; max-width: 90vw;

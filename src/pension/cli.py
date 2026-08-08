@@ -118,6 +118,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--seed", type=int, default=20251231,
         help="시험용 명부 난수 씨앗. 같은 값이면 같은 명부가 나옵니다",
     )
+    samples.add_argument(
+        "--case-base-date", metavar="YYYY-MM-DD", default="",
+        help="시험용 명부의 산출기준일 (기본 2025-12-31)",
+    )
 
     lib = sub.add_parser("library", help="금리표·표준률을 시스템에 등록/조회")
     lib.add_argument("action", choices=["list", "add", "remove"], help="할 일")
@@ -367,7 +371,14 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     if args.cases:
         from .rostergen import CASES, write_case_pack
 
-        made = write_case_pack(args.directory / "시험명부", seed=args.seed)
+        base_date = None
+        if args.case_base_date:
+            import datetime as _dt
+
+            base_date = _dt.date.fromisoformat(args.case_base_date)
+        made = write_case_pack(
+            args.directory / "시험명부", seed=args.seed, base_date=base_date,
+        )
         print(f"\n시험용 명부 {len(CASES)}종 (재직 290명 안팎, 난수 씨앗 {args.seed}):")
         for spec in CASES:
             print(f"  {spec.title}.xlsx + {spec.title}_기초율.xlsx — {spec.summary}")

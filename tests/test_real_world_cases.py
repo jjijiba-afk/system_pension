@@ -332,6 +332,7 @@ class TestPerGroupAssumptionToggles:
 
     def _assumptions(self):
         from pension.assumptions import (
+            PROGRESSIVE,
             Assumptions,
             BenefitScale,
             DiscountCurve,
@@ -347,7 +348,12 @@ class TestPerGroupAssumptionToggles:
                 promotion=RateTable(curves={"정규직": RateCurve({20: 0.02})}),
             ),
             withdrawal=RateTable(curves={"정규직": RateCurve({20: 0.05})}),
-            severance_benefit=BenefitScale(curves={"정규직": RateCurve({0: 1.0})}),
+            # 법정 퇴직금(근속 1년당 30일분). '누진 1.0' 이라야 근속에 비례한다 —
+            # 같은 표를 '누적' 으로 두면 근속과 무관하게 1개월분만 주는 제도가 된다.
+            severance_benefit=BenefitScale(
+                curves={"정규직": RateCurve({0: 1.0})},
+                modes={"정규직": PROGRESSIVE},
+            ),
         )
 
     def _valued(self, config, **flags):
@@ -360,20 +366,53 @@ class TestPerGroupAssumptionToggles:
             setattr(member, key, value)
         return value_member(member, config, self._assumptions())
 
-    def test_turning_off_withdrawal_changes_the_obligation(self, config) -> None:
+    def test_turning_off_withdrawal_moves_every_payment_to_retirement(self, config) -> None:
         """퇴직률을 끄면 급여 지급이 전부 정년 시점으로 밀린다.
 
-        퇴직금은 중도퇴직해도 그때 지급된다. 퇴직률이 있으면 일부가 이른 시점에
-        빠져나가고 그만큼 할인을 덜 받아 현재가치가 커진다. 퇴직률을 끄면 전원이
-        정년까지 남아 20년치 할인을 받으므로 채무가 **줄어든다**.
+        채무가 커지는지 작아지는지는 **임금상승률과 할인율 중 어느 쪽이 큰가** 로
+        갈린다. 법정 퇴직금의 귀속 후 현가는 시점 ``t`` 마다
+        ``임금 × 과거근속 × (1+임금상승률)ᵗ ÷ (1+할인율)ᵗ`` 이므로, 지급이 뒤로
+        밀리는 것이 유리할 수도 불리할 수도 있다. 방향을 단정하지 말고 구조를
+        확인한다.
         """
         on = self._valued(config)
         off = self._valued(config, apply_withdrawal=False)
 
-        assert off.dbo < on.dbo
         # 끈 쪽은 현금흐름이 정년 시점 한 곳에만 남는다.
         assert list(off.cash_flows) == [20.0]
         assert len(on.cash_flows) > 1
+        # 귀속액 총량(할인 전)은 같아야 한다 — 언제 나가든 과거근속 몫은 같다.
+        assert sum(off.cash_flows.values()) > sum(on.cash_flows.values())
+
+    def test_withdrawal_direction_follows_growth_versus_discount(self, config) -> None:
+        """임금상승률 5% > 할인율 4.5% 이면 지급이 밀릴수록 채무가 커진다.
+
+        할인율을 상승률 위로 올리면 방향이 뒤집힌다. 이 관계를 못박아 두지 않으면
+        누군가 '퇴직률을 끄면 채무가 준다' 를 규칙으로 잘못 외우게 된다.
+        """
+        from dataclasses import replace as _replace
+
+        from pension.assumptions import DiscountCurve, RateCurve
+        from pension.valuation import value_member
+
+        def valued(discount_rate: float, *, withdrawal: bool):
+            assumptions = self._assumptions()
+            assumptions = _replace(
+                assumptions,
+                discount=DiscountCurve(
+                    spot=RateCurve({1: discount_rate}), flat=discount_rate
+                ),
+            )
+            member = _active()
+            member.age = 40
+            member.severance_nra = 60
+            member.apply_withdrawal = withdrawal
+            return value_member(member, config, assumptions).dbo
+
+        # 임금상승 5% > 할인 4.5% — 뒤로 밀릴수록 커진다.
+        assert valued(0.045, withdrawal=False) > valued(0.045, withdrawal=True)
+        # 할인 7% > 임금상승 5% — 뒤로 밀릴수록 작아진다.
+        assert valued(0.07, withdrawal=False) < valued(0.07, withdrawal=True)
 
     def test_turning_off_pay_growth_lowers_the_obligation(self, config) -> None:
         on = self._valued(config)

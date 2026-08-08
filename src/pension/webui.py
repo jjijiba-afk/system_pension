@@ -359,7 +359,7 @@ def _run(request: dict) -> dict[str, Any]:
     """산출을 실행하고 화면 요약을 돌려준다. 결과 파일은 ``/work`` 아래에 남는다."""
     from .errors import PensionDataError, Severity
     from .members import write_member_export
-    from .pipeline import PriorPeriod, RunOptions, run_valuation
+    from .pipeline import PlanAssetInput, PriorPeriod, RunOptions, run_valuation
     from .report import write_report
 
     work = Path(request.get("work", "/work"))
@@ -383,6 +383,14 @@ def _run(request: dict) -> dict[str, Any]:
                 service_cost=float(request.get("prior_service_cost") or 0),
                 discount_rate=float(request.get("prior_rate") or 0),
                 assumptions_path=prior_assumptions,
+                past_service_cost=float(request.get("past_service_cost") or 0),
+                settlement_obligation=float(request.get("settlement_obligation") or 0),
+            ),
+            plan_assets=PlanAssetInput(
+                opening_fair_value=float(request.get("asset_opening") or 0),
+                closing_fair_value=float(request.get("asset_closing") or 0),
+                contributions=float(request.get("asset_contributions") or 0),
+                benefits_paid=float(request.get("asset_paid") or 0),
             ),
         ))
     except PensionDataError as exc:
@@ -411,9 +419,17 @@ def _run(request: dict) -> dict[str, Any]:
     if run.longterm is not None:
         summary.append(("장기급여채무", f"{run.longterm.dbo:,.0f} 원"))
     if run.rollforward is not None:
-        summary.append(
-            ("보험수리적손익", f"{run.rollforward.actuarial_gain_loss:,.0f} 원")
-        )
+        roll = run.rollforward
+        if roll.past_service_cost:
+            summary.append(("과거근무원가(제도개정)", f"{roll.past_service_cost:,.0f} 원"))
+        if roll.settlement_gain:
+            summary.append(("정산손익", f"{roll.settlement_gain:,.0f} 원"))
+        summary.append(("보험수리적손익", f"{roll.actuarial_gain_loss:,.0f} 원"))
+    if run.plan_assets is not None:
+        assets = run.plan_assets
+        summary.append(("사외적립자산", f"{assets.closing_fair_value:,.0f} 원"))
+        summary.append(("순확정급여부채", f"{assets.net_liability:,.0f} 원"))
+        summary.append(("적립비율", f"{assets.funded_ratio:.1%}"))
 
     groups = [
         [name, f"{count:,}", f"{dbo:,.0f}", f"{sc:,.0f}"]
@@ -438,6 +454,15 @@ def _run(request: dict) -> dict[str, Any]:
             "service_cost": valuation.service_cost,
             "discount_rate": single_rate,
         },
+        "rollforward": (
+            [[label, amount] for label, amount in run.rollforward.as_rows()]
+            if run.rollforward is not None else []
+        ),
+        "assets": (
+            [[label, amount] for label, amount in run.plan_assets.as_rows()]
+            + [[label, amount] for label, amount in run.plan_assets.net_rows()]
+            if run.plan_assets is not None else []
+        ),
     }
 
 
@@ -614,11 +639,12 @@ def _gen_cases(request: dict) -> dict[str, Any]:
     from .rostergen import write_case_pack
 
     seed = int(request.get("seed") or 20251231)
+    base_date = _as_date(request.get("base_date"))
     work = Path(request.get("work", "/work"))
     folder = work / "시험명부"
     if folder.exists():
         shutil.rmtree(folder)
-    made = write_case_pack(folder, seed=seed)
+    made = write_case_pack(folder, seed=seed, base_date=base_date)
 
     target = work / f"시험명부_{seed}.zip"
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -629,6 +655,7 @@ def _gen_cases(request: dict) -> dict[str, Any]:
         "path": str(target), "filename": target.name,
         "size": target.stat().st_size,
         "files": [path.name for path in made],
+        "base_date": str(base_date or ""),
         "cases": [
             {
                 "key": spec.key, "title": spec.title, "summary": spec.summary,
