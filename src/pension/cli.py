@@ -7,6 +7,7 @@
     pension check 명부.xlsm                 # 검증만
     pension template 기초율.xlsx            # 기초율 양식 생성
     pension samples 기본자료                 # 명부 양식·기초율 기본값 한 벌 생성
+    pension library add 금리표 KIS.xlsx      # 한 번 등록해 두고 모든 단체에 재사용
     pension upload 명부.xlsm -o 업로드.xlsx  # 업로드 명부만 생성
 """
 
@@ -104,6 +105,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="금리표에서 고를 등급 (기본: AA0 → AA+ → AA- 순으로 찾음)",
     )
 
+    lib = sub.add_parser("library", help="금리표·표준률을 시스템에 등록/조회")
+    lib.add_argument("action", choices=["list", "add", "remove"], help="할 일")
+    lib.add_argument("kind", nargs="?", choices=["금리표", "표준률"], help="등록 종류")
+    lib.add_argument("file", nargs="?", type=Path, help="add 할 파일 / remove 할 이름")
+    lib.add_argument("--name", default="", help="목록에 표시할 이름")
+
     upload = sub.add_parser("upload", help="업로드 명부만 생성")
     upload.add_argument("roster", type=Path)
     upload.add_argument("-o", "--output", type=Path, required=True)
@@ -184,11 +191,10 @@ def _cmd_calc(args: argparse.Namespace) -> int:
     v = run.valuation
     print("\n── 산출 결과 " + "─" * 44)
     print(f"  산출기준일     {run.config.base_date}")
-    rate = run.assumptions.discount.representative_rate(v.duration)
     if run.assumptions.discount.flat is None:
-        print(f"  적용 할인율    {rate:.3%}  (듀레이션 {v.duration:.1f}년 시점 현물이자율)")
+        print(f"  적용 할인율    {v.single_discount_rate():.3%}  (수익률곡선기법 단일할인율)")
     else:
-        print(f"  적용 할인율    {rate:.3%}")
+        print(f"  적용 할인율    {run.assumptions.discount.level_rate:.3%}")
     print(f"  산출대상 인원  {v.headcount:,}명")
     print(f"  확정급여채무   {v.dbo:>18,.0f} 원")
     print(f"  당기근무원가   {v.service_cost:>18,.0f} 원")
@@ -317,6 +323,38 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_library(args: argparse.Namespace) -> int:
+    from .library import CURVE_KIND, RATES_KIND, entries, library_dir, register, remove
+
+    kinds = [args.kind] if args.kind else [CURVE_KIND, RATES_KIND]
+
+    if args.action == "list":
+        print(f"등록 폴더: {library_dir()}")
+        for kind in kinds:
+            found = entries(kind)
+            print(f"\n[{kind}] {len(found)}건")
+            for entry in found:
+                print(f"  {entry.label}")
+            if not found:
+                print("  (없음)")
+        return 0
+
+    if not args.kind or args.file is None:
+        print("종류와 파일(또는 이름)을 지정하세요.", file=sys.stderr)
+        return 2
+
+    if args.action == "add":
+        entry = register(args.kind, args.file, name=args.name)
+        print(f"등록했습니다: [{entry.kind}] {entry.name}\n  {entry.path}")
+        return 0
+
+    if remove(args.kind, str(args.file)):
+        print(f"지웠습니다: [{args.kind}] {args.file}")
+        return 0
+    print(f"'{args.file}' 을(를) 찾지 못했습니다.", file=sys.stderr)
+    return 1
+
+
 def _cmd_upload(args: argparse.Namespace) -> int:
     import openpyxl
 
@@ -441,6 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         "check": _cmd_check,
         "template": _cmd_template,
         "samples": _cmd_samples,
+        "library": _cmd_library,
         "assumptions": _cmd_assumptions,
         "members": _cmd_members,
         "upload": _cmd_upload,

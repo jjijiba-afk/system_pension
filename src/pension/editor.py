@@ -13,7 +13,7 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 
 from .actuarial import (
@@ -64,7 +64,11 @@ _PAYOUT_HEADERS = (
     "장기급여 승급률 규정", "퇴직자 퇴직급여 퇴직률 규정", "퇴직자 장기급여 퇴직률 규정",
     "가입자격(최소근속)", "임원 정년연령", "임원 정년초과 가산연령", "산출 제외",
     "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식", "임직원구분",
+    "Base-up 적용", "승급률 적용", "퇴직률 적용", "사망률 적용",
 )
+
+#: 직군별 가정 적용 여부 선택지.
+_APPLY_CHOICES = ("반영", "미반영")
 
 
 @dataclass(slots=True)
@@ -754,7 +758,7 @@ class _PayoutRuleTab(ttk.Frame):
         headers = (
             "직군", "산출\n제외", "가입자격\n(최소근속·년)", "정년\n(직원)",
             "정년\n(임원)", "정년초과\n가산연령", "근속 산정방법", "단수 처리",
-            "지급액 반올림",
+            "지급액 반올림", "Base-up", "승급률", "퇴직률", "사망률",
         )
         for col, title in enumerate(headers):
             ttk.Label(self._body, text=title, style="Col.TLabel", justify="center").grid(
@@ -772,6 +776,10 @@ class _PayoutRuleTab(ttk.Frame):
                 "basis": tk.StringVar(value=saved.get("basis", SERVICE_DAILY)),
                 "fraction": tk.StringVar(value=saved.get("fraction", FRACTION_KEEP)),
                 "unit": tk.StringVar(value=saved.get("unit", "없음")),
+                "base_up": tk.StringVar(value=saved.get("base_up", "반영")),
+                "promotion": tk.StringVar(value=saved.get("promotion", "반영")),
+                "withdrawal": tk.StringVar(value=saved.get("withdrawal", "반영")),
+                "mortality": tk.StringVar(value=saved.get("mortality", "반영")),
             }
 
             ttk.Label(self._body, text=group).grid(row=index, column=0, sticky="w", padx=3)
@@ -796,10 +804,20 @@ class _PayoutRuleTab(ttk.Frame):
                 state="readonly", width=8,
             ).grid(row=index, column=8, padx=3)
 
+            # 직군마다 쓰지 않는 가정이 있다. 임원은 정년까지 근무한다고 보아
+            # 퇴직률을 빼거나, 호봉표가 없는 계약직에 승급률을 주지 않는 식이다.
+            for col, key in enumerate(
+                ("base_up", "promotion", "withdrawal", "mortality"), start=9
+            ):
+                ttk.Combobox(
+                    self._body, textvariable=row[key], values=list(_APPLY_CHOICES),
+                    state="readonly", width=7,
+                ).grid(row=index, column=col, padx=2)
+
             self._rows[group] = row
 
         note = ttk.Frame(self._body)
-        note.grid(row=len(self.job_groups) + 1, column=0, columnspan=9, sticky="w", pady=(10, 0))
+        note.grid(row=len(self.job_groups) + 1, column=0, columnspan=13, sticky="w", pady=(10, 0))
         ttk.Label(
             note,
             text="근속 산정방법  일할=근속일수÷365(근로기준법)  ·  월할=완성 개월÷12  ·  "
@@ -807,7 +825,9 @@ class _PayoutRuleTab(ttk.Frame):
                  "단수 처리  가산연수를 더한 뒤 적용합니다. '절사'는 "
                  "'1년이 되지 않는 단수개월은 버림' 규정에 해당합니다.\n"
                  "정년(임원)  규정에 '없음'으로 적혀 오면 직원 정년과 같게 두세요. "
-                 "이미 정년을 넘긴 사람은 현재연령 + 가산연령으로 처리됩니다.",
+                 "이미 정년을 넘긴 사람은 현재연령 + 가산연령으로 처리됩니다.\n"
+                 "Base-up·승급률·퇴직률·사망률  '미반영'으로 두면 그 가정의 요율을 0 으로 봅니다. "
+                 "임원을 정년까지 근무한다고 보아 퇴직률을 빼는 경우 등에 씁니다.",
             style="Hint.TLabel", justify="left",
         ).pack(anchor="w")
 
@@ -822,6 +842,10 @@ class _PayoutRuleTab(ttk.Frame):
                 "basis": row["basis"].get(),
                 "fraction": row["fraction"].get(),
                 "unit": row["unit"].get(),
+                "base_up": row["base_up"].get(),
+                "promotion": row["promotion"].get(),
+                "withdrawal": row["withdrawal"].get(),
+                "mortality": row["mortality"].get(),
             }
             for group, row in self._rows.items()
         }
@@ -959,8 +983,8 @@ class AssumptionsEditor(tk.Toplevel):
     ) -> None:
         super().__init__(parent)
         self.title("산출 가정 입력")
-        self.geometry("900x720")
-        self.minsize(760, 600)
+        self.geometry("980x820")
+        self.minsize(820, 680)
 
         self.job_groups = list(job_groups or DEFAULT_GROUPS)
         self.path: Path | None = None
@@ -975,6 +999,7 @@ class AssumptionsEditor(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         self._build_styles()
+        self._build_library_bar()
         self._build_job_group_bar()
         self._build_tabs()
         self._build_actions()
@@ -983,6 +1008,155 @@ class AssumptionsEditor(tk.Toplevel):
         style = ttk.Style(self)
         style.configure("Hint.TLabel", foreground="#4B5563")
         style.configure("Col.TLabel", font=("", 9, "bold"))
+
+    # ── 시스템 등록 자료 ─────────────────────────────────────────
+    def _build_library_bar(self) -> None:
+        """등록해 둔 표준률·금리표를 골라 오는 줄.
+
+        한 결산기에 여러 단체를 산출할 때 금리표는 모두 같다. 단체마다 파일을
+        다시 찾아 지정하면 그중 한 번만 다른 파일을 집어도 그 단체만 할인율이
+        달라지는데, 눈에 띄지도 않는다.
+        """
+        from .library import CURVE_KIND, RATES_KIND
+
+        box = ttk.LabelFrame(self, text="시스템 등록 자료", padding=_PAD)
+        box.pack(fill="x", padx=_PAD, pady=(_PAD, 4))
+
+        row = ttk.Frame(box)
+        row.pack(fill="x")
+
+        self.rates_var = tk.StringVar()
+        self.curve_var = tk.StringVar()
+
+        ttk.Label(row, text="표준률").pack(side="left")
+        self._rates_box = ttk.Combobox(
+            row, textvariable=self.rates_var, state="readonly", width=22
+        )
+        self._rates_box.pack(side="left", padx=(4, 2))
+        ttk.Button(row, text="불러오기", width=8,
+                   command=self._load_registered_rates).pack(side="left")
+        ttk.Button(row, text="등록", width=5,
+                   command=lambda: self._register_asset(RATES_KIND)).pack(side="left", padx=(2, 12))
+
+        ttk.Label(row, text="금리표").pack(side="left")
+        self._curve_box = ttk.Combobox(
+            row, textvariable=self.curve_var, state="readonly", width=22
+        )
+        self._curve_box.pack(side="left", padx=(4, 2))
+        self.grade_var = tk.StringVar(value="AA0")
+        ttk.Combobox(row, textvariable=self.grade_var, state="readonly", width=6,
+                     values=["AAA", "AA+", "AA0", "AA-", "국고채"]).pack(side="left", padx=2)
+        ttk.Button(row, text="적용", width=5,
+                   command=self._apply_registered_curve).pack(side="left")
+        ttk.Button(row, text="등록", width=5,
+                   command=lambda: self._register_asset(CURVE_KIND)).pack(side="left", padx=(2, 0))
+
+        ttk.Label(
+            box,
+            text="한 번 등록해 두면 다른 단체를 산출할 때도 목록에서 골라 쓸 수 있습니다. "
+                 "불러온 뒤 값을 고쳐도 됩니다 — 등록된 것은 출발점이지 확정이 아닙니다.",
+            style="Hint.TLabel", wraplength=820, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
+        self._refresh_library()
+
+    def _refresh_library(self) -> None:
+        from .library import CURVE_KIND, RATES_KIND, entries, resolve_default
+
+        for kind, box, var in (
+            (RATES_KIND, self._rates_box, self.rates_var),
+            (CURVE_KIND, self._curve_box, self.curve_var),
+        ):
+            names = [e.name for e in entries(kind)]
+            box.configure(values=names)
+            if var.get() not in names:
+                default = resolve_default(kind)
+                var.set(default.name if default else "")
+
+    def _register_asset(self, kind: str) -> None:
+        """자료를 등록 폴더에 넣는다.
+
+        메서드 이름에 ``_register`` 를 쓰면 안 된다 — ``tkinter.Misc._register`` 를
+        가려 버려서, 창을 만들 때 ``protocol()`` 이 콜백을 등록하려다 이 함수를
+        부르고 파일 선택 창이 떠 버린다. 창이 뜨기도 전에 멈춘다.
+        """
+        from .library import register
+
+        path = filedialog.askopenfilename(
+            title=f"{kind} 파일 선택", parent=self,
+            filetypes=[("엑셀 파일", "*.xlsx *.xlsm"), ("모든 파일", "*.*")],
+        )
+        if not path:
+            return
+        name = simpledialog.askstring(
+            "등록 이름", "목록에 표시할 이름을 정하세요.", parent=self,
+            initialvalue=Path(path).stem,
+        )
+        if name is None:
+            return
+        try:
+            entry = register(kind, path, name=name)
+        except Exception as exc:
+            messagebox.showerror("등록", f"등록하지 못했습니다.\n\n{exc}", parent=self)
+            return
+
+        self._refresh_library()
+        (self.rates_var if kind == "표준률" else self.curve_var).set(entry.name)
+        self.status.configure(text=f"{kind} '{entry.name}' 을(를) 등록했습니다.")
+
+    def _load_registered_rates(self) -> None:
+        """등록된 표준률 워크북을 화면으로 불러온다."""
+        from .library import RATES_KIND, find_entry
+
+        entry = find_entry(RATES_KIND, self.rates_var.get())
+        if entry is None:
+            messagebox.showinfo(
+                "표준률", "등록된 표준률이 없습니다. [등록] 으로 파일을 넣으세요.",
+                parent=self,
+            )
+            return
+        try:
+            self.load_workbook(entry.path)
+        except Exception as exc:
+            messagebox.showerror("표준률", f"읽지 못했습니다.\n\n{exc}", parent=self)
+            return
+        # 표준률은 출발점일 뿐이므로 저장 경로로 이어받지 않는다. 그대로 두면
+        # [저장] 이 등록 자료를 덮어써 다른 단체까지 바뀐다.
+        self.path = None
+        self.status.configure(
+            text=f"표준률 '{entry.name}' 을(를) 불러왔습니다. 회사에 맞게 고친 뒤 저장하세요."
+        )
+
+    def _apply_registered_curve(self) -> None:
+        """등록된 금리표에서 할인율 곡선을 뽑아 할인율 탭에 채운다."""
+        from .library import CURVE_KIND, find_entry
+        from .yieldcurve import pick_curve, read_yield_curves
+
+        entry = find_entry(CURVE_KIND, self.curve_var.get())
+        if entry is None:
+            messagebox.showinfo(
+                "금리표", "등록된 금리표가 없습니다. [등록] 으로 파일을 넣으세요.",
+                parent=self,
+            )
+            return
+        try:
+            curve = pick_curve(read_yield_curves(entry.path), self.grade_var.get())
+        except Exception as exc:
+            messagebox.showerror("금리표", f"읽지 못했습니다.\n\n{exc}", parent=self)
+            return
+        if curve is None:
+            messagebox.showwarning(
+                "금리표", f"'{self.grade_var.get()}' 등급을 찾지 못했습니다.", parent=self
+            )
+            return
+
+        self._grids[DISCOUNT_SHEET].set_rows(
+            [[f"{years:g}", f"{rate * 100:.4f}%"] for years, rate in curve.points]
+        )
+        self.status.configure(
+            text=f"금리표 '{entry.name}' 의 {curve.label} 곡선({len(curve.points)}개 만기)을 "
+                 "할인율에 넣었습니다."
+        )
 
     # ── 직군 관리 ────────────────────────────────────────────────
     def _build_job_group_bar(self) -> None:
@@ -1212,6 +1386,11 @@ class AssumptionsEditor(tk.Toplevel):
                         "basis": text(ws.cell(row, 18).value) or SERVICE_DAILY,
                         "fraction": text(ws.cell(row, 19).value) or FRACTION_KEEP,
                         "unit": _UNIT_LABELS.get(unit, "없음"),
+                        # 빈 칸은 '반영'. 이 열이 없던 기존 파일과 동작을 맞춘다.
+                        "base_up": text(ws.cell(row, 23).value) or "반영",
+                        "promotion": text(ws.cell(row, 24).value) or "반영",
+                        "withdrawal": text(ws.cell(row, 25).value) or "반영",
+                        "mortality": text(ws.cell(row, 26).value) or "반영",
                     }
                 self._payout_tab.set_values(payout)
                 # 명부 직군이 변환 직군과 다른 행이 하나라도 있으면 진짜 매핑이다.
@@ -1340,6 +1519,7 @@ class AssumptionsEditor(tk.Toplevel):
                 item["basis"], item["fraction"],
                 _ROUNDING_VALUES.get(item["unit"], 0), FRACTION_HALF,
                 kind,
+                item["base_up"], item["promotion"], item["withdrawal"], item["mortality"],
             ])
         sheets[PAYOUT_SHEET] = (list(_PAYOUT_HEADERS), rows)
 

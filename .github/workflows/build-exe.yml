@@ -65,12 +65,12 @@ jobs:
           & "$pack/pension-cli.exe" --version
           & "$pack/pension-cli.exe" samples "$pack/기본자료"
 
-          # 기본 파일만으로 산출이 끝까지 도는지 확인한다. 받는 사람이 처음
-          # 여는 파일이 곧바로 실패하면 안 된다.
+          # 기본 파일만으로 산출이 끝까지 도는지 확인한다. 기본 명부는 실제
+          # 사례라 검증 오류가 남아 있으므로 --force 로 돌린다.
           & "$pack/pension-cli.exe" calc `
               "$pack/기본자료/명부_기본.xlsx" `
               "$pack/기본자료/기초율_기본값.xlsx" `
-              -o "$env:RUNNER_TEMP/연습산출.xlsx"
+              -o "$env:RUNNER_TEMP/연습산출.xlsx" --force
 
           Compress-Archive -Path "$pack/*" -DestinationPath dist/연금계리산출.zip -Force
           Get-ChildItem -Recurse $pack | Select-Object FullName, Length

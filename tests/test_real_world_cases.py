@@ -321,3 +321,115 @@ class TestUnknownPlanValue:
         log = IssueLog()
         validate_active([_active(plan=None, plan_raw="")], config, log)
         assert "비어 있습니다" in log.errors[0].message
+
+
+class TestPerGroupAssumptionToggles:
+    """직군마다 쓰지 않는 가정이 있다.
+
+    임원을 정년까지 근무한다고 보아 퇴직률을 빼거나, 호봉표가 없는 계약직에
+    승급률을 주지 않거나, 임금이 계약으로 고정돼 Base-up 을 반영하지 않는 식이다.
+    """
+
+    def _assumptions(self):
+        from pension.assumptions import (
+            Assumptions,
+            BenefitScale,
+            DiscountCurve,
+            RateCurve,
+            RateTable,
+            SalaryScale,
+        )
+
+        return Assumptions(
+            discount=DiscountCurve(spot=RateCurve({1: 0.045}), flat=0.045),
+            salary=SalaryScale(
+                base_up=RateCurve({1: 0.03}),
+                promotion=RateTable(curves={"정규직": RateCurve({20: 0.02})}),
+            ),
+            withdrawal=RateTable(curves={"정규직": RateCurve({20: 0.05})}),
+            severance_benefit=BenefitScale(curves={"정규직": RateCurve({0: 1.0})}),
+        )
+
+    def _valued(self, config, **flags):
+        from pension.valuation import value_member
+
+        member = _active()
+        member.age = 40
+        member.severance_nra = 60
+        for key, value in flags.items():
+            setattr(member, key, value)
+        return value_member(member, config, self._assumptions())
+
+    def test_turning_off_withdrawal_changes_the_obligation(self, config) -> None:
+        """퇴직률을 끄면 급여 지급이 전부 정년 시점으로 밀린다.
+
+        퇴직금은 중도퇴직해도 그때 지급된다. 퇴직률이 있으면 일부가 이른 시점에
+        빠져나가고 그만큼 할인을 덜 받아 현재가치가 커진다. 퇴직률을 끄면 전원이
+        정년까지 남아 20년치 할인을 받으므로 채무가 **줄어든다**.
+        """
+        on = self._valued(config)
+        off = self._valued(config, apply_withdrawal=False)
+
+        assert off.dbo < on.dbo
+        # 끈 쪽은 현금흐름이 정년 시점 한 곳에만 남는다.
+        assert list(off.cash_flows) == [20.0]
+        assert len(on.cash_flows) > 1
+
+    def test_turning_off_pay_growth_lowers_the_obligation(self, config) -> None:
+        on = self._valued(config)
+        no_base_up = self._valued(config, apply_base_up=False)
+        no_promotion = self._valued(config, apply_promotion=False)
+
+        assert no_base_up.dbo < on.dbo
+        assert no_promotion.dbo < on.dbo
+        # 둘 다 끄면 임금이 그대로라 가장 작다.
+        assert self._valued(config, apply_base_up=False, apply_promotion=False).dbo < min(
+            no_base_up.dbo, no_promotion.dbo
+        )
+
+    def test_default_is_everything_applied(self, config) -> None:
+        """이 칸이 없던 기존 파일과 동작이 같아야 한다."""
+        member = _active()
+        assert member.apply_base_up
+        assert member.apply_promotion
+        assert member.apply_withdrawal
+        assert member.apply_mortality
+
+    def test_sheet_column_drives_the_flag(self, tmp_path) -> None:
+        import openpyxl
+
+        from pension.config import PAYOUT_SHEET, read_payout_rules
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = PAYOUT_SHEET
+        ws.append([f"c{i}" for i in range(1, 27)])
+        ws.append(["임원", "임원", 60, 60, 2, *[""] * 8, 0, 0, 2, "", "일할", "그대로",
+                   0, "반올림", "임원", "반영", "미반영", "미반영", "반영"])
+        path = tmp_path / "기초율.xlsx"
+        wb.save(path)
+
+        rule = read_payout_rules(openpyxl.load_workbook(path, data_only=True))[0]
+        assert rule.apply_base_up is True
+        assert rule.apply_promotion is False
+        assert rule.apply_withdrawal is False
+        assert rule.apply_mortality is True
+
+    def test_blank_column_means_applied(self, tmp_path) -> None:
+        """이 열이 아예 없던 기존 파일도 그대로 읽혀야 한다."""
+        import openpyxl
+
+        from pension.config import PAYOUT_SHEET, read_payout_rules
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = PAYOUT_SHEET
+        ws.append([f"c{i}" for i in range(1, 23)])
+        ws.append(["정규직", "정규직", 60, 60, 2, *[""] * 8, 0, 0, 2, "", "일할",
+                   "그대로", 0, "반올림", ""])
+        path = tmp_path / "기초율.xlsx"
+        wb.save(path)
+
+        rule = read_payout_rules(openpyxl.load_workbook(path, data_only=True))[0]
+        assert rule.apply_base_up
+        assert rule.apply_withdrawal

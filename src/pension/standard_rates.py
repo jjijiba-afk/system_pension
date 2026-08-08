@@ -11,8 +11,7 @@
 성격이 갈리므로 섞어 쓰지 않도록 구분해 둔다.
 
 ``사망률``
-    국민 전체 통계에 기반한 값이라 회사가 바꿀 것이 없다. **남녀를 구분하지
-    않는 단일 표** 다(:data:`MORTALITY_MALE_SHARE` 참조).
+    국민 전체 통계에 기반한 값이라 회사가 바꿀 것이 없다. 남녀를 나눠 쓴다.
 
 ``퇴직률`` · ``승급률``
     표준률이지만 회사마다 실제 경험은 크게 다르다. 과거 3~5년 회사 경험률이
@@ -29,22 +28,18 @@ from typing import Final
 
 __all__ = [
     "DISCOUNT_RATE",
-    "MORTALITY_MALE_SHARE",
     "MORTALITY_SOURCE",
     "PROMOTION_BY_AGE",
     "SALARY_BASE_UP",
     "STANDARD_TABLE",
     "WITHDRAWAL_BY_AGE",
     "mortality_table",
-    "unisex_qx",
 ]
 
 # ── 표준률 원표 ───────────────────────────────────────────────────
 
 #: ``(연령, 퇴직률, 승급률, 사망률_남, 사망률_여)`` 15~70세.
 #:
-#: 사망률 남녀 열은 :func:`unisex_qx` 로 합쳐 쓰기 위해 원본을 그대로 둔 것이다.
-#: 산출에는 합친 단일 값만 들어간다.
 STANDARD_TABLE: Final[tuple[tuple[int, float, float, float, float], ...]] = (
     (15, 0.45000, 0.09200, 0.000393, 0.000172),
     (16, 0.45000, 0.09200, 0.000397, 0.000175),
@@ -106,38 +101,16 @@ STANDARD_TABLE: Final[tuple[tuple[int, float, float, float, float], ...]] = (
 
 # ── 사망률 ────────────────────────────────────────────────────────
 
-#: 남녀 단일 표를 만들 때 쓰는 남자 비중.
-#:
-#: **표준률이므로 전체 인구 기준이다.** 특정 회사의 성별 구성으로 가중하면
-#: 그것은 이미 표준률이 아니라 그 회사의 경험률이고, 회사가 바뀔 때마다 표가
-#: 달라져 '표준' 이라는 말이 성립하지 않는다.
-#:
-#: 우리나라 인구의 성비는 생산가능연령 구간에서 사실상 1:1 이므로 단순평균을
-#: 쓴다. 회사의 성별 구성이 크게 치우쳐 있고 그것을 반영하고 싶다면, 표준률이
-#: 아니라 회사 경험률로 남녀를 나눠 넣는 것이 맞다.
-MORTALITY_MALE_SHARE: Final = 0.50
-
 MORTALITY_SOURCE: Final = (
-    "표준사망률(연령 15~70세). 남녀를 구분하지 않는 단일 표이며, "
-    "전체 인구 기준으로 남녀 단순평균한 값이다. "
+    "표준사망률(연령 15~70세). 남녀 구분. "
     "70세를 넘는 연령은 70세 값을 적용한다"
 )
 
 
-def unisex_qx(male: float, female: float) -> float:
-    """남녀 사망률을 하나로 합친다."""
-    return male * MORTALITY_MALE_SHARE + female * (1.0 - MORTALITY_MALE_SHARE)
-
-
 def mortality_table() -> list[list[float]]:
-    """``[연령, qx, qx]`` 행 목록.
-
-    산출 엔진은 성별로 열을 나눠 읽는다(``남자``/``여자``). 남녀를 구분하지
-    않기로 했으므로 **두 열에 같은 값** 을 넣는다. 시트 서식을 바꾸지 않으면서
-    성별 구분만 없앨 수 있고, 회사가 남녀를 나누고 싶으면 그 열만 고치면 된다.
-    """
+    """``[연령, 남자 qx, 여자 qx]`` 행 목록."""
     return [
-        [age, round(unisex_qx(male, female), 6), round(unisex_qx(male, female), 6)]
+        [age, male, female]
         for age, _withdrawal, _promotion, male, female in STANDARD_TABLE
     ]
 

@@ -122,12 +122,23 @@ def value_longterm_member(
     for t in range(1, horizon + 1):
         age_t = member.age + t - 1
         service_t = past_service + t - 1
-        index *= 1.0 + assumptions.salary.rate(
-            salary_rule, year=t, age=age_t, service=service_t
-        )
+        # 직군 규칙에서 끈 가정은 0 으로 둔다. 퇴직급여와 같은 규칙을 쓴다.
+        increase = 0.0
+        if member.apply_base_up:
+            increase += assumptions.salary.base_up.rate(t)
+        if member.apply_promotion:
+            increase += assumptions.salary.promotion.rate(
+                salary_rule, age=age_t, service=service_t
+            )
+        index *= 1.0 + increase
+
         withdrawal = min(max(assumptions.withdrawal.rate(
-            withdrawal_rule, age=age_t, service=service_t), 0.0), 1.0)
-        mortality = assumptions.mortality.qx(member.gender, age_t)
+            withdrawal_rule, age=age_t, service=service_t), 0.0), 1.0) \
+            if member.apply_withdrawal else 0.0
+        mortality = (
+            assumptions.mortality.qx(member.gender, age_t)
+            if member.apply_mortality else 0.0
+        )
         probability *= (1.0 - withdrawal) * (1.0 - mortality)
         survival.append(probability)
         wage_index.append(index)
