@@ -12,3 +12,5 @@ dist/
 !tests/fixtures/*.xlsx
 ~$*
 .DS_Store
+webapp/dist/
+webapp/.cache/

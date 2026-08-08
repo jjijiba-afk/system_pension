@@ -49,12 +49,16 @@ jobs:
       - name: 실행파일 빌드
         run: python -m PyInstaller pension.spec --noconfirm --clean
 
+      - name: 아이패드 웹앱 빌드
+        run: python webapp/build.py
+
       - name: 배포 꾸러미 구성
         shell: pwsh
         run: |
           $pack = "dist/연금계리산출"
           New-Item -ItemType Directory -Force -Path "$pack/기본자료" | Out-Null
           New-Item -ItemType Directory -Force -Path "$pack/설명서" | Out-Null
+          Copy-Item -Recurse webapp/dist "$pack/아이패드웹앱"
 
           Move-Item dist/연금계리산출.exe "$pack/"
           Move-Item dist/pension-cli.exe "$pack/"

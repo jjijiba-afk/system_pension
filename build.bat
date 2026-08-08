@@ -66,6 +66,8 @@ mkdir "%PACK%\설명서"
 move /y dist\연금계리산출.exe "%PACK%\" > nul
 move /y dist\pension-cli.exe "%PACK%\" > nul
 copy /y docs\*.md "%PACK%\설명서\" > nul
+python webapp\build.py
+xcopy /e /i /q webapp\dist "%PACK%\아이패드웹앱" > nul
 
 REM 방금 만든 EXE 로 기본 파일을 뽑는다. 실행 파일이 실제로 도는지도 확인된다.
 "%PACK%\pension-cli.exe" samples "%PACK%\기본자료"
@@ -89,6 +91,7 @@ echo      기본자료\기초율_기본값.xlsx          표준 퇴직률·승�
 echo      기본자료\명부_양식.xlsx              빈 명부 양식
 echo      기본자료\기초율_빈양식.xlsx          처음부터 채우고 싶을 때
 echo      설명서\*.md                          사용설명서·계리방법론
+echo      아이패드웹앱\                         정적 웹서버에 올리면 아이패드 앱
 echo ============================================================
 echo.
 pause
