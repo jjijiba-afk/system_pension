@@ -9,6 +9,7 @@
     pension samples 기본자료                 # 명부 양식·기초율 기본값 한 벌 생성
     pension library add 금리표 KIS.xlsx      # 한 번 등록해 두고 모든 단체에 재사용
     pension upload 명부.xlsm -o 업로드.xlsx  # 업로드 명부만 생성
+    pension web --host 0.0.0.0               # 아이패드 등에서 접속하는 웹 화면
 """
 
 from __future__ import annotations
@@ -126,6 +127,11 @@ def _build_parser() -> argparse.ArgumentParser:
     members.add_argument("assumptions", type=Path, help="기초율 워크북")
     members.add_argument("-o", "--output", type=Path, required=True)
     members.add_argument("--force", action="store_true", help="검증 오류가 있어도 산출")
+
+    web = sub.add_parser("web", help="웹 화면 실행 (아이패드·다른 PC 에서 접속)")
+    web.add_argument("--host", default="127.0.0.1",
+                     help="접속을 허용할 주소. 아이패드에서 쓰려면 0.0.0.0 (기본: 이 PC 만)")
+    web.add_argument("--port", type=int, default=8035, help="포트 (기본 8035)")
 
     sub.add_parser("gui", help="GUI 실행")
 
@@ -364,6 +370,12 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_web(args: argparse.Namespace) -> int:
+    from .web import serve
+
+    return serve(args.host, args.port)
+
+
 def _cmd_library(args: argparse.Namespace) -> int:
     from .library import CURVE_KIND, RATES_KIND, entries, library_dir, register, remove
 
@@ -521,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
         "template": _cmd_template,
         "samples": _cmd_samples,
         "library": _cmd_library,
+        "web": _cmd_web,
         "assumptions": _cmd_assumptions,
         "members": _cmd_members,
         "upload": _cmd_upload,
