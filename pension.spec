@@ -32,7 +32,8 @@ analysis = Analysis(
     ["src/pension/__main__.py"],
     pathex=["src"],
     binaries=[],
-    datas=[],
+    # 기본 명부의 원자료. 없으면 `samples` 명령이 실패한다.
+    datas=[("src/pension/data", "pension/data")],
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],

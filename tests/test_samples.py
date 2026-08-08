@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from itertools import pairwise
-
 import pytest
 
 from pension.samples import (
@@ -16,7 +14,12 @@ from pension.samples import (
     TEMPLATE_ASSUMPTIONS,
     write_sample_pack,
 )
-from pension.standard_rates import MORTALITY_AGES, mortality_table
+from pension.standard_rates import (
+    MORTALITY_MALE_SHARE,
+    STANDARD_TABLE,
+    mortality_table,
+    unisex_qx,
+)
 
 
 @pytest.fixture
@@ -96,74 +99,199 @@ class TestOutOfTheBox:
 
 
 class TestMortality:
-    """통계청 「2024년 생명표」 공표치에 맞춘 값이다."""
+    """표준사망률은 남녀를 구분하지 않는 단일 표다."""
 
-    def test_covers_the_working_age_range(self) -> None:
-        table = mortality_table()
-        assert [row[0] for row in table] == list(MORTALITY_AGES)
+    def test_covers_the_supplied_age_range(self) -> None:
+        assert [row[0] for row in mortality_table()] == [r[0] for r in STANDARD_TABLE]
+
+    def test_both_columns_are_identical(self) -> None:
+        """남녀를 구분하지 않으므로 두 열의 값이 같아야 한다.
+
+        산출 엔진은 성별로 열을 골라 읽는다. 두 열이 같아야 성별이 결과를
+        바꾸지 않는다.
+        """
+        assert all(row[1] == row[2] for row in mortality_table())
+
+    def test_is_the_population_average_not_a_company_mix(self) -> None:
+        """표준률이므로 전체 인구 기준(남녀 단순평균)이다.
+
+        특정 회사의 성별 구성으로 가중하면 그것은 표준률이 아니라 그 회사의
+        경험률이고, 회사가 바뀔 때마다 표가 달라져 '표준' 이 성립하지 않는다.
+        """
+        assert MORTALITY_MALE_SHARE == 0.50
+        blended = {row[0]: row[1] for row in mortality_table()}
+        for age, _w, _p, male, female in STANDARD_TABLE:
+            assert blended[age] == round((male + female) / 2, 6)
 
     def test_rates_increase_with_age(self) -> None:
-        for column in (1, 2):
-            rates = [row[column] for row in mortality_table()]
-            assert rates == sorted(rates)
-            assert all(0.0 < r < 1.0 for r in rates)
+        rates = [row[1] for row in mortality_table()]
+        assert rates == sorted(rates)
+        assert all(0.0 < r < 1.0 for r in rates)
 
-    def test_women_die_later(self) -> None:
-        assert all(row[2] < row[1] for row in mortality_table())
+    def test_unisex_blend(self) -> None:
+        assert unisex_qx(0.002, 0.001) == pytest.approx(0.0015)
 
-    @pytest.mark.parametrize(
-        ("sex", "column", "expected"),
-        [("남자", 1, 0.656), ("여자", 2, 0.833)],
-    )
-    def test_survival_from_40_to_80_matches_the_published_figure(
-        self, sex: str, column: int, expected: float
-    ) -> None:
-        """40세 생존자가 80세까지 살 확률: 남 65.6% / 여 83.3%."""
-        rates = {row[0]: row[column] for row in mortality_table()}
-        survival = 1.0
-        for age in range(40, 80):
-            survival *= 1.0 - rates[age]
-        assert survival == pytest.approx(expected, abs=0.005)
 
-    @pytest.mark.parametrize(
-        ("sex", "column", "expected"),
-        [("남자", 1, 0.012 / 0.644), ("여자", 2, 0.048 / 0.822)],
-    )
-    def test_survival_from_80_to_100_matches_the_published_figure(
-        self, sex: str, column: int, expected: float
-    ) -> None:
-        rates = {row[0]: row[column] for row in mortality_table()}
-        survival = 1.0
-        for age in range(80, 100):
-            survival *= 1.0 - rates[age]
-        assert survival == pytest.approx(expected, abs=0.005)
+class TestStandardTable:
+    """퇴직률·승급률은 표에 적힌 그대로 쓰인다."""
 
-    @pytest.mark.parametrize(
-        ("column", "age", "expected"),
-        [
-            # 통계청 완전생명표의 해당 연령대와 사실상 같아야 한다.
-            (1, 40, 0.0014), (1, 60, 0.0056),
-            (2, 40, 0.0006), (2, 60, 0.0020),
-        ],
-    )
-    def test_working_age_rates_are_realistic(
-        self, column: int, age: int, expected: float
-    ) -> None:
-        """채무는 40~70세 구간에서 거의 다 만들어진다. 거기가 맞아야 한다.
+    def test_withdrawal_and_promotion_match_the_table(self) -> None:
+        from pension.standard_rates import PROMOTION_BY_AGE, WITHDRAWAL_BY_AGE
 
-        상수항 없이 ``B·c^x`` 만 쓰면 두 기준점을 맞추는 대신 이 구간이 30%
-        가까이 낮아진다. 젊은 층의 사망은 노화가 아니라 사고·재해가 대부분이라
-        연령에 따라 지수적으로 늘지 않기 때문이다.
-        """
-        rates = {row[0]: row[column] for row in mortality_table()}
-        assert rates[age] == pytest.approx(expected, rel=0.15)
+        assert [[r[0], r[1]] for r in STANDARD_TABLE] == WITHDRAWAL_BY_AGE
+        assert [[r[0], r[2]] for r in STANDARD_TABLE] == PROMOTION_BY_AGE
 
-    def test_curve_is_smooth(self) -> None:
-        """단일 곡선이므로 증가율이 갑자기 꺾이는 지점이 없어야 한다."""
-        rates = {row[0]: (row[1], row[2]) for row in mortality_table()}
-        for column in (0, 1):
-            steps = [
-                rates[age + 1][column] / rates[age][column]
-                for age in range(40, 100)
-            ]
-            assert all(a <= b for a, b in pairwise(steps))
+    def test_withdrawal_peaks_at_the_retirement_ramp(self) -> None:
+        """55세부터 정년까지 가파르게 오른다(임금피크·명예퇴직 구간)."""
+        rates = {r[0]: r[1] for r in STANDARD_TABLE}
+        assert rates[55] < rates[58] < rates[60]
+        assert rates[60] > 0.4
+
+    def test_promotion_falls_with_age(self) -> None:
+        rates = [r[2] for r in STANDARD_TABLE]
+        assert rates == sorted(rates, reverse=True)
+
+    def test_last_row_is_age_70(self) -> None:
+        """70세를 넘는 연령은 70세 값을 쓴다. 표는 계단식으로 읽힌다."""
+        assert STANDARD_TABLE[-1][0] == 70
+
+
+class TestDefaultRoster:
+    """기본 명부는 실제 평가 사례를 비식별 처리한 것이다.
+
+    작성 예시 두 줄짜리 양식으로는 DC 혼재·근속 1년 미만 퇴직자·임원의 직군
+    표기 같은 실제 형태를 볼 수 없다.
+    """
+
+    def test_reads_back_at_full_size(self, pack) -> None:
+        from pension.config import read_config
+        from pension.errors import IssueLog
+        from pension.readers import read_roster
+        from pension.samples import ROSTER_DEFAULT
+        from pension.workbook import open_workbook
+
+        book = open_workbook(pack / ROSTER_DEFAULT)
+        try:
+            roster = read_roster(book, read_config(book), IssueLog())
+        finally:
+            book.close()
+
+        assert len(roster.active) == 275
+        assert len(roster.retired) == 247
+
+    def test_calculates_without_errors(self, pack, tmp_path) -> None:
+        """받는 사람이 처음 여는 파일이 곧바로 실패하면 안 된다."""
+        from pension.normalize import BenefitPlan
+        from pension.pipeline import RunOptions, run_valuation
+        from pension.samples import ROSTER_DEFAULT
+
+        run = run_valuation(RunOptions(
+            roster_path=pack / ROSTER_DEFAULT,
+            assumptions_path=pack / STANDARD_ASSUMPTIONS,
+            output_path=tmp_path / "결과.xlsx",
+        ))
+        assert not run.issues.has_errors()
+        assert run.valuation.dbo > 0
+        # DC 가입자가 섞여 있어 산출대상이 전체보다 적다.
+        assert 0 < run.valuation.headcount < len(run.roster.active)
+        assert any(m.plan is BenefitPlan.DC for m in run.roster.active)
+
+    def test_is_deidentified(self, pack) -> None:
+        """성명이 없고 사번은 새로 매긴 것이어야 한다."""
+        from pension.config import read_config
+        from pension.errors import IssueLog
+        from pension.readers import read_roster
+        from pension.samples import ROSTER_DEFAULT
+        from pension.workbook import open_workbook
+
+        book = open_workbook(pack / ROSTER_DEFAULT)
+        try:
+            roster = read_roster(book, read_config(book), IssueLog())
+        finally:
+            book.close()
+
+        assert not any(m.name for m in roster.active)
+        assert not any(m.name for m in roster.retired)
+        assert all(m.employee_id.startswith("A") for m in roster.active)
+        assert all(m.employee_id.startswith("T") for m in roster.retired)
+
+    def test_dates_stay_inside_the_valuation_period(self, pack) -> None:
+        """비식별 처리로 날짜를 옮길 때 기준일을 넘거나 순서가 뒤집히면 안 된다."""
+        import datetime as _dt
+
+        from pension.config import read_config
+        from pension.errors import IssueLog
+        from pension.readers import read_roster
+        from pension.samples import ROSTER_DEFAULT
+        from pension.workbook import open_workbook
+
+        base = _dt.date(2025, 12, 31)
+        book = open_workbook(pack / ROSTER_DEFAULT)
+        try:
+            roster = read_roster(book, read_config(book), IssueLog())
+        finally:
+            book.close()
+
+        for member in roster.active:
+            assert member.birth_date < member.hire_date <= base
+        for member in roster.retired:
+            assert member.birth_date < member.hire_date < member.exit_date <= base
+
+
+class TestYieldCurve:
+    """금리표 파일을 할인율 시트로 옮긴다."""
+
+    def _book(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "KIS_NET금리"
+        ws.append(["No", "기준일자", "구분", "등급", "1년", "1년6월", "5년", "20년"])
+        ws.append([1, None, None, "국고채", 2.55, 2.747, 3.235, 3.347])
+        ws.append([2, None, "공모 무보증회사채", "AA0", 3.122, 3.133, 3.62, 5.26])
+        ws.append([3, None, "기타이율", "기타1", 0, 0, 0, 0])
+        path = tmp_path / "금리표.xlsx"
+        wb.save(path)
+        return path
+
+    def test_reads_tenors_and_converts_percent(self, tmp_path) -> None:
+        from pension.yieldcurve import pick_curve, read_yield_curves
+
+        curves = read_yield_curves(self._book(tmp_path))
+        assert [c.grade for c in curves] == ["국고채", "AA0"]   # 0 만 있는 행은 제외
+
+        aa0 = pick_curve(curves, "AA0")
+        assert aa0.points[0] == (1.0, pytest.approx(0.03122))
+        assert aa0.points[1] == (1.5, pytest.approx(0.03133))
+        assert aa0.points[-1] == (20.0, pytest.approx(0.0526))
+
+    def test_default_grade_prefers_investment_grade(self, tmp_path) -> None:
+        """등급을 지정하지 않으면 우량회사채를 고른다. 국고채가 첫 행이어도."""
+        from pension.yieldcurve import pick_curve, read_yield_curves
+
+        assert pick_curve(read_yield_curves(self._book(tmp_path))).grade == "AA0"
+
+    def test_curve_lands_in_the_assumptions(self, tmp_path) -> None:
+        from pension.assumptions import load_assumptions
+        from pension.samples import write_standard_assumptions
+
+        path = write_standard_assumptions(
+            tmp_path / "기초율.xlsx", yield_curve_path=self._book(tmp_path), grade="AA0"
+        )
+        discount = load_assumptions(path).discount
+        assert discount.flat is None            # 곡선이므로 단일 할인율이 아니다
+        assert discount.rate(1) == pytest.approx(0.03122)
+        assert discount.rate(20) == pytest.approx(0.0526)
+
+    def test_representative_rate_follows_duration(self, tmp_path) -> None:
+        """곡선을 넣었으면 듀레이션 시점 이자율이 공시용 대표값이다."""
+        from pension.assumptions import load_assumptions
+        from pension.samples import write_standard_assumptions
+
+        path = write_standard_assumptions(
+            tmp_path / "기초율.xlsx", yield_curve_path=self._book(tmp_path)
+        )
+        discount = load_assumptions(path).discount
+        assert discount.representative_rate(6.0) == pytest.approx(0.0362)
+        assert discount.representative_rate(1.0) == pytest.approx(0.03122)

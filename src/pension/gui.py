@@ -302,15 +302,34 @@ class PensionApp(tk.Tk):
         from .editor import open_editor
 
         def adopt(editor) -> None:
-            """창을 닫을 때 방금 저장한 기초율 파일을 이어받는다."""
-            if editor.path is not None:
+            """방금 저장한 기초율 파일을 이어받는다.
+
+            저장 직후와 창을 닫을 때 모두 호출된다. 예전에는 닫을 때만 받아서,
+            저장해 놓고 창을 계속 쓰다 보면 산출 화면이 비어 있었다.
+            """
+            if editor.path is not None and self.assumptions_path.get() != str(editor.path):
                 self.assumptions_path.set(str(editor.path))
                 self._write(f"기초율 파일을 지정했습니다: {editor.path.name}")
 
+        roster = self.roster_path.get()
+        roster = Path(roster) if roster and Path(roster).exists() else None
+
+        found, groups = self._scan_roster_groups(roster)
+
         editor = open_editor(
-            self, job_groups=self._job_groups_from_roster() or None, on_close=adopt
+            self, job_groups=groups or None,
+            on_close=adopt, on_saved=adopt, roster_path=roster,
         )
 
+        # 명부를 이미 골랐으면 직군 매핑 표를 미리 채워 둔다. 담당자가 같은
+        # 파일을 한 번 더 고르지 않아도 되고, 서로 다른 명부를 집을 일도 없다.
+        if found:
+            editor._map_tab.set_found(found)
+            editor.status.configure(
+                text=f"{roster.name} 에서 직군 {len(found)}종을 읽어 배정했습니다."
+            )
+
+        # 이미 지정된 기초율 파일이 있으면 그 내용으로 화면을 채운다.
         current = self.assumptions_path.get()
         if current and Path(current).exists():
             try:
@@ -319,6 +338,38 @@ class PensionApp(tk.Tk):
                 editor.status.configure(text=f"불러왔습니다: {Path(current).name}")
             except Exception as exc:  # 양식이 다른 파일이면 빈 화면에서 시작한다
                 editor.status.configure(text=f"기존 파일을 읽지 못했습니다 ({exc})")
+
+    def _scan_roster_groups(self, roster: Path | None):
+        """명부에서 (직군 조합, 쓸 묶음 이름) 을 뽑는다.
+
+        묶음 이름은 명부 ``Input`` 시트에 적힌 것만으로는 모자랄 수 있다. 실제로
+        케이스 4 의 Input 에는 '정규직·계약직' 둘뿐인데 명부에는 임원이 있어서,
+        그대로 두면 임원이 갈 곳이 없어 정규직으로 떨어졌다. 그래서 **배정에
+        필요한 이름을 반드시 포함** 시킨다.
+        """
+        from .jobgroup import DEFAULT_GROUPS, scan_roster, suggest_mapping
+
+        if roster is None:
+            return [], self._job_groups_from_roster()
+
+        try:
+            from .workbook import open_workbook
+
+            book = open_workbook(roster)
+            try:
+                found = scan_roster(book)
+            finally:
+                book.close()
+        except Exception as exc:
+            self._write(f"명부에서 직군을 읽지 못했습니다: {exc}")
+            return [], self._job_groups_from_roster()
+
+        needed = set(suggest_mapping(found, DEFAULT_GROUPS).values())
+        groups = [g for g in DEFAULT_GROUPS if g in needed]
+        for name in self._job_groups_from_roster():
+            if name not in groups:
+                groups.append(name)
+        return found, groups
 
     def _make_template(self) -> None:
         path = filedialog.asksaveasfilename(
@@ -502,7 +553,10 @@ class PensionApp(tk.Tk):
         self._write("", "muted")
         self._write("── 산출 결과 요약 " + "─" * 40, "head")
         self._write(f"  산출기준일        {run.config.base_date}")
-        self._write(f"  적용 할인율       {run.assumptions.discount.level_rate:.3%}")
+        rate = run.assumptions.discount.representative_rate(run.valuation.duration)
+        tail = "" if run.assumptions.discount.flat is not None else \
+            f"  (듀레이션 {run.valuation.duration:.1f}년 시점 현물이자율)"
+        self._write(f"  적용 할인율       {rate:.3%}{tail}")
         self._write(f"  산출대상 인원     {v.headcount:,}명")
         self._write(f"  확정급여채무      {v.dbo:>18,.0f} 원", "ok")
         self._write(f"  당기근무원가      {v.service_cost:>18,.0f} 원")

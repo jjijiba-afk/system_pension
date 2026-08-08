@@ -23,6 +23,10 @@ pension-gui = "pension.gui:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# 기본 명부의 원자료 CSV. 휠·설치본에 함께 들어가야 `pension samples` 가 돈다.
+[tool.setuptools.package-data]
+pension = ["data/*.csv"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

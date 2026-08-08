@@ -93,10 +93,19 @@ DEFAULT_IN_KIND_ESCALATION: Final = 0.03
 
 @dataclass(slots=True)
 class RateCurve:
-    """정수 키(연령 또는 근속연수) 하나로 조회하는 계단식 비율 곡선."""
+    """키(연령·근속연수·연차) 하나로 조회하는 계단식 비율 곡선."""
 
-    points: dict[int, float] = field(default_factory=dict)
-    _keys: list[int] = field(default_factory=list, init=False, repr=False)
+    points: dict[float, float] = field(default_factory=dict)
+    whole_key: bool = True
+    """조회 키를 정수로 내림할지.
+
+    연령과 근속연수는 **만** 단위로 센다. 만 41.7세는 41세 행을 쓰는 것이 맞다.
+
+    할인율의 연차는 다르다. 만기 3개월·6개월·1년6개월이 표준으로 들어오는데
+    내림해 버리면 1년 미만 만기가 모두 0 으로 뭉치고 1년6월이 1년을 덮어쓴다.
+    실제 금리표(만기 17개) 중 5개가 1년 미만이거나 반년 단위였다.
+    """
+    _keys: list[float] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._keys = sorted(self.points)
@@ -105,18 +114,19 @@ class RateCurve:
         """``key`` 이하의 가장 큰 구간 값. 표가 비었거나 키가 표보다 작으면 0."""
         if not self._keys:
             return 0.0
-        idx = bisect_right(self._keys, math.floor(key)) - 1
+        lookup = math.floor(key) if self.whole_key else key
+        idx = bisect_right(self._keys, lookup) - 1
         if idx < 0:
             return self.points[self._keys[0]]
         return self.points[self._keys[idx]]
 
     def scaled(self, factor: float) -> RateCurve:
         """모든 값에 배수를 적용한 새 곡선. 민감도 분석에 쓴다."""
-        return RateCurve({k: v * factor for k, v in self.points.items()})
+        return RateCurve({k: v * factor for k, v in self.points.items()}, self.whole_key)
 
     def shifted(self, delta: float) -> RateCurve:
         """모든 값에 절대값을 더한 새 곡선(음수는 0 으로 자름)."""
-        return RateCurve({k: max(0.0, v + delta) for k, v in self.points.items()})
+        return RateCurve({k: max(0.0, v + delta) for k, v in self.points.items()}, self.whole_key)
 
     def __bool__(self) -> bool:
         return bool(self.points)
@@ -133,6 +143,15 @@ class RateTable:
     """규정명을 못 찾았을 때 대신 쓸 규정명. 비면 0 을 쓴다."""
 
     def curve(self, rule: str) -> RateCurve:
+        """규정명에 해당하는 곡선. 없으면 빈 곡선(=요율 0).
+
+        **호출부는 규정명이 비어 있지 않도록 보장해야 한다.** 빈 이름으로 물으면
+        요율 0 이 조용히 돌아오는데, 퇴직률 0 은 '아무도 중도퇴직하지 않는다',
+        승급률 0 은 '호봉 인상이 없다' 는 뜻이라 채무가 통째로 어긋난다. 실제로
+        규정명 칸이 비어 있는 명부에서 기초율 시트가 통째로 무시된 적이 있다.
+        그래서 :mod:`pension.valuation` 과 :mod:`pension.longterm` 은 규정명이
+        비면 변환 직군명으로 대신 묻는다.
+        """
         curve = self.curves.get(text(rule))
         if curve is None and self.default_rule:
             curve = self.curves.get(self.default_rule)
@@ -200,6 +219,18 @@ class DiscountCurve:
     def level_rate(self) -> float:
         """이자원가 계산 등에 쓰는 대표 할인율(1년 시점 기준)."""
         return self.rate(1)
+
+    def representative_rate(self, duration: float = 0.0) -> float:
+        """공시용 대표 할인율.
+
+        단일 할인율이면 그 값이다. 현물이자율 곡선이면 **채무의 듀레이션 시점**
+        이자율을 쓴다. 곡선을 넣었는데 1년 이자율을 대표값으로 내보이면, 만기가
+        긴 채무를 짧은 금리로 설명하는 셈이라 주석 수치가 실제 할인 결과와
+        어긋나 보인다. 실제 산출은 어느 쪽이든 곡선 전체를 그대로 쓴다.
+        """
+        if self.flat is not None or duration <= 0:
+            return self.level_rate
+        return self.rate(duration)
 
 
 @dataclass(slots=True)
@@ -530,17 +561,23 @@ def _read_benefit_scale(
     )
 
 
-def _read_single_curve(wb, sheet_name: str) -> RateCurve:
+def _read_single_curve(wb, sheet_name: str, *, whole_key: bool = True) -> RateCurve:
+    """A열 키 · B열 비율 두 칸짜리 시트를 곡선으로 읽는다.
+
+    :param whole_key: 키를 정수로 볼지. 할인율의 연차만 실수로 읽는다 —
+        만기 3월·6월·1년6월이 표준으로 들어오는데 정수로 끊으면 1년 미만이
+        모두 0 으로 뭉치고 1년6월이 1년을 덮어쓴다.
+    """
     if sheet_name not in wb.sheetnames:
-        return RateCurve()
+        return RateCurve(whole_key=whole_key)
     ws = wb[sheet_name]
-    points: dict[int, float] = {}
+    points: dict[float, float] = {}
     for row, _ in _rows(ws):
-        key = _as_int(ws.cell(row, 1).value)
+        key = _as_int(ws.cell(row, 1).value) if whole_key else _as_number(ws.cell(row, 1).value)
         rate = _as_rate(ws.cell(row, 2).value)
         if key is not None and rate is not None:
             points[key] = rate
-    return RateCurve(points)
+    return RateCurve(points, whole_key)
 
 
 def _read_mortality(wb) -> MortalityTable:
@@ -615,7 +652,7 @@ def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assum
 
     wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
     try:
-        spot = _read_single_curve(wb, DISCOUNT_SHEET)
+        spot = _read_single_curve(wb, DISCOUNT_SHEET, whole_key=False)
         if not spot:
             raise ValueError(
                 f"'{DISCOUNT_SHEET}' 시트에서 할인율을 읽지 못했습니다. "

@@ -99,7 +99,7 @@ def value_longterm_member(
         result.excluded_reason = "생년월일 또는 입사일자 누락"
         return result
 
-    rule = member.rules.longterm_benefit
+    rule = member.rules.longterm_benefit or member.job_group
     kind = assumptions.longterm_rule(rule)
     result.benefit_kind = kind.kind
     milestones = assumptions.longterm_benefit.milestones(rule)
@@ -111,8 +111,8 @@ def value_longterm_member(
     # 장기급여는 자체 정년연령을 쓴다.
     horizon = max(1, min(member.longterm_nra - member.age, assumptions.max_projection_years))
 
-    withdrawal_rule = member.rules.longterm_withdrawal
-    salary_rule = member.rules.longterm_salary_increase
+    withdrawal_rule = member.rules.longterm_withdrawal or member.job_group
+    salary_rule = member.rules.longterm_salary_increase or member.job_group
 
     # 연도별 재직확률과 임금지수를 미리 만들어 둔다(t = 0 은 기준일).
     survival = [1.0]

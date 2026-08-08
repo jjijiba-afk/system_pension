@@ -58,17 +58,25 @@ from .standard_rates import (
 )
 
 __all__ = [
+    "ROSTER_DEFAULT",
     "ROSTER_TEMPLATE",
     "STANDARD_ASSUMPTIONS",
     "TEMPLATE_ASSUMPTIONS",
+    "write_default_roster",
     "write_roster_template",
     "write_sample_pack",
     "write_standard_assumptions",
 ]
 
 ROSTER_TEMPLATE: Final = "명부_양식.xlsx"
+ROSTER_DEFAULT: Final = "명부_기본.xlsx"
 STANDARD_ASSUMPTIONS: Final = "기초율_기본값.xlsx"
 TEMPLATE_ASSUMPTIONS: Final = "기초율_빈양식.xlsx"
+
+#: 기본 명부의 원자료. :mod:`pension.data` 에 CSV 두 장으로 들어 있다.
+_DATA_DIR: Final = Path(__file__).with_name("data")
+_DEFAULT_ACTIVE: Final = "기본명부_재직자.csv"
+_DEFAULT_RETIRED: Final = "기본명부_퇴직자.csv"
 
 
 def _style():
@@ -196,8 +204,111 @@ def write_roster_template(path: str | Path) -> Path:
     return path
 
 
+def write_default_roster(path: str | Path) -> Path:
+    """기본 명부를 만든다 — 재직 275명 · 퇴직 247명.
+
+    실제 평가 사례(케이스 4)의 명부를 **비식별 처리해** 옮긴 것이다. 직군·임직원
+    구분·성별·제도구분·퇴직사유 같은 구조는 그대로 두고, 생년월일·입·퇴사일은
+    ±180일, 금액은 ±7% 안에서 흔들어 천원 단위로 끊었다. 사번은 새로 매겼고
+    성명은 원본에서도 비어 있었다.
+
+    작성 예시 두 줄짜리 양식만으로는 알 수 없는 것들이 여기서 드러난다.
+    DC 가입자가 섞여 산출대상에서 빠지고, 근속 1년 미만 퇴직자가 지급액 없이
+    들어오고, 임원의 직군이 '정규직' 으로 적혀 온다. 회사 자료를 넣기 전에
+    결과 엑셀이 어떤 모습인지 보기에 이 편이 낫다.
+    """
+    import csv
+
+    import openpyxl
+
+    from .layout import ACTIVE_HEADER_ALIASES, RETIRED_HEADER_ALIASES
+
+    path = Path(path)
+    st = _style()
+    wb = openpyxl.Workbook()
+
+    def sheet(name, columns, aliases, first_row, csv_name, field_map):
+        ws = wb.create_sheet(name)
+        header_row = first_row - 2
+        ws.cell(header_row, 2, "순번").font = st["head_font"]
+        ws.cell(header_row, 2).fill = st["head_fill"]
+        for key, col in columns.items():
+            label = aliases.get(key, (col.label,))[0]
+            cell = ws.cell(header_row, col.index, label)
+            cell.font = st["head_font"]
+            cell.fill = st["head_fill"]
+            cell.alignment = st["center"]
+            ws.column_dimensions[cell.column_letter].width = max(10, min(22, len(label) + 4))
+
+        with (_DATA_DIR / csv_name).open(encoding="utf-8") as handle:
+            for offset, record in enumerate(csv.DictReader(handle)):
+                row = first_row + offset
+                ws.cell(row, 2, offset + 1)
+                for field, key in field_map.items():
+                    value = record.get(field, "")
+                    if value == "":
+                        continue
+                    column = columns.get(key)
+                    if column is None:
+                        continue
+                    ws.cell(row, column.index, _as_number(value))
+        ws.freeze_panes = ws.cell(first_row, 3)
+
+    sheet(
+        ACTIVE_SHEET, ACTIVE_COLUMNS, ACTIVE_HEADER_ALIASES, ACTIVE_FIRST_ROW,
+        _DEFAULT_ACTIVE,
+        {
+            "사번": "employee_id", "임직원구분": "employee_type", "직군": "job_group",
+            "성별": "gender", "생년월일": "birth_date", "입사일자": "hire_date",
+            "중간정산일": "settlement_date", "30일 평균임금": "monthly_wage",
+            "일 기본급": "daily_base_pay", "퇴직급여 제도구분": "plan",
+            "장기급여 산출대상여부": "longterm_target", "원가코드": "cost_code",
+        },
+    )
+    sheet(
+        RETIRED_SHEET, RETIRED_COLUMNS, RETIRED_HEADER_ALIASES, RETIRED_FIRST_ROW,
+        _DEFAULT_RETIRED,
+        {
+            "사번": "employee_id", "임직원구분": "employee_type", "직군": "job_group",
+            "성별": "gender", "생년월일": "birth_date", "입사일": "hire_date",
+            "퇴사일": "exit_date", "지급(퇴직)사유 구분": "reason",
+            "퇴직급여 제도구분": "plan", "퇴직급여 총지급금액": "total_payment",
+            "사외자산 지급금액": "fund_payment",
+            "장기급여 산출대상여부": "longterm_target", "원가코드": "cost_code",
+        },
+    )
+
+    ws = wb.create_sheet("Input", 0)
+    ws.cell(1, 2, "산출 기준").font = st["title_font"]
+    ws.cell(3, 2, "산출기준일")
+    ws.cell(3, 3, "2025-12-31")
+    ws.cell(5, 2, "평균임금 체크금액")
+    ws.cell(5, 3, 0)
+    ws.cell(7, 2, "실제 평가 사례를 비식별 처리한 명부입니다 "
+                  "(생년월일·입퇴사일 ±180일, 금액 ±7% 조정).").font = st["note_font"]
+    ws.cell(8, 2, "직군 배정은 '산출 가정 입력' 화면의 [직군 매핑] 탭에서 확인하세요."
+            ).font = st["note_font"]
+
+    del wb["Sheet"]
+    wb.save(path)
+    return path
+
+
+def _as_number(value: str):
+    """CSV 문자열을 엑셀 셀 값으로. 날짜 문자열은 그대로 둔다(파서가 읽는다)."""
+    try:
+        number = float(value)
+    except ValueError:
+        return value
+    return int(number) if number == int(number) else number
+
+
 def write_standard_assumptions(
-    path: str | Path, *, job_groups: tuple[str, ...] = DEFAULT_GROUPS
+    path: str | Path,
+    *,
+    job_groups: tuple[str, ...] = DEFAULT_GROUPS,
+    yield_curve_path: str | Path | None = None,
+    grade: str = "",
 ) -> Path:
     """기본값이 채워진 기초율 워크북을 만든다.
 
@@ -211,6 +322,22 @@ def write_standard_assumptions(
     path = Path(path)
     groups = [g for g in job_groups if g] or list(DEFAULT_GROUPS)
     n = len(groups)
+
+    # 금리표 파일을 주면 결산일 현물이자율 곡선을 그대로 쓴다. 만기가 17개나
+    # 되어 손으로 옮기면 자릿수를 틀리기 쉽다.
+    discount_rows: list[list[Any]] = []
+    discount_note = ""
+    if yield_curve_path is not None:
+        from .yieldcurve import pick_curve, read_yield_curves
+
+        curve = pick_curve(read_yield_curves(yield_curve_path), grade)
+        if curve is not None:
+            discount_rows = curve.rows()
+            discount_note = (
+                f"· 출처: {Path(yield_curve_path).name} — {curve.label}"
+                + (f" ({curve.base_date} 기준)" if curve.base_date else "")
+                + "\n· 만기별 현물이자율(spot)입니다. 결산일마다 새로 받아 바꾸세요."
+            )
 
     wb = openpyxl.Workbook()
     head_font = Font(bold=True, color="FFFFFF")
@@ -238,9 +365,11 @@ def write_standard_assumptions(
         ws.freeze_panes = "A2"
 
     make(
-        DISCOUNT_SHEET, ["연차", "할인율"], [list(r) for r in DISCOUNT_RATE],
+        DISCOUNT_SHEET, ["연차", "할인율"], discount_rows or [list(r) for r in DISCOUNT_RATE],
+        discount_note or
         "· 한 줄이면 전 기간 단일 할인율, 여러 줄이면 각 연차의 현물이자율(spot)입니다.",
-        warn="[필수 확인] 결산일 현재 우량회사채 수익률로 바꾸세요. 매 결산 달라집니다.",
+        warn="" if discount_rows else
+        "[필수 확인] 결산일 현재 우량회사채 수익률로 바꾸세요. 매 결산 달라집니다.",
     )
     make(
         SALARY_SHEET, ["연차", "Base-up 상승률"], [list(r) for r in SALARY_BASE_UP],
@@ -263,7 +392,8 @@ def write_standard_assumptions(
     make(
         MORTALITY_SHEET, ["연령", "남자", "여자"], mortality_table(),
         f"· 출처: {MORTALITY_SOURCE}\n"
-        "· 국민 전체 통계이므로 그대로 쓸 수 있습니다. 회사 경험생명표가 있으면 바꾸세요.\n"
+        "· 남녀를 구분하지 않으므로 두 열의 값이 같습니다. 회사 경험률로 남녀를 "
+        "나누려면 이 두 열만 고치면 됩니다.\n"
         "· 사망률이 채무에 미치는 영향은 퇴직률·임금상승률에 비해 작습니다.",
     )
     make(
@@ -320,13 +450,21 @@ def write_standard_assumptions(
 
 
 def write_sample_pack(
-    directory: str | Path, *, job_groups: tuple[str, ...] = DEFAULT_GROUPS
+    directory: str | Path,
+    *,
+    job_groups: tuple[str, ...] = DEFAULT_GROUPS,
+    yield_curve_path: str | Path | None = None,
+    grade: str = "",
 ) -> list[Path]:
     """기본 파일 한 벌을 폴더에 만든다. 만든 파일 경로 목록을 돌려준다."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     return [
+        write_default_roster(directory / ROSTER_DEFAULT),
+        write_standard_assumptions(
+            directory / STANDARD_ASSUMPTIONS, job_groups=job_groups,
+            yield_curve_path=yield_curve_path, grade=grade,
+        ),
         write_roster_template(directory / ROSTER_TEMPLATE),
-        write_standard_assumptions(directory / STANDARD_ASSUMPTIONS, job_groups=job_groups),
         write_template(directory / TEMPLATE_ASSUMPTIONS, job_groups=job_groups),
     ]

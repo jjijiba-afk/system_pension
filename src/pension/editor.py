@@ -540,10 +540,14 @@ class _JobGroupMapTab(ttk.Frame):
 
     # ── 명부 읽기 ────────────────────────────────────────────────
     def _load_from_roster(self) -> None:
-        path = filedialog.askopenfilename(
-            title="명부 파일 선택", parent=self,
-            filetypes=[("엑셀 파일", "*.xls *.xlsm *.xlsx"), ("모든 파일", "*.*")],
-        )
+        # 산출 화면에서 이미 명부를 골랐으면 그것을 쓴다. 같은 파일을 두 번
+        # 고르게 하면 서로 다른 명부를 집어 가정과 명부가 어긋날 수 있다.
+        path = getattr(self.winfo_toplevel(), "roster_path", None)
+        if path is None or not Path(path).exists():
+            path = filedialog.askopenfilename(
+                title="명부 파일 선택", parent=self,
+                filetypes=[("엑셀 파일", "*.xls *.xlsm *.xlsx"), ("모든 파일", "*.*")],
+            )
         if not path:
             return
         try:
@@ -950,6 +954,8 @@ class AssumptionsEditor(tk.Toplevel):
         *,
         job_groups: list[str] | None = None,
         on_close: Callable[[AssumptionsEditor], None] | None = None,
+        on_saved: Callable[[AssumptionsEditor], None] | None = None,
+        roster_path: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.title("산출 가정 입력")
@@ -960,7 +966,12 @@ class AssumptionsEditor(tk.Toplevel):
         self.path: Path | None = None
         """마지막으로 저장하거나 불러온 파일. 호출한 쪽이 이어받을 수 있다."""
 
+        self.roster_path = Path(roster_path) if roster_path else None
+        """산출 화면에서 고른 명부. 직군을 읽어 올 때 파일 선택을 건너뛴다."""
+
         self._on_close = on_close
+        self._on_saved = on_saved
+        """저장 직후 호출된다. 창을 닫아야만 결과가 전달되던 것을 없애기 위한 것."""
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         self._build_styles()
@@ -1270,7 +1281,15 @@ class AssumptionsEditor(tk.Toplevel):
 
         self.path = Path(path)
         self.status.configure(text=f"저장했습니다: {Path(path).name}")
-        messagebox.showinfo("저장", f"기초율을 저장했습니다.\n\n{path}", parent=self)
+        # 창을 닫아야만 산출 화면에 전달되던 것을 없앤다. 저장한 순간 반영한다.
+        if self._on_saved is not None:
+            self._on_saved(self)
+        messagebox.showinfo(
+            "저장",
+            f"기초율을 저장했습니다.\n\n{path}\n\n산출 화면의 기초율 파일 칸에 "
+            "이 파일을 지정했습니다.",
+            parent=self,
+        )
 
     def collect(self) -> tuple[
         dict[str, tuple[list[str], list[list[Any]]]],
@@ -1342,8 +1361,32 @@ class AssumptionsEditor(tk.Toplevel):
         return write_assumptions(path, sheets, rules, longterm)
 
 
+    def has_input(self) -> bool:
+        """저장할 만한 입력이 들어 있는지. 할인율 한 줄이라도 있으면 참."""
+        return any(grid.get_rows() for grid in self._grids.values())
+
     def close(self) -> None:
-        """창을 닫는다. 호출한 쪽에 결과를 알린 뒤 정리한다."""
+        """창을 닫는다. 호출한 쪽에 결과를 알린 뒤 정리한다.
+
+        한 번도 저장하지 않은 채 닫으면 입력이 통째로 사라진다. 창이 모달이라
+        닫기 전에는 산출 화면으로 갈 수도 없어서, 공들여 채운 표가 조용히
+        날아가는 일이 실제로 있었다. 그래서 닫기 전에 한 번 묻는다.
+        """
+        if self.path is None and self.has_input():
+            answer = messagebox.askyesnocancel(
+                "저장하지 않고 닫기",
+                "입력한 기초율을 아직 저장하지 않았습니다.\n"
+                "지금 닫으면 입력한 내용이 사라집니다.\n\n"
+                "저장할까요?",
+                parent=self,
+            )
+            if answer is None:          # 취소 — 창을 그대로 둔다
+                return
+            if answer:
+                self.save()
+                if self.path is None:   # 저장 대화상자를 취소했다
+                    return
+
         if self._on_close is not None:
             self._on_close(self)
         self.destroy()
@@ -1390,9 +1433,14 @@ def open_editor(
     *,
     job_groups: list[str] | None = None,
     on_close: Callable[[AssumptionsEditor], None] | None = None,
+    on_saved: Callable[[AssumptionsEditor], None] | None = None,
+    roster_path: Path | None = None,
 ) -> AssumptionsEditor:
     """가정 입력 창을 띄운다."""
-    editor = AssumptionsEditor(parent, job_groups=job_groups, on_close=on_close)
+    editor = AssumptionsEditor(
+        parent, job_groups=job_groups, on_close=on_close,
+        on_saved=on_saved, roster_path=roster_path,
+    )
     if parent is not None:
         editor.transient(parent)
     editor.grab_set()
