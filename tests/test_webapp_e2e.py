@@ -91,12 +91,17 @@ def grid_row(page, sheet: str, row: int = 1):
     return grid(page, sheet).locator("tr[data-row]").nth(row - 1).locator("input")
 
 
+def open_section(page, selector: str):
+    """접어 둔 구획을 펼친다. 이미 펼쳐져 있으면 그대로 둔다."""
+    box = page.locator(selector)
+    if not box.evaluate("node => node.open"):
+        box.locator("summary").click()
+
+
 def open_calc(page, section_id: str):
     """산출 탭에서 접어 둔 구획을 펼친다. 사람이 하는 것과 같은 순서다."""
     page.click("#tab-calc")
-    box = page.locator(f"#{section_id}")
-    if not box.evaluate("node => node.open"):
-        box.locator("summary").click()
+    open_section(page, f"#{section_id}")
 
 
 def test_upload_run_download(page, tmp_path) -> None:
@@ -202,6 +207,7 @@ def test_library_registers_curve_into_editor(page, tmp_path) -> None:
     wb.save(source)
 
     page.click("#tab-lib")
+    open_section(page, "#sec-lib-curve")
     page.set_input_files("#lib-curve-file", str(source))
     page.fill("#lib-curve-name", "KIS_E2E")
     page.click("#lib-curve-add")
@@ -299,7 +305,8 @@ def test_saved_roster_and_prior_link_and_backup(page, tmp_path, shared_dir) -> N
     assert "보험수리적손익" in page.inner_text("#summary")
 
     # 보관함 내보내기 — 기기 밖에 둘 zip 이 실제로 떨어져야 한다.
-    page.click("#tab-runs")
+    page.click("#tab-lib")
+    open_section(page, "#lib-backup")
     with page.expect_download() as captured:
         page.click("#backup-export")
     archive = shared_dir / "보관함.zip"
@@ -322,8 +329,11 @@ def test_backup_restores_on_a_clean_device(browser, app_url, shared_dir) -> None
     assert "저장된 산출이 없습니다" in fresh.inner_text("#runs-list")
 
     fresh.on("dialog", lambda dialog: dialog.accept())
+    fresh.click("#tab-lib")
+    open_section(fresh, "#lib-backup")
     fresh.set_input_files("#backup-file", str(archive))
     fresh.click("#backup-replace")
+    fresh.click("#tab-runs")
     fresh.wait_for_selector("#runs-list >> text=2312 1번단체", timeout=60_000)
 
     # 등록 자료(명부)도 함께 돌아와야 한다.
@@ -363,8 +373,9 @@ def test_editor_survives_tab_switching(page) -> None:
 
 
 def test_generator_tab_makes_and_runs_a_case(page) -> None:
-    """시험명부 탭에서 만든 명부로 곧바로 산출까지."""
-    page.click("#tab-gen")
+    """자료실의 시험 명부 구획에서 만든 명부로 곧바로 산출까지."""
+    page.click("#tab-lib")
+    open_section(page, "#lib-gen")
     page.fill("#gen-seed", "777")
     page.click("#gen-run")
     page.wait_for_selector("#gen-cases fieldset", timeout=120_000)

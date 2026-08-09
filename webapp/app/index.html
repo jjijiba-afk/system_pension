@@ -20,9 +20,8 @@
 <nav class="tabs">
   <button id="tab-calc" class="on">산출</button>
   <button id="tab-edit">산출가정 입력</button>
-  <button id="tab-lib">기본가정 관리</button>
+  <button id="tab-lib">자료실</button>
   <button id="tab-runs">산출 내역</button>
-  <button id="tab-gen">시험명부</button>
 </nav>
 
 <!-- ════════ 산출 ════════ -->
@@ -204,15 +203,16 @@
 <div id="ed-problems"></div>
 </section>
 
-<!-- ════════ 기본가정 관리 ════════ -->
+<!-- ════════ 자료실 ════════ -->
 <section class="page" id="page-lib">
 <p class="notice">한 결산기에 여러 단체를 산출할 때 금리표·표준률은 모두 같습니다.
 여기 등록해 두면 [산출가정 입력] 화면에서 목록으로 골라 쓸 수 있고, 이 기기의
 브라우저 안에 저장되어 다음에 열어도 남아 있습니다. 따로 지정하지 않으면
 <b>가장 최근 등록한 것</b>이 기본으로 잡힙니다.</p>
 
-<fieldset><legend>가정세트 (지급률·지급규정 포함 산출가정 한 벌)</legend>
-  <div class="lib-line">
+<details class="section" id="sec-lib-preset"><summary>가정세트 (지급률·지급규정 포함 산출가정 한 벌)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
     <input type="file" id="lib-preset-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
     <input type="text" id="lib-preset-name" placeholder="등록 이름 (예: A사 퇴직금규정)" style="min-width:180px">
     <button class="small primary" id="lib-preset-add">등록</button>
@@ -220,19 +220,21 @@
   <div class="hint">[산출가정 입력] 탭에서 [현재 가정 저장] 을 눌러도 여기에 쌓입니다.
   기초율 워크북 파일을 직접 올려도 됩니다.</div>
   <div id="lib-preset-list"></div>
-</fieldset>
+</div></details>
 
-<fieldset><legend>금리표 (KIS-Net 등급별 기간구조)</legend>
-  <div class="lib-line">
+<details class="section" id="sec-lib-curve"><summary>금리표 (KIS-Net 등급별 기간구조)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
     <input type="file" id="lib-curve-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
     <input type="text" id="lib-curve-name" placeholder="등록 이름 (예: KIS_20261231)" style="min-width:180px">
     <button class="small primary" id="lib-curve-add">등록</button>
   </div>
   <div id="lib-curve-list"></div>
-</fieldset>
+</div></details>
 
-<fieldset><legend>명부 (올렸던 명부 보관)</legend>
-  <div class="lib-line">
+<details class="section" id="sec-lib-roster"><summary>명부 (올렸던 명부 보관)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
     <input type="file" id="lib-roster-file" accept=".xls,.xlsx,.xlsm" style="flex:1;min-width:200px">
     <input type="text" id="lib-roster-name" placeholder="등록 이름 (예: 1번단체 2412)" style="min-width:180px">
     <button class="small primary" id="lib-roster-add">등록</button>
@@ -241,10 +243,11 @@
   쓸 수 있습니다. 산출 탭에서 파일을 고른 뒤 [이 파일을 목록에 저장] 을 눌러도
   같습니다. 개인정보가 들어 있으므로 기기 잠금을 걸어 두세요.</div>
   <div id="lib-roster-list"></div>
-</fieldset>
+</div></details>
 
-<fieldset><legend>표준률 (퇴직률·승급률·사망률 기초율 워크북)</legend>
-  <div class="lib-line">
+<details class="section" id="sec-lib-rates"><summary>표준률 (퇴직률·승급률·사망률 기초율 워크북)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
     <input type="file" id="lib-rates-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
     <input type="text" id="lib-rates-name" placeholder="등록 이름 (예: 2026 표준률)" style="min-width:180px">
     <button class="small primary" id="lib-rates-add">등록</button>
@@ -253,40 +256,10 @@
   됩니다. [산출가정 입력]에서 만들어 저장한 파일을 그대로 등록해도 됩니다.
   등록이 없어도 <b>내장 표준률</b>(15~70세 표)은 항상 쓸 수 있습니다.</div>
   <div id="lib-rates-list"></div>
-</fieldset>
-</section>
+</div></details>
 
-<!-- ════════ 산출 내역 ════════ -->
-<section class="page" id="page-runs">
-<p class="notice">산출을 마친 뒤 이름을 붙여 저장해 두면 여기 쌓입니다.
-"2412 1번단체" 처럼 결산기·단체명으로 이름을 지으면 다음 결산 때 전기 입력과
-전기 DBO 를 그대로 끌어올 수 있습니다.</p>
-<div id="runs-list"></div>
-
-<fieldset style="margin-top:18px"><legend>보관함 — 기기 밖에 저장</legend>
-  <p class="hint">앱 안의 자료(등록한 금리표·표준률·명부, 산출 내역 전부)는 이 기기의
-  브라우저 저장소에 있습니다. Safari 방문기록·웹사이트 데이터를 지우거나 기기를
-  바꾸면 함께 사라집니다. 그래서 <b>전부를 파일 하나로 내보내</b> 파일 앱의
-  iCloud Drive 같은 기기 밖에 두었다가, 필요할 때 그대로 되살릴 수 있게 했습니다.
-  결산이 끝날 때마다 한 번씩 내보내 두시길 권합니다.</p>
-  <div class="lib-line">
-    <button class="small primary" type="button" id="backup-export">보관함 내보내기</button>
-    <span class="hint" id="backup-stamp"></span>
-  </div>
-  <div class="hint">내려받은 뒤 아이패드에서 <b>공유 → 파일에 저장 → iCloud Drive</b>
-  를 고르면 기기를 바꿔도 남습니다.</div>
-  <div class="lib-line" style="margin-top:10px">
-    <input type="file" id="backup-file" accept=".zip" style="flex:1;min-width:200px">
-    <button class="small" type="button" id="backup-import">가져오기 (합치기)</button>
-    <button class="small" type="button" id="backup-replace">전체 교체</button>
-  </div>
-  <div class="hint">합치기는 지금 자료를 두고 같은 이름만 덮어씁니다.
-  전체 교체는 지금 것을 비우고 보관함 그대로 되돌립니다.</div>
-</fieldset>
-</section>
-
-<!-- ════════ 시험명부 ════════ -->
-<section class="page" id="page-gen">
+<details class="section" id="lib-gen"><summary>시험 명부 만들기<span class="count"></span></summary>
+<div class="section-body">
 <p class="notice">난수로 만든 시험용 명부 세 벌입니다. 프로그램이 제대로 도는지
 확인하거나, 실제 명부 없이 화면을 익힐 때 씁니다. 명부마다 <b>짝이 되는 기초율</b>과
 무엇이 들어 있는지 적은 <b>특이사항 안내문</b>이 함께 나옵니다.
@@ -308,6 +281,37 @@
 </fieldset>
 
 <div id="gen-cases"></div>
+</div></details>
+
+<details class="section" id="lib-backup"><summary>보관함 — 기기 밖에 저장<span class="count"></span></summary>
+<div class="section-body">
+<p class="hint">앱 안의 자료(등록한 금리표·표준률·명부, 산출 내역 전부)는 이 기기의
+  브라우저 저장소에 있습니다. Safari 방문기록·웹사이트 데이터를 지우거나 기기를
+  바꾸면 함께 사라집니다. 그래서 <b>전부를 파일 하나로 내보내</b> 파일 앱의
+  iCloud Drive 같은 기기 밖에 두었다가, 필요할 때 그대로 되살릴 수 있게 했습니다.
+  결산이 끝날 때마다 한 번씩 내보내 두시길 권합니다.</p>
+  <div class="lib-line">
+    <button class="small primary" type="button" id="backup-export">보관함 내보내기</button>
+    <span class="hint" id="backup-stamp"></span>
+  </div>
+  <div class="hint">내려받은 뒤 아이패드에서 <b>공유 → 파일에 저장 → iCloud Drive</b>
+  를 고르면 기기를 바꿔도 남습니다.</div>
+  <div class="lib-line" style="margin-top:10px">
+    <input type="file" id="backup-file" accept=".zip" style="flex:1;min-width:200px">
+    <button class="small" type="button" id="backup-import">가져오기 (합치기)</button>
+    <button class="small" type="button" id="backup-replace">전체 교체</button>
+  </div>
+  <div class="hint">합치기는 지금 자료를 두고 같은 이름만 덮어씁니다.
+  전체 교체는 지금 것을 비우고 보관함 그대로 되돌립니다.</div>
+</div></details>
+</section>
+
+<!-- ════════ 산출 내역 ════════ -->
+<section class="page" id="page-runs">
+<p class="notice">산출을 마친 뒤 이름을 붙여 저장해 두면 여기 쌓입니다.
+"2412 1번단체" 처럼 결산기·단체명으로 이름을 지으면 다음 결산 때 전기 입력과
+전기 DBO 를 그대로 끌어올 수 있습니다.</p>
+<div id="runs-list"></div>
 </section>
 
 <dialog id="report-dialog">
