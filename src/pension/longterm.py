@@ -19,6 +19,8 @@ import datetime as _dt
 from dataclasses import dataclass, field
 
 from .assumptions import (
+    LT_AT_MILESTONE,
+    LT_AT_NRA,
     LT_AVERAGE_WAGE,
     LT_CASH,
     LT_IN_KIND,
@@ -100,11 +102,15 @@ def value_longterm_member(
         return result
 
     rule = member.rules.longterm_benefit or member.job_group
-    kind = assumptions.longterm_rule(rule)
-    result.benefit_kind = kind.kind
-    milestones = assumptions.longterm_benefit.milestones(rule)
-    if not milestones:
-        result.excluded_reason = f"장기급여 지급률 규정 '{rule}' 을(를) 찾을 수 없음"
+    items = assumptions.longterm_items(rule)
+    result.benefit_kind = " + ".join(dict.fromkeys(i.kind for i in items))
+
+    by_item = [(item, assumptions.longterm_benefit.milestones(item.column(rule)))
+               for item in items]
+    by_item = [(item, points) for item, points in by_item if points]
+    if not by_item:
+        columns = " / ".join(dict.fromkeys(i.column(rule) for i in items))
+        result.excluded_reason = f"장기급여 지급률 규정 '{columns}' 을(를) 찾을 수 없음"
         return result
 
     past_service = result.past_service
@@ -143,51 +149,189 @@ def value_longterm_member(
         survival.append(probability)
         wage_index.append(index)
 
+    def index_at(t: float) -> float:
+        """``t`` 년 뒤 임금지수. 연 단위 표를 선형으로 이어 본다."""
+        low = min(int(t), horizon)
+        high = min(low + 1, horizon)
+        return wage_index[low] + (wage_index[high] - wage_index[low]) * (t - low)
+
+    def survival_at(t: float) -> float:
+        low = min(int(t), horizon)
+        high = min(low + 1, horizon)
+        return survival[low] + (survival[high] - survival[low]) * (t - low)
+
+    def amount(item, value: float, t: float) -> float:
+        """표 값 하나를 그 시점의 금액으로.
+
+        표 값의 뜻이 지급유형에 따라 달라진다.
+          휴가      지급일수  → 일 기본급 × 일수, 임금상승률 반영
+          평균임금  배수      → 30일 평균임금 × 배수, 임금상승률 반영
+          현물      정액(원)  → 평가시점 시세를 현물 상승률로 올린다
+          현금      정액(원)  → 규정 금액이 고정이므로 올리지 않는다
+        """
+        if item.kind == LT_AVERAGE_WAGE:
+            return value * member.monthly_wage * index_at(t)
+        if item.kind == LT_IN_KIND:
+            return value * (1.0 + item.escalation) ** t
+        if item.kind == LT_CASH:
+            return value
+        return value * daily * index_at(t)
+
     dbo = 0.0
     service_cost = 0.0
     upcoming = 0
 
-    for target_service, days in milestones:
-        if days <= 0:
-            continue
-        remaining = target_service - past_service
-        if remaining <= 0:
-            continue  # 이미 지급이 끝난 시점
-        t = int(-(-remaining // 1))  # 도달 연도(올림)
-        if t > horizon:
-            continue  # 정년 전에 도달하지 못한다
-
-        upcoming += 1
-        if result.next_milestone is None:
-            result.next_milestone = target_service
-
-        # 표 값의 뜻이 지급유형에 따라 달라진다.
-        #   휴가      지급일수  → 일 기본급 × 일수, 임금상승률 반영
-        #   평균임금  배수      → 30일 평균임금 × 배수, 임금상승률 반영
-        #   현물      정액(원)  → 평가시점 시세를 현물 상승률로 올린다
-        #   현금      정액(원)  → 규정 금액이 고정이므로 올리지 않는다
-        if kind.kind == LT_AVERAGE_WAGE:
-            benefit = days * member.monthly_wage * wage_index[t]
-        elif kind.kind == LT_IN_KIND:
-            benefit = days * (1.0 + kind.escalation) ** t
-        elif kind.kind == LT_CASH:
-            benefit = days
+    for item, milestones in by_item:
+        points = _expand(milestones, item.every_years, past_service + horizon)
+        if item.timing == LT_AT_MILESTONE:
+            item_dbo, item_cost, count, first = _value_at_milestones(
+                points, item, past_service, horizon, member, config,
+                assumptions, amount, survival_at,
+            )
+            upcoming += count
+            if first is not None and (
+                result.next_milestone is None or first < result.next_milestone
+            ):
+                result.next_milestone = first
         else:
-            benefit = days * daily * wage_index[t]
-
-        weighted = benefit * survival[t] * assumptions.discount.discount_factor(remaining)
-
-        attribution = min(1.0, past_service / target_service) if target_service > 0 else 0.0
-        unit_attribution = 1.0 / target_service if target_service > 0 else 0.0
-
-        dbo += weighted * attribution
-        service_cost += weighted * unit_attribution
+            item_dbo, item_cost = _value_at_exit(
+                points, item, past_service, horizon, assumptions, amount, survival
+            )
+        dbo += item_dbo
+        service_cost += item_cost
 
     result.dbo = dbo
     result.service_cost = service_cost
     result.interest_cost = dbo * assumptions.discount.level_rate
     result.milestone_count = upcoming
     return result
+
+
+def _expand(
+    milestones: list[tuple[int, float]], every_years: float, limit: float
+) -> list[tuple[float, float]]:
+    """반복 주기가 있으면 마지막 지급 시점을 ``limit`` 까지 되풀이한다.
+
+    '30년 넘으면 5년마다 한 번 더', 건강검진처럼 2년마다 되풀이하는 규정을
+    표 한 줄로 적을 수 있게 한다.
+    """
+    points: list[tuple[float, float]] = [(float(k), v) for k, v in milestones]
+    if every_years <= 0 or not points:
+        return points
+
+    last_service, last_value = points[-1]
+    # 표가 이미 채운 자리를 다시 만들지 않도록 마지막 시점 다음부터 센다.
+    step = every_years
+    service = last_service + step
+    while service <= limit and len(points) < 200:
+        points.append((service, last_value))
+        service += step
+    return points
+
+
+def _anniversary_delay(item, member, config, target_service: float) -> float:
+    """근속에 닿은 뒤 지급일까지 밀리는 햇수.
+
+    창립기념일 지급 규정은 근속에 닿아도 그 날짜가 와야 준다. 근속 도달일이
+    지급일보다 뒤면 이듬해로 넘어가므로 최대 1년 밀린다.
+    """
+    if not item.anniversary:
+        return 0.0
+    start = member.settlement_date or member.hire_date
+    if start is None:
+        return 0.0
+    month, day = (int(part) for part in item.anniversary.split("-"))
+
+    reached = start + _dt.timedelta(days=round(target_service * 365.25))
+    try:
+        payday = reached.replace(month=month, day=day)
+    except ValueError:                       # 2/29 같은 날짜
+        payday = reached.replace(month=month, day=28)
+    if payday < reached:
+        payday = payday.replace(year=payday.year + 1)
+    return (payday - reached).days / 365.25
+
+
+def _value_at_milestones(
+    points, item, past_service, horizon, member, config, assumptions, amount, survival_at
+):
+    """근속에 닿는 해에 받는 급여. 이미 지나간 시점은 채무가 아니다."""
+    dbo = 0.0
+    service_cost = 0.0
+    count = 0
+    first: float | None = None
+
+    for target_service, value in points:
+        if value <= 0 or target_service <= 0:
+            continue
+        remaining = target_service - past_service
+        if remaining <= 0:
+            continue  # 이미 지급이 끝난 시점
+        remaining += _anniversary_delay(item, member, config, target_service)
+        if remaining > horizon:
+            continue  # 정년 전에 도달하지 못한다
+
+        count += 1
+        if first is None:
+            first = target_service
+
+        benefit = amount(item, value, remaining)
+        weighted = (
+            benefit * survival_at(remaining)
+            * assumptions.discount.discount_factor(remaining)
+        )
+        dbo += weighted * min(1.0, past_service / target_service)
+        service_cost += weighted / target_service
+
+    return dbo, service_cost, count, first
+
+
+def _value_at_exit(points, item, past_service, horizon, assumptions, amount, survival):
+    """나갈 때 받는 급여(``퇴직시`` / ``정년시``).
+
+    재직 중에는 주지 않으므로 지급 시점이 탈퇴 시점이다. 금액은 그때까지 쌓인
+    자격으로 정해지고, 귀속은 지금 자격과 그때 자격의 비로 잰다.
+    """
+    def due(service: float) -> list[tuple[float, float]]:
+        """근속 ``service`` 로 나갈 때 받을 ``(도달근속, 표 값)`` 들.
+
+        누적이면 도달한 시점을 모두 받는다('유급휴가 소멸기한 없음').
+        아니면 그 근속에 해당하는 한 칸만 받는다('20년 이상이면 현물 포상').
+        """
+        reached = [(target, v) for target, v in points if target <= service and v > 0]
+        if not reached:
+            return []
+        return reached if item.accumulate else reached[-1:]
+
+    dbo = 0.0
+    service_cost = 0.0
+    in_service = 1.0            # 그 해 **초** 에 재직해 있을 확률
+
+    for t in range(1, horizon + 1):
+        is_final = t == horizon
+        # 정년퇴직자에게만 주는 급여면 중도 탈퇴자는 받지 못한다.
+        if item.timing == LT_AT_NRA and not is_final:
+            in_service = survival[t]
+            continue
+
+        timing = float(t) if is_final else t - 0.5
+        leaving = in_service if is_final else max(0.0, in_service - survival[t])
+        in_service = survival[t]
+        if leaving <= 0.0:
+            continue
+
+        discount = assumptions.discount.discount_factor(timing)
+        for target, value in due(past_service + timing):
+            # 귀속은 그 급여를 벌게 한 근무기간(0 → 도달근속)에 고르게 나눈다
+            # (문단 72). 도달하는 해에 통째로 잡으면 그때까지 채무가 0 이다가
+            # 한 번에 튄다.
+            share = min(1.0, past_service / target) if target > 0 else 1.0
+            next_share = min(1.0, (past_service + 1.0) / target) if target > 0 else 1.0
+            weighted = amount(item, value, timing) * leaving * discount
+            dbo += weighted * share
+            service_cost += weighted * max(0.0, next_share - share)
+
+    return dbo, service_cost
 
 
 def value_longterm(

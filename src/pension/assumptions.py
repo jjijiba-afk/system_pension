@@ -21,7 +21,9 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import math
+import re
 from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -42,7 +44,12 @@ __all__ = [
     "CUMULATIVE",
     "EXIT_CAUSES",
     "FORMULA",
+    "LONGTERM_RULE_HEADERS",
+    "LONGTERM_TIMINGS",
     "LONGTERM_TYPES",
+    "LT_AT_EXIT",
+    "LT_AT_MILESTONE",
+    "LT_AT_NRA",
     "LT_AVERAGE_WAGE",
     "LT_CASH",
     "LT_IN_KIND",
@@ -456,9 +463,32 @@ class CauseBenefits:
 _NO_CAUSE_BENEFIT: Final = CauseBenefit()
 
 
+LT_AT_MILESTONE: Final = "근속도달"
+"""지급시점 — 그 근속연수에 닿는 해에 준다(재직 중)."""
+
+LT_AT_EXIT: Final = "퇴직시"
+"""지급시점 — 나갈 때 준다. 근속에 따라 금액이 갈린다.
+
+'20년 이상 근속 퇴직자에게 현물 포상' 처럼, 재직 중에는 주지 않고 퇴직할 때
+그동안 쌓인 자격만큼 주는 규정이 많다.
+"""
+
+LT_AT_NRA: Final = "정년시"
+"""지급시점 — 정년퇴직자에게만 준다."""
+
+LONGTERM_TIMINGS: Final = (LT_AT_MILESTONE, LT_AT_EXIT, LT_AT_NRA)
+
+
 @dataclass(slots=True)
 class LongTermRule:
-    """장기급여 규정 하나의 지급유형.
+    """장기급여 규정의 지급 항목 **하나**.
+
+    한 규정에 항목이 여럿 붙는다. 실제 규정을 그대로 옮기면
+
+        10년 : 휴가 3일 , 금 10돈, 특별상여(기본급의 50%)
+
+    처럼 한 근속연수에 성격이 다른 급여가 셋 걸린다. 항목마다 표 값의 뜻도,
+    올리는 방법도, 주는 시점도 다르므로 각각 한 줄로 적는다.
 
     ``장기급여지급률`` 표의 값이 무엇을 뜻하는지는 유형에 따라 달라진다.
 
@@ -478,6 +508,34 @@ class LongTermRule:
     note: str = ""
     """'현물 포상 @ 2025-12-31 시세' 처럼 환산 근거를 남긴다."""
 
+    item: str = ""
+    """``장기급여지급률`` 표에서 이 항목이 쓸 열 이름. 비면 규정명과 같다."""
+    timing: str = LT_AT_MILESTONE
+    """지급시점. :data:`LONGTERM_TIMINGS` 중 하나."""
+    every_years: float = 0.0
+    """마지막 지급 이후 되풀이하는 주기(년). 0 이면 한 번만.
+
+    '30년 넘으면 5년마다 한 번 더', 건강검진처럼 2년마다 되풀이하는 규정을
+    담는다. 마지막 표 값을 그 주기로 정년까지 반복한다.
+    """
+    accumulate: bool = False
+    """지급 시점까지 쌓아 두는지.
+
+    '유급휴가 소멸기한 없음' 처럼 받은 것을 안 쓰고 모아 두었다가 나갈 때
+    정산하는 규정이 있다. 켜면 도달한 지급 시점의 값을 **모두 더한다**.
+    끄면 그 근속에 해당하는 한 칸만 본다.
+    """
+    anniversary: str = ""
+    """``MM-DD``. 근속에 닿아도 이 날짜가 와야 주는 규정(창립기념일 지급).
+
+    '입사 1/1~9/30 은 그해 창립기념일(10/1), 10/1~12/31 은 이듬해' 처럼
+    지급이 최대 1년 밀린다. 비면 도달 즉시 준다.
+    """
+
+    def column(self, rule: str) -> str:
+        """이 항목이 볼 지급률 열 이름."""
+        return self.item or rule
+
 
 @dataclass(slots=True)
 class Assumptions:
@@ -492,14 +550,19 @@ class Assumptions:
     longterm_benefit: BenefitScale = field(
         default_factory=lambda: BenefitScale(statutory_when_missing=False)
     )
-    longterm_rules: dict[str, LongTermRule] = field(default_factory=dict)
-    """장기급여 규정명 → 지급유형. 없으면 ``휴가`` 로 본다(기존 동작)."""
+    longterm_rules: dict[str, list[LongTermRule]] = field(default_factory=dict)
+    """장기급여 규정명 → 지급 항목들. 없으면 ``휴가`` 한 항목으로 본다."""
 
     exit_causes: CauseBenefits = field(default_factory=CauseBenefits)
     """퇴직사유별 지급 차등. 비면 사유를 가리지 않는다(기존 동작)."""
 
+    def longterm_items(self, rule: str) -> list[LongTermRule]:
+        """그 규정의 지급 항목들. 등록이 없으면 기본 항목 하나."""
+        return self.longterm_rules.get(text(rule)) or [LongTermRule()]
+
     def longterm_rule(self, rule: str) -> LongTermRule:
-        return self.longterm_rules.get(text(rule), LongTermRule())
+        """첫 지급 항목. 항목이 하나뿐인 규정을 간단히 볼 때 쓴다."""
+        return self.longterm_items(rule)[0]
 
     label: str = "당기 가정"
     """리포트에 표시할 이름. 민감도·증감분석에서 구분자로 쓴다."""
@@ -707,21 +770,50 @@ def _read_mortality(wb) -> MortalityTable:
     return MortalityTable(RateCurve(male), RateCurve(female))
 
 
-def _read_longterm_rules(wb) -> tuple[dict[str, LongTermRule], list[str]]:
-    """``장기급여규정`` 시트에서 규정별 지급유형을 읽는다.
+#: ``MM-DD`` 표기. 창립기념일처럼 달·일만 정해진 지급일.
+_MONTH_DAY = re.compile(r"^(\d{1,2})\s*[-/월.]\s*(\d{1,2})\s*일?$")
 
-    시트가 없으면 빈 표를 돌려준다 — 그러면 전부 ``휴가`` 로 보아 기존 동작과
-    같아진다.
+
+def _parse_anniversary(value: object) -> tuple[str, str]:
+    """지급일 칸을 ``MM-DD`` 로. ``(값, 오류)``.
+
+    엑셀이 ``10-01`` 을 날짜로 바꿔 버리는 일이 흔해 :class:`datetime` 도 받는다.
     """
-    rules: dict[str, LongTermRule] = {}
+    if isinstance(value, _dt.datetime):
+        value = value.date()
+    if isinstance(value, _dt.date):
+        return f"{value.month:02d}-{value.day:02d}", ""
+    token = text(value)
+    if not token:
+        return "", ""
+    found = _MONTH_DAY.match(token)
+    if not found:
+        return "", token
+    month, day = int(found.group(1)), int(found.group(2))
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return "", token
+    return f"{month:02d}-{day:02d}", ""
+
+
+def _read_longterm_rules(wb) -> tuple[dict[str, list[LongTermRule]], list[str]]:
+    """``장기급여규정`` 시트에서 규정별 지급 항목을 읽는다.
+
+    한 규정에 여러 줄을 적으면 항목이 여럿 붙는다 — '10년 : 휴가 3일, 금 10돈,
+    특별상여' 처럼 성격이 다른 급여가 한 근속연수에 걸리는 규정이 흔하다.
+
+    시트가 없으면 빈 표를 돌려준다 — 그러면 전부 ``휴가`` 한 항목으로 보아
+    기존 동작과 같아진다.
+    """
+    rules: dict[str, list[LongTermRule]] = {}
     problems: list[str] = []
     if LONGTERM_RULE_SHEET not in wb.sheetnames:
         return rules, problems
 
     ws = wb[LONGTERM_RULE_SHEET]
+    seen: set[tuple[str, str]] = set()
     for row, _ in _rows(ws):
         name = text(ws.cell(row, 1).value)
-        if not name:
+        if not name or name.startswith(("·", "*", "※", "#")):
             continue
         kind = text(ws.cell(row, 2).value) or LT_VACATION
         if kind not in LONGTERM_TYPES:
@@ -737,10 +829,53 @@ def _read_longterm_rules(wb) -> tuple[dict[str, LongTermRule], list[str]]:
                 f"{LONGTERM_RULE_SHEET}!C{row}: '{name}' 은 {kind} 유형이라 현물 상승률을 "
                 "쓰지 않습니다 (유형을 '현물'로 바꾸거나 상승률을 비우세요)"
             )
-        rules[name] = LongTermRule(
-            kind=kind,
-            escalation=escalation if kind == LT_IN_KIND else 0.0,
-            note=text(ws.cell(row, 4).value),
+
+        item = text(ws.cell(row, 5).value)
+        timing = text(ws.cell(row, 6).value) or LT_AT_MILESTONE
+        if timing not in LONGTERM_TIMINGS:
+            problems.append(
+                f"{LONGTERM_RULE_SHEET}!F{row}: 지급시점 '{timing}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(LONGTERM_TIMINGS)} 중 하나)"
+            )
+            continue
+
+        every = _as_number(ws.cell(row, 7).value) or 0.0
+        if every < 0:
+            problems.append(f"{LONGTERM_RULE_SHEET}!G{row}: 반복 주기는 음수일 수 없습니다")
+            continue
+
+        anniversary, bad = _parse_anniversary(ws.cell(row, 9).value)
+        if bad:
+            problems.append(
+                f"{LONGTERM_RULE_SHEET}!I{row}: 지급일 '{bad}' 을(를) 읽지 못했습니다 "
+                "(10-01 처럼 월-일로 적어 주세요)"
+            )
+            continue
+        if anniversary and timing != LT_AT_MILESTONE:
+            problems.append(
+                f"{LONGTERM_RULE_SHEET}!I{row}: 지급일은 '{LT_AT_MILESTONE}' 에만 씁니다 "
+                f"(지금은 '{timing}')"
+            )
+            continue
+
+        key = (name, item)
+        if key in seen:
+            label = f"{name} / {item}" if item else name
+            problems.append(f"{LONGTERM_RULE_SHEET}!A{row}: '{label}' 이 두 번 적혀 있습니다")
+            continue
+        seen.add(key)
+
+        rules.setdefault(name, []).append(
+            LongTermRule(
+                kind=kind,
+                escalation=escalation if kind == LT_IN_KIND else 0.0,
+                note=text(ws.cell(row, 4).value),
+                item=item,
+                timing=timing,
+                every_years=every,
+                accumulate=text(ws.cell(row, 8).value).upper() in ("Y", "예", "TRUE", "1"),
+                anniversary=anniversary,
+            )
         )
     return rules, problems
 
@@ -866,11 +1001,18 @@ def _as_stored_formula(source: str) -> str:
     return text_value[1:].strip() if text_value.startswith("=") else text_value
 
 
+#: ``장기급여규정`` 시트의 열. 읽기와 쓰기가 같은 자료를 봐야 한다.
+LONGTERM_RULE_HEADERS: Final[tuple[str, ...]] = (
+    "규정명", "지급유형", "현물 상승률", "환산 근거",
+    "항목(지급률 열)", "지급시점", "반복 주기(년)", "누적", "지급일(월-일)",
+)
+
+
 def write_assumptions(
     path: str | Path,
     sheets: dict[str, tuple[list[str], list[list[Any]]]],
     rules: dict[str, tuple[str, str]] | None = None,
-    longterm_rules: dict[str, tuple[str, float, str]] | None = None,
+    longterm_rules: list[list[Any]] | None = None,
 ) -> Path:
     """기초율 워크북을 쓴다.
 
@@ -879,6 +1021,8 @@ def write_assumptions(
 
     :param sheets: 시트명 → (머리글 목록, 행 목록).
     :param rules: 규정명 → (방식, 수식). ``지급률규정`` 시트로 나간다.
+    :param longterm_rules: ``장기급여규정`` 시트의 행들
+        (:data:`LONGTERM_RULE_HEADERS` 순서).
     """
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -907,14 +1051,7 @@ def write_assumptions(
         write_sheet(name, headers, rows)
 
     if longterm_rules is not None:
-        write_sheet(
-            LONGTERM_RULE_SHEET,
-            ["규정명", "지급유형", "현물 상승률", "환산 근거"],
-            [
-                [name, kind, escalation or None, note]
-                for name, (kind, escalation, note) in longterm_rules.items()
-            ],
-        )
+        write_sheet(LONGTERM_RULE_SHEET, list(LONGTERM_RULE_HEADERS), longterm_rules)
 
     if rules is not None:
         write_sheet(
@@ -1003,8 +1140,23 @@ def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
     )
     make(
         LONGTERM_SHEET, ["근속연수", *rules],
-        "· 근속 포상·장기근속휴가의 지급일수입니다(일 기본급 × 일수). 해당 근속연수 도달 시 지급으로 봅니다.",
+        "· 근속 포상·장기근속휴가의 지급일수입니다(일 기본급 × 일수). 해당 근속연수 도달 시 지급으로 봅니다."
+        "\n· 한 규정에 항목이 여럿이면 '장기급여규정' 시트의 항목 이름으로 열을 더 만드세요.",
         [[10, *[10] * len(rules)], [20, *[20] * len(rules)], [30, *[30] * len(rules)]],
+    )
+    make(
+        LONGTERM_RULE_SHEET, list(LONGTERM_RULE_HEADERS),
+        "· 규정 하나에 항목이 여럿이면 줄을 여러 개 적습니다 "
+        "(예: 10년 → 휴가 3일 + 금 10돈 + 특별상여)."
+        "\n· 항목(지급률 열): 그 항목이 볼 '장기급여지급률' 시트의 열 이름. 비우면 규정명과 같습니다."
+        "\n· 지급유형: " + " / ".join(LONGTERM_TYPES) +
+        "\n· 지급시점: " + " / ".join(LONGTERM_TIMINGS) +
+        " — 퇴직시/정년시는 재직 중에 주지 않고 나갈 때 줍니다."
+        "\n· 반복 주기(년): 마지막 지급 이후 되풀이하는 주기. 0 이면 한 번만 (예: 건강검진 2)."
+        "\n· 누적: Y 면 도달한 지급 시점의 값을 모두 더합니다 (유급휴가 소멸기한 없음 등)."
+        "\n· 지급일(월-일): 창립기념일처럼 날짜가 와야 주는 규정 (예: 10-01). '근속도달' 에만 씁니다.",
+        [[rule, LT_VACATION, None, "", "", LT_AT_MILESTONE, None, "", ""]
+         for rule in rules],
     )
     make(
         EXIT_CAUSE_SHEET,

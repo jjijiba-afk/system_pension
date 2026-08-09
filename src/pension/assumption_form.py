@@ -38,6 +38,8 @@ from .assumptions import (
     FORMULA,
     LONGTERM_RULE_SHEET,
     LONGTERM_SHEET,
+    LONGTERM_TIMINGS,
+    LT_AT_MILESTONE,
     LT_VACATION,
     MORTALITY_SHEET,
     PROMOTION_SHEET,
@@ -55,6 +57,7 @@ __all__ = [
     "APPLY_CHOICES",
     "EXIT_CAUSE_HEADERS",
     "FORM_SHEETS",
+    "LONGTERM_ITEM_HEADERS",
     "PAYOUT_HEADERS",
     "PAYOUT_SHEET",
     "ROUNDING_UNITS",
@@ -81,6 +84,12 @@ PAYOUT_HEADERS: Final[tuple[str, ...]] = (
     "가입자격(최소근속)", "임원 정년연령", "임원 정년초과 가산연령", "산출 제외",
     "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식", "임직원구분",
     "Base-up 적용", "승급률 적용", "퇴직률 적용", "사망률 적용",
+)
+
+#: 장기급여 '복합 지급' 탭의 열. 한 규정에 항목이 여럿일 때 쓴다.
+LONGTERM_ITEM_HEADERS: Final[tuple[str, ...]] = (
+    "규정(직군)", "항목(지급률 열)", "지급유형", "현물 상승률",
+    "지급시점", "반복 주기(년)", "누적", "지급일(월-일)", "환산 근거",
 )
 
 #: 퇴직사유 탭의 열. 자유 입력이 아니라 정해진 자리에 넣게 한다.
@@ -176,9 +185,15 @@ def empty_state(job_groups: list[str] | None = None) -> dict[str, Any]:
             group: {"mode": STATUTORY_MODE, "formula": ""} for group in groups
         },
         "longterm_rules": {
-            group: {"kind": LT_VACATION, "escalation": "", "note": ""}
+            group: {
+                "kind": LT_VACATION, "escalation": "", "note": "",
+                "timing": LT_AT_MILESTONE, "every": "", "accumulate": False,
+                "anniversary": "",
+            }
             for group in groups
         },
+        # 한 규정에 항목이 여럿일 때만 채운다 (10년 → 휴가 + 금 + 특별상여).
+        "longterm_items": [],
         "mapping": [],
         # 중도퇴직·사망·정년퇴직의 지급률이 다를 때만 채운다. 비면 사유를
         # 가리지 않으므로 종전과 같은 산출이 나온다.
@@ -241,6 +256,26 @@ def state_problems(state: dict[str, Any]) -> list[str]:
     if not any(any(text(v) for v in row) for row in discount):
         found.append("할인율은 반드시 입력해야 합니다. 없으면 채무를 산출할 수 없습니다")
 
+    for group, item in state.get("longterm_rules", {}).items():
+        timing = text(item.get("timing")) or LT_AT_MILESTONE
+        if timing not in LONGTERM_TIMINGS:
+            found.append(
+                f"'{group}' 장기급여의 지급시점 '{timing}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(LONGTERM_TIMINGS)} 중 하나)"
+            )
+
+    items: set[tuple[str, str]] = set()
+    for row in _longterm_item_rows(state):
+        rule, name, timing = row[0], row[1], row[4] or LT_AT_MILESTONE
+        if timing not in LONGTERM_TIMINGS:
+            found.append(
+                f"'{rule} / {name}' 의 지급시점 '{timing}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(LONGTERM_TIMINGS)} 중 하나)"
+            )
+        if (rule, name) in items:
+            found.append(f"장기급여 항목 '{rule} / {name}' 이 두 번 적혀 있습니다")
+        items.add((rule, name))
+
     seen: set[tuple[str, str]] = set()
     for row in _cause_rows(state):
         rule, cause = row[0], row[1]
@@ -260,6 +295,18 @@ def state_problems(state: dict[str, Any]) -> list[str]:
             found.append(f"'{rule} / {cause}' 이 두 번 적혀 있습니다")
         seen.add((rule, cause))
     return found
+
+
+def _longterm_item_rows(state: dict[str, Any]) -> list[list[str]]:
+    """복합 지급 탭에서 값이 든 줄만. 아홉 칸으로 길이를 맞춘다."""
+    rows: list[list[str]] = []
+    for row in state.get("longterm_items", []):
+        values = [text(v) for v in list(row)[: len(LONGTERM_ITEM_HEADERS)]]
+        values += [""] * (len(LONGTERM_ITEM_HEADERS) - len(values))
+        # 규정과 항목 이름이 둘 다 있어야 지급률 표에서 열을 찾을 수 있다.
+        if values[0] and values[1]:
+            rows.append(values)
+    return rows
 
 
 def _cause_rows(state: dict[str, Any]) -> list[list[str]]:
@@ -390,14 +437,28 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
         ],
     )
 
-    longterm = {
-        group: (
+    # 장기급여규정 시트. 직군마다 한 줄(기본 항목)을 쓰고, '복합 지급' 으로
+    # 더 적은 항목이 있으면 그 뒤에 이어 붙인다.
+    longterm: list[list[Any]] = [
+        [
+            group,
             text(item.get("kind")) or LT_VACATION,
-            _parse_escalation(text(item.get("escalation"))),
+            _parse_escalation(text(item.get("escalation"))) or None,
             text(item.get("note")),
-        )
+            "",                                     # 항목: 규정명과 같다
+            text(item.get("timing")) or LT_AT_MILESTONE,
+            _as_float(item.get("every"), 0.0) or None,
+            "Y" if item.get("accumulate") else "",
+            text(item.get("anniversary")),
+        ]
         for group, item in state.get("longterm_rules", {}).items()
-    }
+    ]
+    longterm += [
+        [row[0], row[2] or LT_VACATION, _parse_escalation(row[3]) or None, row[8],
+         row[1], row[4] or LT_AT_MILESTONE, _as_float(row[5], 0.0) or None,
+         "Y" if row[6] in ("Y", "예", True, "true") else "", row[7]]
+        for row in _longterm_item_rows(state)
+    ]
     return sheets, rules, longterm
 
 
@@ -494,19 +555,38 @@ def read_state(path: str | Path) -> dict[str, Any]:
 
         if LONGTERM_RULE_SHEET in wb.sheetnames:
             ws = wb[LONGTERM_RULE_SHEET]
+            extra: list[list[str]] = []
+            seen_rules: set[str] = set()
             for row in range(2, ws.max_row + 1):
                 name = text(ws.cell(row, 1).value)
                 if not name or name[:1] in _NOTE_PREFIXES:
                     continue
-                raw = ws.cell(row, 3).value
-                state["longterm_rules"][name] = {
-                    "kind": text(ws.cell(row, 2).value) or LT_VACATION,
-                    "escalation": (
-                        f"{float(raw) * 100:g}%"
-                        if isinstance(raw, (int, float)) and raw else ""
-                    ),
-                    "note": text(ws.cell(row, 4).value),
-                }
+                escalation = _percent(ws.cell(row, 3).value)
+                item = _cell_text(ws.cell(row, 5).value)
+                timing = text(ws.cell(row, 6).value) or LT_AT_MILESTONE
+                every = _cell_text(ws.cell(row, 7).value)
+                accumulate = text(ws.cell(row, 8).value).upper() in ("Y", "예")
+                anniversary = _month_day(ws.cell(row, 9).value)
+
+                # 규정마다 첫 줄이 기본 항목, 그 뒤는 '복합 지급' 으로 간다.
+                if not item and name not in seen_rules:
+                    seen_rules.add(name)
+                    state["longterm_rules"][name] = {
+                        "kind": text(ws.cell(row, 2).value) or LT_VACATION,
+                        "escalation": escalation,
+                        "note": text(ws.cell(row, 4).value),
+                        "timing": timing,
+                        "every": every,
+                        "accumulate": accumulate,
+                        "anniversary": anniversary,
+                    }
+                    continue
+                extra.append([
+                    name, item, text(ws.cell(row, 2).value) or LT_VACATION,
+                    escalation, timing, every, "Y" if accumulate else "",
+                    anniversary, text(ws.cell(row, 4).value),
+                ])
+            state["longterm_items"] = extra
 
         if EXIT_CAUSE_SHEET in wb.sheetnames:
             ws = wb[EXIT_CAUSE_SHEET]
@@ -587,6 +667,24 @@ def _parse_cell(token: str) -> Any:
     except ValueError:
         return token
     return number / 100.0 if percent else number
+
+
+def _percent(value: object) -> str:
+    """비율 셀을 화면 표기로. ``0.03`` → ``3%``."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value:
+        return f"{float(value) * 100:g}%"
+    return ""
+
+
+def _month_day(value: object) -> str:
+    """지급일 셀을 ``MM-DD`` 로. 엑셀이 날짜로 바꿔 둔 것도 받는다."""
+    import datetime as _dt
+
+    if isinstance(value, _dt.datetime):
+        value = value.date()
+    if isinstance(value, _dt.date):
+        return f"{value.month:02d}-{value.day:02d}"
+    return text(value)
 
 
 def _parse_escalation(token: str) -> float:
