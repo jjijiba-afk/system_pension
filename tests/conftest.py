@@ -110,6 +110,128 @@ def _write_retired(ws) -> None:
         ws.cell(row, 24, "판관비")
 
 
+# ── 1)일반사항 ──────────────────────────────────────────────────
+# 실제 자료요청서의 행 배치를 그대로 옮겼다. 금액도 실제 파일의 것을 쓴다 —
+# 검산줄이 맞아떨어지는 조합이라야 시험이 의미가 있다.
+
+OBLIGATION_ROWS = (
+    ("(+)증가", "계열사 전입", 1_742_800_303.0),
+    ("", "합병", 0.0),
+    ("(-)감소", "퇴직금 지급액", 129_623_571.0),
+    ("", "중간정산금", 0.0),
+    ("", "DC전환", 1_016_614_322.0),
+    ("", "퇴직위로금", 0.0),
+    ("", "계열사 전출", 0.0),
+    ("", "사업처분/분할", 0.0),
+)
+
+ASSET_ROWS = (
+    ("(+)증가", "부담금납입", 1_710_353_902.0),
+    ("", "이자수익", 415_974_575.0),
+    ("", "계열사 전입", 0.0),
+    ("", "합병", 0.0),
+    ("(-)감소", "퇴직금", 129_623_571.0),
+    ("", "중간정산금", 0.0),
+    ("", "DC전환", 1_016_614_322.0),
+    ("", "계열사 전출", 0.0),
+    ("", "사업처분/분할", 0.0),
+    ("", "운용관리수수료", 12_704_896.0),
+    ("", "자산관리수수료", 17_786_853.0),
+)
+
+ASSET_OPENING = 12_044_373_875.0
+ASSET_CLOSING = 12_993_972_710.0
+
+
+def write_general_sheet(
+    ws,
+    *,
+    period=(dt.date(2025, 1, 1), dt.date(2025, 12, 31)),
+    grade: str = "AA+",
+    payout: dict[str, str] | None = None,
+    obligation=OBLIGATION_ROWS,
+    assets=ASSET_ROWS,
+    opening: float = ASSET_OPENING,
+    closing: float = ASSET_CLOSING,
+    national_pension: float = 0.0,
+    breakdown=(("⑴ 현금 및 현금등가물", ASSET_CLOSING),),
+    longterm: tuple[float, float] | None = None,
+) -> None:
+    """``1)일반사항`` 시트를 자료요청서 서식대로 채운다."""
+    if period is not None:
+        ws.cell(22, 2, "2.")
+        ws.cell(22, 3, "대상 회계기간")
+        ws.cell(23, 3, "기시")
+        ws.cell(23, 4, "기말")
+        ws.cell(24, 3, period[0])
+        ws.cell(24, 4, period[1])
+
+    ws.cell(49, 3, "할인율 회사채 신용등급")
+    ws.cell(53, 3, grade)
+
+    if obligation is not None:
+        ws.cell(65, 3, "1) 퇴직급여추계액 변동내역 (발생기준 작성)")
+        ws.cell(66, 3, "구분")
+        ws.cell(66, 5, "추계액")
+        for offset, (group, label, amount) in enumerate(obligation):
+            row = 67 + offset
+            if group:
+                ws.cell(row, 3, group)
+            ws.cell(row, 4, label)
+            ws.cell(row, 5, amount)
+
+    head = 67 + (len(obligation) if obligation else 0) + 1
+    if assets is not None:
+        ws.cell(head, 3, "2) 사외적립자산 변동내역 (현금기준 작성)")
+        ws.cell(head + 1, 3, "구분")
+        ws.cell(head + 1, 5, "DB퇴직연금,\n퇴직보험")
+        ws.cell(head + 1, 6, "국민연금전환금")
+        ws.cell(head + 1, 7, "합계")
+        ws.cell(head + 2, 3, dt.datetime(2025, 1, 1))
+        ws.cell(head + 2, 5, opening)
+        ws.cell(head + 2, 7, opening)
+        for offset, (group, label, amount) in enumerate(assets):
+            row = head + 3 + offset
+            if group:
+                ws.cell(row, 3, group)
+            ws.cell(row, 4, label)
+            ws.cell(row, 5, amount)
+            ws.cell(row, 7, amount)
+        last = head + 3 + len(assets)
+        ws.cell(last, 3, dt.datetime(2025, 12, 31))
+        ws.cell(last, 5, closing - national_pension)
+        if national_pension:
+            ws.cell(last, 6, national_pension)
+        ws.cell(last, 7, closing)
+        ws.cell(last + 1, 3, "검증")
+
+        detail = last + 3
+        ws.cell(detail, 3, "3) 사외적립자산 세부내역")
+        ws.cell(detail + 2, 3, "구분")
+        ws.cell(detail + 2, 5, "금액")
+        for offset, (label, amount) in enumerate(breakdown):
+            ws.cell(detail + 3 + offset, 3, label)
+            ws.cell(detail + 3 + offset, 5, amount)
+        ws.cell(detail + 3 + len(breakdown), 3, "합계")
+        ws.cell(detail + 3 + len(breakdown), 5, sum(a for _, a in breakdown))
+
+    for key, row in PAYOUT_ROWS.items():
+        ws.cell(row, 5, (payout or {}).get(key, ""))
+
+    if longterm is not None:
+        ws.cell(130, 3, "장기근속 지급액")
+        ws.cell(130, 5, longterm[0])
+        ws.cell(131, 3, "장기근속 받은금액")
+        ws.cell(131, 5, longterm[1])
+
+
+#: 6번 '회사의 퇴직금 지급규정' 항목의 행 배치.
+PAYOUT_ROWS = {
+    "eligibility": 110, "service_period": 111, "formula": 112, "base_wage": 113,
+    "staff_nra": 114, "executive_nra": 115,
+}
+
+
 @pytest.fixture
 def roster_path(tmp_path: Path) -> Path:
     """원본과 같은 시트 구조를 가진 명부 워크북."""

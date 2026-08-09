@@ -187,10 +187,21 @@ def find_sheet(workbook: Workbook, *aliases: str) -> Sheet | None:
 
 
 def _simplify(name: str) -> str:
-    """``2)재직자명부`` → ``재직자명부``. 번호 접두사·공백·괄호를 걷어낸다."""
+    """``2)재직자명부-2025`` → ``재직자명부``.
+
+    번호 접두사와 공백·괄호를 걷어내고, 뒤에 붙은 꼬리표도 뗀다. 실제 명부에서
+    ``2)재직자명부-2025`` · ``3)퇴직자명부-해당X`` 처럼 연도나 메모를 붙여 오는
+    일이 잦은데, 그것 때문에 시트를 못 찾으면 파일이 통째로 안 열린다.
+    """
     text = str(name).strip()
     # 앞의 "2)" "3." "1_" 같은 번호 표기를 떼어 낸다.
     index = 0
     while index < len(text) and (text[index].isdigit() or text[index] in ")].-_ "):
         index += 1
-    return text[index:].replace(" ", "") or text.replace(" ", "")
+    text = text[index:].replace(" ", "") or text.replace(" ", "")
+    # 뒤의 "-2025" "-해당X" 같은 꼬리표를 뗀다.
+    for mark in ("-", "_", "("):
+        head = text.split(mark)[0]
+        if head:
+            text = head
+    return text

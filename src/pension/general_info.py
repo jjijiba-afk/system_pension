@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from dataclasses import dataclass, field
+from typing import Final
 
 from .actuarial import (
     FRACTION_DOWN,
@@ -32,7 +34,13 @@ from .actuarial import (
 )
 from .normalize import text
 
-__all__ = ["GeneralInfo", "PayoutRuleDraft", "read_general_info"]
+__all__ = [
+    "AssetMovement",
+    "GeneralInfo",
+    "ObligationMovement",
+    "PayoutRuleDraft",
+    "read_general_info",
+]
 
 GENERAL_SHEET = "일반사항"
 
@@ -77,12 +85,114 @@ class PayoutRuleDraft:
 
 
 @dataclass(slots=True)
+class ObligationMovement:
+    """5-1) 퇴직급여추계액 변동내역. 증감표의 지급·전입 줄에 그대로 쓴다."""
+
+    transfer_in: float = 0.0
+    """계열사 전입 (받은 금액)."""
+    merger_in: float = 0.0
+    """합병으로 받은 금액."""
+    benefits_paid: float = 0.0
+    """퇴직금 지급액(중간정산·DC전환·위로금·전출·사업처분 제외)."""
+    settlement_paid: float = 0.0
+    """중간정산금."""
+    dc_converted: float = 0.0
+    """DC 전환 지급액."""
+    other_paid: float = 0.0
+    """퇴직위로금(명예퇴직금 등)."""
+    transfer_out: float = 0.0
+    """계열사 전출."""
+    disposal: float = 0.0
+    """사업처분·분할."""
+
+    def is_empty(self) -> bool:
+        return not any(
+            (self.transfer_in, self.merger_in, self.benefits_paid,
+             self.settlement_paid, self.dc_converted, self.other_paid,
+             self.transfer_out, self.disposal)
+        )
+
+
+@dataclass(slots=True)
+class AssetMovement:
+    """5-2) 사외적립자산 변동내역과 5-3) 세부내역.
+
+    담당자가 신탁 명세서를 보고 이미 채워 둔 표다. 화면에 다시 옮겨 적게 하면
+    스무 개 넘는 숫자를 손으로 나르는 셈이라, 여기서 그대로 읽는다.
+    """
+
+    opening: float = 0.0
+    closing: float = 0.0
+    contributions: float = 0.0
+    """부담금 납입액."""
+    actual_return: float = 0.0
+    """장부상 이자수익. 재측정손익 검산에 쓴다."""
+    transfer_in: float = 0.0
+    merger_in: float = 0.0
+    benefits_paid: float = 0.0
+    settlement_paid: float = 0.0
+    dc_converted: float = 0.0
+    transfer_out: float = 0.0
+    disposal: float = 0.0
+    management_fee: float = 0.0
+    """운용관리수수료."""
+    custody_fee: float = 0.0
+    """자산관리수수료."""
+    national_pension: float = 0.0
+    """국민연금전환금 기말 잔액. 별도 열로 관리된다."""
+    breakdown: dict[str, float] = field(default_factory=dict)
+    """자산 분류별 공정가치(문단 142 공시)."""
+
+    def is_empty(self) -> bool:
+        return not (self.opening or self.closing or self.contributions)
+
+    @property
+    def total_paid(self) -> float:
+        """자산에서 빠져나간 금액 전부(수수료 포함)."""
+        return (
+            self.benefits_paid + self.settlement_paid + self.dc_converted
+            + self.transfer_out + self.disposal
+            + self.management_fee + self.custody_fee
+        )
+
+    @property
+    def total_received(self) -> float:
+        """자산으로 들어온 금액(부담금 제외)."""
+        return self.transfer_in + self.merger_in
+
+    @property
+    def difference(self) -> float:
+        """검산 차이. 기초 + 유입 − 유출 − 기말.
+
+        서식의 '검증' 줄과 같은 계산이다. 0 이 아니면 회사가 보내온 표 자체가
+        맞지 않는다는 뜻이므로, 조용히 쓰지 말고 담당자에게 알려야 한다.
+        """
+        return (
+            self.opening + self.contributions + self.actual_return
+            + self.total_received - self.total_paid - self.closing
+        )
+
+
+@dataclass(slots=True)
 class GeneralInfo:
     """``1)일반사항`` 에서 읽은 것 전부."""
 
     raw: dict[str, str] = field(default_factory=dict)
     """항목 → 원문."""
     draft: PayoutRuleDraft = field(default_factory=PayoutRuleDraft)
+
+    period_start: _dt.date | None = None
+    """2번 대상 회계기간 기시. 산출 시작일로 쓴다."""
+    period_end: _dt.date | None = None
+    """2번 대상 회계기간 기말. 산출기준일로 쓴다."""
+    credit_grade: str = ""
+    """4번 할인율 회사채 신용등급."""
+    obligation: ObligationMovement = field(default_factory=ObligationMovement)
+    assets: AssetMovement = field(default_factory=AssetMovement)
+    longterm_paid: float = 0.0
+    """7-2) 기중 장기근속 지급액."""
+    longterm_received: float = 0.0
+    """7-2) 기중 장기근속 받은 금액."""
 
     @property
     def has_payout_section(self) -> bool:
@@ -172,6 +282,230 @@ def _parse_rounding(formula: str, base_wage: str) -> tuple[int | None, str]:
     return None, ""
 
 
+# ── 5·7번 항목: 표에서 숫자 긁어오기 ────────────────────────────
+# 행 번호를 못박지 않고 **라벨로** 찾는다. 6번 지급규정과 달리 이 표들은
+# 회사가 줄을 넣고 빼는 일이 있어, 고정 행으로 읽으면 엉뚱한 값을 집는다.
+
+#: 라벨 → 필드. 앞뒤 공백·괄호 표기가 흔들려서 부분일치로 본다.
+_OBLIGATION_LABELS: Final = (
+    ("계열사 전입", "transfer_in"),
+    ("합병", "merger_in"),
+    ("퇴직금 지급액", "benefits_paid"),
+    ("중간정산금", "settlement_paid"),
+    ("DC전환", "dc_converted"),
+    ("퇴직위로금", "other_paid"),
+    ("계열사 전출", "transfer_out"),
+    ("사업처분", "disposal"),
+)
+
+_ASSET_LABELS: Final = (
+    ("부담금납입", "contributions"),
+    ("부담금 납입", "contributions"),
+    ("이자수익", "actual_return"),
+    ("계열사 전입", "transfer_in"),
+    ("합병", "merger_in"),
+    ("퇴직금", "benefits_paid"),
+    ("중간정산금", "settlement_paid"),
+    ("DC전환", "dc_converted"),
+    ("계열사 전출", "transfer_out"),
+    ("사업처분", "disposal"),
+    ("운용관리수수료", "management_fee"),
+    ("자산관리수수료", "custody_fee"),
+)
+
+
+#: 부호가 없는 항목들. 표의 '(-)감소' 칸을 음수로 적는 회사가 있는데, 그대로
+#: 빼면 유출이 유입으로 뒤집혀 자산이 유출액의 두 배만큼 부풀려진다. 방향은
+#: 항목 이름이 이미 정해 놓았으므로 크기만 쓴다. ``actual_return`` 만 예외다 —
+#: 운용손실은 실제로 음수다.
+_MAGNITUDE_FIELDS: Final = frozenset(
+    {
+        "transfer_in", "merger_in", "contributions", "benefits_paid",
+        "settlement_paid", "dc_converted", "other_paid", "transfer_out",
+        "disposal", "management_fee", "custody_fee",
+    }
+)
+
+
+def _opt_number(value: object) -> float | None:
+    """셀 값을 금액으로. 빈 칸과 숫자 0 을 구별해야 해서 ``None`` 을 쓴다."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _number(value: object) -> float:
+    """셀 값을 금액으로. 숫자가 아니면 0."""
+    return _opt_number(value) or 0.0
+
+
+def _find_row(ws, needle: str, start: int = 1, limit: int = 200) -> int:
+    """``needle`` 이 들어간 첫 행. 못 찾으면 0."""
+    for row in range(start, min(ws.max_row, limit) + 1):
+        for col in range(1, min(ws.max_column, 8) + 1):
+            if needle in text(ws.cell(row, col).value):
+                return row
+    return 0
+
+
+def _row_label(ws, row: int) -> str:
+    """그 행의 항목 이름. 구분 열(B~D) 중 글자가 있는 마지막 칸을 쓴다."""
+    for col in (4, 3, 2):
+        label = text(ws.cell(row, col).value)
+        if label and not label.startswith(("(+)", "(-)")):
+            return label
+    return ""
+
+
+def _row_amount(ws, row: int, columns: tuple[int, ...]) -> float:
+    """그 행의 금액. 앞 열이 비어 있으면 다음 열(합계)을 본다."""
+    for col in columns:
+        amount = _number(ws.cell(row, col).value)
+        if amount:
+            return amount
+    return 0.0
+
+
+def _read_obligation(ws) -> ObligationMovement:
+    head = _find_row(ws, "퇴직급여추계액 변동내역")
+    result = ObligationMovement()
+    if not head:
+        return result
+
+    # 바로 다음 표(사외적립자산)에서 멈춘다. 회사가 줄을 하나만 끼워 넣어도
+    # 고정 길이로 훑으면 그 표까지 넘어가는데, 거기에도 '계열사 전입' 같은
+    # 이름이 그대로 있어 방금 읽은 금액을 0 으로 덮어쓴다.
+    stop = _find_row(ws, "사외적립자산 변동내역", start=head + 1) or (head + 14)
+    for row in range(head + 1, stop):
+        label = _row_label(ws, row)
+        if not label:
+            continue
+        for needle, field_name in _OBLIGATION_LABELS:
+            if needle in label:
+                if not getattr(result, field_name):
+                    # 방향은 항목 이름이 정한다 — '(-)감소' 를 음수로 적어 온
+                    # 표를 그대로 빼면 지급액이 전입으로 뒤집힌다.
+                    setattr(result, field_name, abs(_row_amount(ws, row, (5,))))
+                break
+    return result
+
+
+@dataclass(slots=True, frozen=True)
+class _AssetColumns:
+    """5-2) 표의 금액 열 배치. 머리글에서 찾는다.
+
+    열을 못박으면 회사가 신탁사별로 칸을 늘렸을 때 엉뚱한 곳을 읽는다.
+    """
+
+    db: int = 5
+    pension: int = 6
+    total: int = 7
+
+
+def _asset_columns(ws, header: int) -> _AssetColumns:
+    if not header:
+        return _AssetColumns()
+    db = pension = total = 0
+    for col in range(4, min(ws.max_column, 12) + 1):
+        label = text(ws.cell(header, col).value)
+        if not db and ("DB퇴직연금" in label or "퇴직보험" in label):
+            db = col
+        if not pension and "국민연금전환금" in label:
+            pension = col
+        if not total and "합계" in label:
+            total = col
+    return _AssetColumns(db=db or 5, pension=pension, total=total)
+
+
+def _asset_amount(ws, row: int, cols: _AssetColumns) -> float:
+    """5-2) 표 한 줄의 금액.
+
+    합계 열을 먼저 믿으면 안 된다. 담당자가 줄을 밀려 적어 합계가 한 칸
+    어긋난 파일이 실제로 있었고, 그대로 읽으면 수수료가 두 번 잡힌다.
+    구성 열(DB + 국민연금전환금)이 적혀 있으면 그것을 더하고, 비어 있을
+    때만 합계를 쓴다.
+    """
+    db = _opt_number(ws.cell(row, cols.db).value) if cols.db else None
+    if db is not None:
+        pension = (
+            _opt_number(ws.cell(row, cols.pension).value) if cols.pension else None
+        )
+        return db + (pension or 0.0)
+    if cols.total:
+        return _number(ws.cell(row, cols.total).value)
+    return 0.0
+
+
+def _read_assets(ws) -> AssetMovement:
+    head = _find_row(ws, "사외적립자산 변동내역")
+    result = AssetMovement()
+    if not head:
+        return result
+
+    # 표의 머리글(구분 | DB퇴직연금 | 국민연금전환금 | 합계) 바로 다음 줄이
+    # 기초 잔액, '검증' 바로 앞줄이 기말 잔액이다. 두 줄 모두 항목 이름 대신
+    # 날짜가 적혀 있어 라벨로는 찾을 수 없다.
+    header = _find_row(ws, "국민연금전환금", start=head)
+    verify = _find_row(ws, "검증", start=head)
+
+    # 국민연금전환금까지 더한 금액을 쓴다. DB퇴직연금 열만 보면 전환금이
+    # 통째로 빠져, 전환금을 가진 회사에서 자산이 그만큼 모자라게 잡힌다.
+    cols = _asset_columns(ws, header)
+
+    if header:
+        result.opening = _asset_amount(ws, header + 1, cols)
+    if verify:
+        result.closing = _asset_amount(ws, verify - 1, cols)
+        if cols.pension:
+            result.national_pension = _number(ws.cell(verify - 1, cols.pension).value)
+
+    last = verify - 1 if verify else head + 18
+    for row in range(header + 1 if header else head + 1, last):
+        label = _row_label(ws, row)
+        if not label:
+            continue
+        for needle, field_name in _ASSET_LABELS:
+            if needle in label:
+                # 라벨이 여러 개 걸리면(퇴직금 vs 퇴직금 지급액) 먼저 맞는 것을 쓴다.
+                if not getattr(result, field_name):
+                    amount = _asset_amount(ws, row, cols)
+                    if field_name in _MAGNITUDE_FIELDS:
+                        amount = abs(amount)
+                    setattr(result, field_name, amount)
+                break
+
+    detail = _find_row(ws, "사외적립자산 세부내역")
+    if detail:
+        for row in range(detail + 1, detail + 14):
+            label = text(ws.cell(row, 3).value)
+            if not label or "합계" in label:
+                continue
+            amount = _row_amount(ws, row, (5, 6, 7))
+            if amount:
+                # '⑴ 현금 및 현금등가물' → '현금 및 현금등가물'
+                clean = re.sub(r"^[^가-힣A-Za-z]+", "", label)
+                result.breakdown[clean] = amount
+    return result
+
+
+def _read_period(ws) -> tuple[_dt.date | None, _dt.date | None]:
+    """2번 대상 회계기간(기시·기말)."""
+    from .dates import to_date
+
+    head = _find_row(ws, "대상 회계기간")
+    if not head:
+        return None, None
+    for row in range(head, head + 5):
+        for col in (2, 3, 4):
+            if "기시" not in text(ws.cell(row, col).value):
+                continue
+            return (
+                to_date(ws.cell(row + 1, col).value),
+                to_date(ws.cell(row + 1, col + 1).value),
+            )
+    return None, None
+
+
 def read_general_info(workbook) -> GeneralInfo:
     """``1)일반사항`` 시트를 읽어 지급규정 초안을 만든다.
 
@@ -185,6 +519,29 @@ def read_general_info(workbook) -> GeneralInfo:
     if ws is None:
         info.draft.unread.append("1)일반사항 시트가 없습니다")
         return info
+
+    info.period_start, info.period_end = _read_period(ws)
+    info.obligation = _read_obligation(ws)
+    info.assets = _read_assets(ws)
+
+    grade_row = _find_row(ws, "회사채 신용등급")
+    if grade_row:
+        grades = ("AAA", "AA+", "AA0", "AA-", "A+", "A0", "A-", "국고채")
+        for row in range(grade_row, grade_row + 8):
+            for col in range(2, 7):
+                candidate = text(ws.cell(row, col).value).upper()
+                if candidate in grades:
+                    info.credit_grade = candidate
+                    break
+            if info.credit_grade:
+                break
+
+    paid_row = _find_row(ws, "장기근속 지급액")
+    if paid_row:
+        info.longterm_paid = _row_amount(ws, paid_row, (5, 4))
+    received_row = _find_row(ws, "장기근속 받은금액")
+    if received_row:
+        info.longterm_received = _row_amount(ws, received_row, (5, 4))
 
     for key, row in _ROWS.items():
         value = ""

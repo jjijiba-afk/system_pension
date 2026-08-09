@@ -282,7 +282,7 @@ class TestPipelineUsesPayoutSheet:
     def test_payout_sheet_overrides_the_roster(self, tmp_path) -> None:
         from pension.pipeline import load_inputs
 
-        config, roster, _assumptions, _log = load_inputs(
+        config, roster, _assumptions, _log, _g = load_inputs(
             self._roster(tmp_path), self._assumptions(tmp_path)
         )
         assert not config.inferred
@@ -300,7 +300,7 @@ class TestPipelineUsesPayoutSheet:
              "지급률": (["근속연수", "과장"], [[0, 1.0]])},
             None, None,
         )
-        config, roster, _a, _log = load_inputs(self._roster(tmp_path), path)
+        config, roster, _a, _log, _g = load_inputs(self._roster(tmp_path), path)
         # Input 시트가 없으니 명부에서 직군을 끌어낸 잠정 설정이다.
         assert config.inferred
         assert {m.job_group for m in roster.active} == {"과장"}

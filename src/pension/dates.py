@@ -104,6 +104,11 @@ def parse_roster_date(value: object, base_year: int) -> _dt.date | None:
         raise DateParseError(str(value), "논리값은 날짜가 될 수 없습니다")
 
     if isinstance(value, (int, float)):
+        # 0 은 '해당 없음' 이다. 중간정산일·전입일처럼 대부분 비는 칸에 회사가
+        # 빈칸 대신 0 을 채워 보내는 일이 흔하다 — 실제 명부 한 건에서 이것만으로
+        # 오류가 225건 났다. 엑셀 일련번호 0(1899-12-30)일 리도 없다.
+        if value == 0:
+            return None
         # VBA 는 셀 값을 String 변수(datetr)로 받으므로 숫자 셀은 자릿수 기반
         # 판정을 탄다(19801231 → yyyymmdd, 801231 → yymmdd). 날짜 서식이 잡힌
         # 셀은 openpyxl 이 이미 datetime 으로 넘겨주므로 위에서 처리된다.

@@ -19,7 +19,7 @@ from .actuarial import attained_age
 from .config import CalculationConfig
 from .errors import IssueLog, Severity
 from .models import ActiveMember, RetiredMember, Roster
-from .normalize import BenefitPlan, EmployeeType, RetirementReason, is_ambiguous_reason
+from .normalize import BenefitPlan, EmployeeType, RetirementReason, is_ambiguous_reason, text
 from .readers import ACTIVE_COLUMNS, ACTIVE_SHEET, RETIRED_COLUMNS, RETIRED_SHEET
 
 __all__ = ["validate_active", "validate_retired", "validate_roster"]
@@ -123,11 +123,47 @@ def _check_duplicate_ids(members, sheet: str, log: IssueLog, code: str) -> None:
             )
 
 
+def _is_longterm_only(members: list[ActiveMember]) -> bool:
+    """장기급여만 평가하는 명부인지.
+
+    자료요청서 재직자명부 머리글에 "장기급여만 평가시 미작성" 이라고 적힌 칸이
+    여럿이다 — 30일 평균임금·제도구분이 그렇다. 장기근속 포상만 평가할 때는
+    회사가 그 칸을 정말로 비워 보내는데, 이를 퇴직급여 명부로 보고 검증하면
+    100명 명부에 오류가 200건씩 쏟아져 정작 볼 것을 덮어 버린다.
+
+    판정은 세 가지를 모두 만족할 때만 한다.
+
+    1. 한 명도 임금이 없다 — 일부만 빠진 것은 진짜 누락이다.
+    2. 장기급여 산출대상(``Y``)이 한 명이라도 있다 — 장기급여를 평가하려는
+       명부라는 적극적 표시다.
+    3. 사람이 셋 이상이다 — 한두 명짜리 명부에서 임금이 비면 누락으로 보는
+       편이 안전하다.
+
+    이 조건을 좁게 잡는 이유는, 잘못 판정하면 **임금 누락이라는 진짜 오류를
+    통째로 삼켜** 채무가 0 으로 나와도 아무 말이 없기 때문이다.
+    """
+    if len(members) < 3:
+        return False
+    if any(m.monthly_wage > 0 for m in members):
+        return False
+    return any(text(m.longterm_target).upper() == "Y" for m in members)
+
+
 def validate_active(members: list[ActiveMember], config: CalculationConfig, log: IssueLog) -> None:
     """재직자명부 검증 및 파생값(연령·정년연령) 채우기."""
     sheet = ACTIVE_SHEET
     _check_duplicate_ids(members, sheet, log, "JAE_DUP_ID")
     _check_names(members, sheet, log, "JAE_NAME_MISSING")
+
+    longterm_only = _is_longterm_only(members)
+    if longterm_only:
+        log.info(
+            "JAE_LONGTERM_ONLY",
+            f"재직자 {len(members):,}명 전원의 30일 평균임금이 비어 있어 "
+            "**장기급여만 평가하는 명부** 로 봅니다. 퇴직급여 채무는 산출되지 "
+            "않습니다 — 퇴직급여도 평가해야 하면 임금·제도구분을 채워 주세요",
+            sheet=sheet,
+        )
 
     for member in members:
         kw = dict(sheet=sheet, row=member.row, seq=member.seq, employee_id=member.employee_id)
@@ -195,7 +231,10 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
 
         # ── 임금 (VBA: 체크금액 미만이거나 0 이면 산출 중단) ───────
         if member.monthly_wage <= 0:
-            if member.plan is BenefitPlan.DC:
+            if longterm_only:
+                # 장기급여 전용 명부라 임금·제도구분이 비는 것이 정상이다.
+                pass
+            elif member.plan is BenefitPlan.DC:
                 # DC 가입자는 확정급여채무가 생기지 않으므로 평균임금이 없어도
                 # 산출에 지장이 없다. 실제 명부에서 DC 가입자 임금란을 비우는 일이
                 # 흔한데, 이를 오류로 막으면 명부 전체가 산출되지 않는다.
@@ -217,7 +256,7 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
             )
 
         # ── 제도구분 (VBA: 공란이면 산출 중단) ─────────────────────
-        if member.plan is None:
+        if member.plan is None and not longterm_only:
             detail = (
                 f"'{member.plan_raw}' 은(는) 해석할 수 없는 값입니다"
                 if member.plan_raw else "비어 있습니다"
@@ -289,7 +328,13 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
                 )
 
 
-def validate_retired(members: list[RetiredMember], config: CalculationConfig, log: IssueLog) -> None:
+def validate_retired(
+    members: list[RetiredMember],
+    config: CalculationConfig,
+    log: IssueLog,
+    *,
+    longterm_only: bool = False,
+) -> None:
     """퇴직자명부 검증 및 파생값 채우기."""
     sheet = RETIRED_SHEET
     _check_duplicate_ids(members, sheet, log, "TOI_DUP_ID")
@@ -331,7 +376,7 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
         # 산출(인원 기준)이라 금액이 없어도 쓸 수 있다.
         short_service = 0.0 < member.service_years() < 1.0
 
-        if member.plan is None:
+        if member.plan is None and not longterm_only:
             if short_service:
                 log.warning(
                     "TOI_PLAN_MISSING_SHORT",
@@ -400,7 +445,7 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
             and member.transfer_out_payment > 0
         )
 
-        if member.total_payment <= 0 and not paid_as_transfer:
+        if member.total_payment <= 0 and not paid_as_transfer and not longterm_only:
             if short_service:
                 log.warning(
                     "TOI_TOTAL_MISSING_SHORT",
@@ -458,8 +503,9 @@ def validate_retired(members: list[RetiredMember], config: CalculationConfig, lo
 
 def validate_roster(roster: Roster, config: CalculationConfig, log: IssueLog) -> IssueLog:
     """명부 전체 검증. 이슈는 ``log`` 에 누적되며 같은 객체를 돌려준다."""
+    longterm_only = _is_longterm_only(roster.active)
     validate_active(roster.active, config, log)
-    validate_retired(roster.retired, config, log)
+    validate_retired(roster.retired, config, log, longterm_only=longterm_only)
     _cross_check(roster, config, log)
     return log
 
