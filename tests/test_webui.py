@@ -767,6 +767,55 @@ class TestPlanAssetsAndAmendment:
             report["values"]["dbo"] - 17_200_000_000
         )
 
+    def test_general_info_hands_the_screen_its_input_values(self, tmp_path) -> None:
+        """산출 화면의 칸에 그대로 넣을 수 있는 형태로 나와야 한다.
+
+        엔진이 알아서 읽는 것만으로는 부족하다. 칸이 비어 있으면 담당자는
+        아무것도 읽히지 않은 줄 알고 신탁 명세서를 보고 손으로 다시 적는다.
+        """
+        case = self._pack(tmp_path)
+        info = call("general_info", path=case["roster"])
+
+        fields = info["fields"]
+        assert fields["base_date"]
+        assert fields["period_start"] < fields["base_date"]
+        assert float(fields["asset_opening"]) > 0
+        assert float(fields["asset_closing"]) > 0
+        assert float(fields["asset_contributions"]) > 0
+        assert float(fields["asset_paid"]) >= 0
+        assert info["grade"]
+        assert any("사외적립자산" in line for line in info["found"])
+        assert info["problems"] == []
+
+    def test_it_flags_a_table_that_does_not_balance(self, tmp_path) -> None:
+        """회사 표가 스스로 안 맞으면 넣어 주되 반드시 알린다."""
+        import openpyxl
+
+        case = self._pack(tmp_path)
+        wb = openpyxl.load_workbook(case["roster"])
+        ws = wb["1)일반사항"]
+        # 기말 잔액을 흔든다. 구성 열(DB퇴직연금)이 합계보다 우선하므로 거기를 고친다.
+        ws.cell(90, 5, float(ws.cell(90, 5).value) + 9_103_134)
+        broken = str(tmp_path / "안맞는표.xlsx")
+        wb.save(broken)
+
+        info = call("general_info", path=broken)
+        assert info["fields"]["asset_closing"]
+        assert any("맞지 않습니다" in p for p in info["problems"])
+
+    def test_a_roster_without_the_sheet_hands_back_nothing(self, tmp_path) -> None:
+        import openpyxl
+
+        case = self._pack(tmp_path)
+        wb = openpyxl.load_workbook(case["roster"])
+        del wb["1)일반사항"]
+        stripped = str(tmp_path / "일반사항없음.xlsx")
+        wb.save(stripped)
+
+        info = call("general_info", path=stripped)
+        assert info["fields"] == {}
+        assert info["found"] == []
+
     def test_the_roster_sheet_fills_the_asset_table_by_itself(self, tmp_path) -> None:
         """명부의 ``1)일반사항`` 에 표가 있으면 손으로 안 넣어도 나와야 한다."""
         case = self._pack(tmp_path)
