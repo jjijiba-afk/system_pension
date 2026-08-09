@@ -340,7 +340,13 @@ def _roster_groups(request: dict) -> dict[str, Any]:
 
 
 def _general_info(request: dict) -> dict[str, Any]:
-    """자료요청서 '1)일반사항' 6번에서 지급규정 초안을 읽는다."""
+    """자료요청서 ``1)일반사항`` 에서 화면에 채울 것을 전부 읽는다.
+
+    6번 지급규정 초안은 ``values`` 로(지급규정 탭), 담당자가 이미 채워 보낸
+    2·4·5번 표는 ``fields`` 로(산출 탭 입력칸) 나간다. 산출 엔진은 칸이 비면
+    이 표를 알아서 쓰지만, **화면에 보이지 않으면 담당자는 아무것도 읽히지
+    않은 줄 안다.** 값을 눈에 보이게 넣어 두어야 확인하고 고칠 수 있다.
+    """
     from .general_info import read_general_info
     from .workbook import open_workbook
 
@@ -364,10 +370,46 @@ def _general_info(request: dict) -> dict[str, Any]:
         values["fraction"] = draft.service_fraction
     if draft.rounding_unit is not None:
         values["unit"] = form.UNIT_LABELS.get(draft.rounding_unit, "없음")
+
+    # ── 산출 탭 입력칸 ──────────────────────────────────────────
+    fields: dict[str, str] = {}
+    found: list[str] = []
+    if info.period_end is not None:
+        fields["base_date"] = info.period_end.isoformat()
+        found.append(f"산출기준일 {info.period_end}")
+    if info.period_start is not None:
+        fields["period_start"] = info.period_start.isoformat()
+        found.append(f"시작일 {info.period_start}")
+
+    assets = info.assets
+    if not assets.is_empty():
+        # 자산에서 나간 돈은 전부 뺀다 — 수수료도 자산을 줄인다.
+        paid = assets.total_paid - assets.total_received
+        fields.update(
+            asset_opening=f"{assets.opening:.0f}",
+            asset_contributions=f"{assets.contributions:.0f}",
+            asset_paid=f"{paid:.0f}",
+            asset_closing=f"{assets.closing:.0f}",
+        )
+        found.append(
+            f"사외적립자산 기초 {assets.opening:,.0f}원 → 기말 {assets.closing:,.0f}원"
+        )
+
+    problems: list[str] = []
+    if not assets.is_empty() and round(assets.difference) != 0:
+        problems.append(
+            f"사외적립자산 변동내역이 {assets.difference:,.0f}원 맞지 않습니다. "
+            "회사가 보내온 표를 확인하세요"
+        )
+
     return {
         "values": values,
         "evidence": dict(draft.evidence),
         "unread": list(draft.unread),
+        "fields": fields,
+        "found": found,
+        "problems": problems,
+        "grade": info.credit_grade,
     }
 
 

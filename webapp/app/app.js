@@ -1108,12 +1108,73 @@ $("roster-saved").addEventListener("change", () => {
   const name = $("roster-saved").value;
   if (!name) {
     $("roster-hint").textContent = "Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서";
+    $("general-filled").style.display = "none";
     return;
   }
   $("roster").value = "";
   $("roster-hint").textContent =
     `저장된 명부 '${name}' 를 사용합니다. 새 파일을 고르면 그 파일이 우선합니다.`;
+  fillFromGeneralSheet();
 });
+
+// 명부를 고르면 '1)일반사항' 에 담당자가 채워 보낸 것을 입력칸에 옮겨 넣는다.
+// 산출 엔진은 칸이 비어도 그 표를 알아서 쓰지만, 화면에 보이지 않으면
+// 담당자는 아무것도 읽히지 않은 줄 알고 손으로 다시 적는다.
+$("roster").addEventListener("change", () => {
+  if ($("roster").files[0]) fillFromGeneralSheet();
+});
+
+//: 명부에서 채워 넣은 칸들. 사람이 친 값과 갈라 두어야 한다.
+//
+// 다른 단체의 명부로 바꿨을 때, 앞 단체의 숫자를 '사람이 넣은 값' 으로 보고
+// 남겨 두면 남의 회사 자산으로 산출된다. 우리가 채운 칸은 새 명부 값으로
+// 바꾸고, 새 명부에 없는 항목이면 지운다.
+const autoFilled = new Set();
+
+/** 사람이 손댄 칸은 그 뒤로 명부가 덮어쓰지 않는다. */
+for (const id of ["base_date", "period_start", "asset_opening",
+                  "asset_contributions", "asset_paid", "asset_closing"]) {
+  $(id).addEventListener("input", () => autoFilled.delete(id));
+}
+
+async function fillFromGeneralSheet() {
+  const note = $("general-filled");
+  note.style.display = "none";
+  note.className = "hint";
+  try {
+    const info = py("general_info", { path: await rosterIntoFS() });
+    const fields = info.fields || {};
+    const kept = [];
+    for (const [id, value] of Object.entries(fields)) {
+      const box = $(id);
+      if (!box) continue;
+      if (box.value.trim() && !autoFilled.has(id)) { kept.push(id); continue; }
+      box.value = value;
+      autoFilled.add(id);
+    }
+    for (const id of [...autoFilled]) {
+      if (!(id in fields)) { $(id).value = ""; autoFilled.delete(id); }
+    }
+    if (info.grade && $("ed-grade")) $("ed-grade").value = info.grade;
+
+    const lines = [];
+    if (info.found?.length) {
+      lines.push("명부의 [1)일반사항] 에서 가져왔습니다 — " + info.found.join(" · "));
+    }
+    if (kept.length) {
+      lines.push("직접 입력한 칸은 그대로 두었습니다.");
+    }
+    if (info.problems?.length) {
+      lines.push("⚠ " + info.problems.join(" · "));
+      note.className = "warn-box";
+    }
+    if (!lines.length) return;
+    note.textContent = lines.join("  ");
+    note.style.display = "block";
+  } catch {
+    // 일반사항이 없는 명부(업로드용 변환본 등)가 많다. 조용히 넘어간다.
+  }
+}
 
 $("roster-save").addEventListener("click", async () => {
   const file = $("roster").files[0];
@@ -1589,6 +1650,8 @@ function useGenerated(item) {
   $("loaded-run-banner").style.display = "block";
   $("roster-hint").textContent = "시험 명부를 사용합니다. 새 파일을 고르면 대체됩니다.";
   $("tab-calc").click();
+  // 시험 명부에도 '1)일반사항' 이 들어 있다. 올린 파일과 똑같이 채워 준다.
+  fillFromGeneralSheet();
   status(`시험 명부 '${item.title}' 을(를) 산출 탭에 넣었습니다. [산출 실행]을 누르세요.`);
 }
 

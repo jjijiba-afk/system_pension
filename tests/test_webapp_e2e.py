@@ -114,6 +114,47 @@ def test_upload_run_download(page, tmp_path) -> None:
     assert payload[:2] == b"PK"
 
 
+def test_roster_fills_the_asset_boxes(page, tmp_path) -> None:
+    """명부를 고르면 '1)일반사항' 의 사외적립자산이 입력칸에 들어가야 한다.
+
+    엔진이 알아서 읽는 것만으로는 부족하다. 칸이 비어 있으면 담당자는
+    아무것도 읽히지 않은 줄 알고 신탁 명세서를 보고 손으로 다시 적는다.
+    """
+    from pension.rostergen import CASES, write_case_roster
+
+    roster = write_case_roster(CASES[0], tmp_path / "일반사항명부.xlsx")
+
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.wait_for_selector("#general-filled", state="visible", timeout=60_000)
+
+    assert page.input_value("#base_date")
+    assert page.input_value("#period_start") < page.input_value("#base_date")
+    assert float(page.input_value("#asset_opening")) > 0
+    assert float(page.input_value("#asset_closing")) > 0
+    assert "사외적립자산" in page.inner_text("#general-filled")
+
+    # 사람이 손댄 칸은 덮어쓰지 않는다 — 명부보다 나중 자료일 수 있다.
+    page.fill("#asset_opening", "1")
+    page.set_input_files("#roster", str(roster))
+    page.wait_for_selector("#general-filled", state="visible", timeout=60_000)
+    assert page.input_value("#asset_opening") == "1"
+
+    # 다른 단체로 바꾸면 **우리가 채운 칸은** 그 명부 값으로 다시 채운다.
+    # 앞 단체 숫자를 남겨 두면 남의 회사 자산으로 산출된다.
+    other = write_case_roster(CASES[1], tmp_path / "다른단체.xlsx")
+    before = page.input_value("#asset_closing")
+    page.set_input_files("#roster", str(other))
+    page.wait_for_selector("#general-filled", state="visible", timeout=60_000)
+    assert page.input_value("#asset_closing") != before
+    assert page.input_value("#asset_opening") == "1"   # 손댄 칸은 그대로
+
+    for box in ("base_date", "period_start", "asset_opening", "asset_contributions",
+                "asset_paid", "asset_closing"):
+        page.fill(f"#{box}", "")
+    page.set_input_files("#roster", [])
+
+
 def test_editor_tab_builds_assumptions_and_runs(page, tmp_path) -> None:
     """산출가정 입력 탭에서 만든 가정만으로 산출까지 이어져야 한다."""
     from pension.samples import write_sample_pack
