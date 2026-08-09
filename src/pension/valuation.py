@@ -128,6 +128,10 @@ class MemberValuation:
     """적용한 지급률 규정명."""
     withdrawal_rule: str = ""
     """적용한 중도(사망)퇴직률 규정명."""
+    progressive_service: float = 0.0
+    """누진 배수를 보전한 구간의 근속연수. 0 이면 구간을 나누지 않았다."""
+    progressive_rate: float = 0.0
+    """그 구간에 적용한 연 배수."""
 
     dbo: float = 0.0
     """확정급여채무."""
@@ -246,6 +250,38 @@ class ValuationResult:
         return {k: (int(v[0]), v[1], v[2]) for k, v in sorted(buckets.items())}
 
 
+def _service_window(member: ActiveMember) -> tuple[float, float]:
+    """이 줄이 담당하는 지급 구간을 **근속연수 눈금** 으로 옮긴다.
+
+    구간이 없으면 ``(0, 무한)`` 이라 종전과 같다. 날짜를 근속 눈금으로 바꾸는
+    이유는, 이후 계산이 전부 '기산일로부터 몇 년' 으로 돌기 때문이다.
+    """
+    if not member.has_period:
+        return 0.0, float("inf")
+
+    start = member.settlement_date or member.hire_date
+    if start is None:
+        return 0.0, float("inf")
+
+    def years_at(when: _dt.date | None, default: float) -> float:
+        if when is None:
+            return default
+        # 기준일 기준 근속에서, 그 날짜까지 남은/지난 햇수를 뺀다. 근속 산정은
+        # 회사 규칙(일할/월할)을 따르므로 같은 자로 재야 눈금이 맞는다.
+        if when <= start:
+            return 0.0
+        return member.raw_service_years(when)
+
+    window_start = years_at(member.period_start, 0.0)
+    # 종료일은 **그 날까지 포함** 이다. 다음 줄이 이튿날부터 시작하므로, 하루를
+    # 더해 두어야 두 구간이 빈틈없이 이어진다.
+    last_day = member.period_end + _dt.timedelta(days=1) if member.period_end else None
+    window_end = years_at(last_day, float("inf"))
+    if window_end < window_start:
+        return 0.0, 0.0
+    return window_start, window_end
+
+
 def _projection_years(member: ActiveMember, assumptions: Assumptions) -> int:
     """정년까지 남은 연수. 최소 1년은 투영한다."""
     remaining = member.severance_nra - member.age
@@ -280,6 +316,8 @@ def value_member(
         retirement_age=member.severance_nra,
         benefit_rule=member.rules.severance_benefit,
         withdrawal_rule=member.rules.severance_withdrawal,
+        progressive_service=max(0.0, member.progressive_service),
+        progressive_rate=member.progressive_rate,
     )
 
     if member.excluded_group:
@@ -299,7 +337,6 @@ def value_member(
     withdrawal_rule = member.rules.severance_withdrawal or member.job_group
     salary_rule = member.rules.severance_salary_increase or member.job_group
 
-    past_service = result.past_service
     years = _projection_years(member, assumptions)
     result.projection_years = years
 
@@ -309,9 +346,22 @@ def value_member(
     # 단수 처리 전 원래 근속을 따로 들고 있다가 시점마다 다시 깎는다.
     raw_past_service = member.raw_service_years(config.base_date)
 
+    # ── 지급 구간 ────────────────────────────────────────────────
+    # 같은 사번이 여러 줄로 나뉘어 오는 명부가 있다(임원 세법한도의 2019/2020
+    # 분할 등). 이 줄이 담당하는 구간만 세고, 나머지는 다른 줄이 센다.
+    window_start, window_end = _service_window(member)
+    closed = window_end <= raw_past_service
+
+    def covered(raw_service: float) -> float:
+        """총근속 ``raw_service`` 중 이 줄이 담당하는 몫."""
+        return max(0.0, min(raw_service, window_end) - window_start)
+
+    past_service = apply_fraction(covered(raw_past_service), member.service_fraction)
+    result.past_service = past_service
+
     def service_at(elapsed: float) -> float:
         """기준일로부터 ``elapsed`` 년 뒤 시점의 근속(단수 처리 반영)."""
-        return apply_fraction(raw_past_service + elapsed, member.service_fraction)
+        return apply_fraction(covered(raw_past_service + elapsed), member.service_fraction)
 
     # 수식 방식 지급률 규정이 참조하는 변수들. 표 방식이면 무시된다.
     context = {
@@ -343,6 +393,13 @@ def value_member(
 
     causes = assumptions.exit_causes
 
+    # 누진(호봉)제를 쓰다가 연봉제로 바꾼 회사는 전환 전 근속분의 누진 배수를
+    # 보전해 준다. 중간정산을 하지 않았으니 근속은 이어지고 **배수만** 구간에서
+    # 갈린다. 명부의 '누진적용 근속연수 / 누진적용 율' 이 그 구간을 말해 준다.
+    frozen_service = max(0.0, member.progressive_service)
+    frozen_rate = member.progressive_rate
+    split_benefit = frozen_service > 0.0 and frozen_rate > 0.0
+
     def multiple_at(service: float, age: float, rule_name: str = "") -> float:
         """근속 ``service`` 년까지 쌓인 지급배수. 가입자격 문턱은 보지 않는다.
 
@@ -351,9 +408,20 @@ def value_member(
         되는 근무가 **시작된 때** 부터 귀속하라고 한다. 요건 미달로 못 받는 것은
         그 시나리오의 급여액이 0 이 되는 것으로 이미 반영된다.
         """
-        return assumptions.severance_benefit.multiple(
-            rule_name or rule, service, x=age, **context
+        name = rule_name or rule
+        if not split_benefit:
+            return assumptions.severance_benefit.multiple(
+                name, service, x=age, **context
+            )
+
+        # 누진 구간까지는 보전 배수로, 그 뒤는 규정대로 이어 쌓는다.
+        if service <= frozen_service:
+            return service * frozen_rate
+        scale = assumptions.severance_benefit
+        after = scale.multiple(name, service, x=age, **context) - scale.multiple(
+            name, frozen_service, x=age, **context
         )
+        return frozen_service * frozen_rate + max(0.0, after)
 
     def parts_at(
         cause: CauseBenefit, service: float, age: float, wage: float
@@ -487,13 +555,16 @@ def value_member(
         service_t = past_service + t - 1
 
         # 임금은 해당 연도 초에 인상된다고 본다. 직군 규칙에서 끈 항목은 0 이다.
+        # 이미 끝난 지급 구간은 올리지 않는다 — 그 줄의 임금이 곧 그 시점의
+        # 기준임금이라, 지금 다시 올리면 법이 정한 기준을 넘긴다.
         increase = 0.0
-        if member.apply_base_up:
-            increase += assumptions.salary.base_up.rate(t)
-        if member.apply_promotion:
-            increase += assumptions.salary.promotion.rate(
-                salary_rule, age=age_t, service=service_t
-            )
+        if not closed:
+            if member.apply_base_up:
+                increase += assumptions.salary.base_up.rate(t)
+            if member.apply_promotion:
+                increase += assumptions.salary.promotion.rate(
+                    salary_rule, age=age_t, service=service_t
+                )
         wage *= 1.0 + increase
 
         withdrawal = (
