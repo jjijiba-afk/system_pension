@@ -551,6 +551,19 @@ def _assumption_sheet(wb, run: PensionRun) -> None:
         section("지급률 방식")
         table(["규정명", "방식", "수식"], modes)
 
+    if not a.exit_causes.is_empty():
+        section("퇴직사유별 지급 차등")
+        table(
+            ["지급률 규정", "퇴직사유", "대체 지급률 규정", "가산 규정",
+             "가산액(원)", "근속 하한(년)", "가산 귀속"],
+            [
+                [rule, cause, entry.benefit_rule, entry.extra_rule,
+                 entry.extra_amount or "", entry.min_service or "",
+                 entry.attribution_basis(cause)]
+                for (rule, cause), entry in sorted(a.exit_causes.rules.items())
+            ],
+        )
+
     rules = run.config.job_group_rules
     if rules:
         section("직군별 규정")

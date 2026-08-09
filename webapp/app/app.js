@@ -179,6 +179,7 @@ function buildEditor() {
   for (const spec of META.sheets) addTab(spec.tab, (page) => buildGridTab(page, spec));
   addTab("지급규정", buildPayoutTab);
   addTab("지급률 규정", buildRuleTab);
+  addTab("퇴직사유", buildCauseTab);
   addTab("장기급여 유형", buildLongtermTab);
 
   $("ed-grade").replaceChildren(...META.grades.map((g) => el("option", {}, g)));
@@ -449,6 +450,72 @@ function previewFormulas() {
   }
 }
 
+// ── 퇴직사유 탭 ──
+// 자료요청서 6번에 '중도퇴직시 / 사망시 / 정년퇴직시 퇴직금 지급률' 이 따로
+// 있고, 실제로 다르게 적어 오는 회사가 많다. 비워 두면 사유를 가리지 않는다.
+let causeBody = null;
+const CAUSE_MIN_ROWS = 4;
+
+function buildCauseTab(page) {
+  const guide =
+    "중도퇴직·사망·정년퇴직의 지급이 다를 때만 채웁니다. 비우면 사유를 가리지 않습니다.\n" +
+    "대체 지급률 규정  그 사유일 때 기본 규정 대신 쓸 '지급률' 탭의 열 이름 " +
+    "(예: 정년퇴직만 임원 배수 별도)\n" +
+    "가산 규정        기본 급여에 더할 배수를 내는 규정 " +
+    "(예: 사망 시 근속 10년 미만 3개월분 / 이상 5개월분)\n" +
+    "가산액(원)       정액 가산 (예: 정액 가산금 50,000,000)\n" +
+    "근속 하한(년)     '사망 시 1년 미만도 1년으로 계산' 처럼 짧은 근속을 끌어올릴 때\n" +
+    "가산 귀속        즉시=근속이 늘어도 안 느는 급여라 지금 전액 귀속, " +
+    "근속비례=근속에 따라 쌓음\n" +
+    "                비우면 사망은 '즉시', 나머지는 '근속비례' 입니다.";
+  const table = el("table", { class: "grid" });
+  causeBody = el("tbody");
+  table.append(causeBody);
+  page.append(
+    el("div", { class: "hint", style: "white-space:pre-line" }, guide),
+    el("div", { class: "scroll-x" }, table),
+    el("div", { class: "toolbar" },
+       el("button", { class: "small", type: "button",
+                      onclick: () => { causeBody.append(causeRow([])); } },
+          "줄 추가")));
+}
+
+function causeRow(values) {
+  const rule = makeSelect(["", ...groups], values[0] || "");
+  const cause = makeSelect(["", ...META.exit_causes], values[1] || "");
+  const alt = makeSelect(["", ...groups], values[2] || "");
+  const extraRule = makeSelect(["", ...groups], values[3] || "");
+  const amount = el("input", { type: "text", value: values[4] || "" });
+  const floor = el("input", { type: "text", value: values[5] || "" });
+  const basis = makeSelect(["", ...META.attributions], values[6] || "");
+  const tr = el("tr", {}, ...[rule, cause, alt, extraRule, amount, floor, basis]
+    .map((w) => el("td", {}, w)));
+  tr.widgets = { rule, cause, alt, extraRule, amount, floor, basis };
+  return tr;
+}
+
+function renderCauses(rows) {
+  causeBody.replaceChildren(el("tr", {},
+    ...META.exit_cause_headers.map((h) => el("th", {}, h))));
+  const filled = rows.length ? rows : [];
+  for (const row of filled) causeBody.append(causeRow(row));
+  for (let i = filled.length; i < CAUSE_MIN_ROWS; i += 1) {
+    causeBody.append(causeRow([]));
+  }
+}
+
+function causeValues() {
+  const result = [];
+  for (const tr of [...causeBody.children].slice(1)) {
+    const w = tr.widgets;
+    const row = [w.rule.value, w.cause.value, w.alt.value, w.extraRule.value,
+                 w.amount.value.trim(), w.floor.value.trim(), w.basis.value];
+    // 규정과 사유만 고르고 값을 안 넣은 줄은 규정이 아니다.
+    if (row[0] && row.slice(2).some(Boolean)) result.push(row);
+  }
+  return result;
+}
+
 // ── 장기급여 유형 탭 ──
 function buildLongtermTab(page) {
   const guide =
@@ -588,6 +655,7 @@ function collectState() {
     payout: payoutValues(),
     benefit_rules: ruleValues(),
     longterm_rules: longtermValues(),
+    exit_causes: causeValues(),
     mapping: mapData.map((r) => [r.source, r.kind, r.target]),
   };
 }
@@ -601,6 +669,7 @@ function renderState(state) {
   }
   renderPayout(state.payout || {});
   renderRules(state.benefit_rules || {});
+  renderCauses(state.exit_causes || []);
   renderLongterm(state.longterm_rules || {});
   const scanned = new Map(mapData.map((r) => [pairKey(r.source, r.kind), r]));
   mapData = (state.mapping || []).map(([source, kind, target]) => {

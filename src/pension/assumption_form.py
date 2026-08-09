@@ -29,9 +29,12 @@ from typing import Any, Final
 
 from .actuarial import FRACTION_HALF, FRACTION_KEEP, SERVICE_DAILY
 from .assumptions import (
+    ATTRIBUTIONS,
     BENEFIT_RULE_SHEET,
     BENEFIT_SHEET,
     DISCOUNT_SHEET,
+    EXIT_CAUSE_SHEET,
+    EXIT_CAUSES,
     FORMULA,
     LONGTERM_RULE_SHEET,
     LONGTERM_SHEET,
@@ -50,6 +53,7 @@ from .standard_rates import SALARY_BASE_UP
 
 __all__ = [
     "APPLY_CHOICES",
+    "EXIT_CAUSE_HEADERS",
     "FORM_SHEETS",
     "PAYOUT_HEADERS",
     "PAYOUT_SHEET",
@@ -77,6 +81,12 @@ PAYOUT_HEADERS: Final[tuple[str, ...]] = (
     "가입자격(최소근속)", "임원 정년연령", "임원 정년초과 가산연령", "산출 제외",
     "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식", "임직원구분",
     "Base-up 적용", "승급률 적용", "퇴직률 적용", "사망률 적용",
+)
+
+#: 퇴직사유 탭의 열. 자유 입력이 아니라 정해진 자리에 넣게 한다.
+EXIT_CAUSE_HEADERS: Final[tuple[str, ...]] = (
+    "지급률 규정", "퇴직사유", "대체 지급률 규정", "가산 규정",
+    "가산액(원)", "근속 하한(년)", "가산 귀속",
 )
 
 #: 직군별 가정 적용 여부 선택지.
@@ -170,6 +180,9 @@ def empty_state(job_groups: list[str] | None = None) -> dict[str, Any]:
             for group in groups
         },
         "mapping": [],
+        # 중도퇴직·사망·정년퇴직의 지급률이 다를 때만 채운다. 비면 사유를
+        # 가리지 않으므로 종전과 같은 산출이 나온다.
+        "exit_causes": [],
     }
 
 
@@ -227,7 +240,41 @@ def state_problems(state: dict[str, Any]) -> list[str]:
     discount = state.get("grids", {}).get(DISCOUNT_SHEET, {}).get("rows", [])
     if not any(any(text(v) for v in row) for row in discount):
         found.append("할인율은 반드시 입력해야 합니다. 없으면 채무를 산출할 수 없습니다")
+
+    seen: set[tuple[str, str]] = set()
+    for row in _cause_rows(state):
+        rule, cause = row[0], row[1]
+        if cause not in EXIT_CAUSES:
+            found.append(
+                f"'{rule}' 의 퇴직사유 '{cause}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(EXIT_CAUSES)} 중 하나)"
+            )
+            continue
+        basis = row[6]
+        if basis and basis not in ATTRIBUTIONS:
+            found.append(
+                f"'{rule} / {cause}' 의 가산 귀속 '{basis}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(ATTRIBUTIONS)} 중 하나)"
+            )
+        if (rule, cause) in seen:
+            found.append(f"'{rule} / {cause}' 이 두 번 적혀 있습니다")
+        seen.add((rule, cause))
     return found
+
+
+def _cause_rows(state: dict[str, Any]) -> list[list[str]]:
+    """퇴직사유 탭에서 값이 든 줄만. 일곱 칸으로 길이를 맞춘다."""
+    rows: list[list[str]] = []
+    for row in state.get("exit_causes", []):
+        values = [text(v) for v in list(row)[: len(EXIT_CAUSE_HEADERS)]]
+        values += [""] * (len(EXIT_CAUSE_HEADERS) - len(values))
+        if not values[0]:
+            continue
+        # 규정과 사유만 고르고 아무 값도 안 넣은 줄은 규정이 아니다.
+        if not any(values[2:]):
+            continue
+        rows.append(values)
+    return rows
 
 
 def formula_preview(
@@ -333,6 +380,15 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
             text(item.get("mortality")) or "반영",
         ])
     sheets[PAYOUT_SHEET] = (list(PAYOUT_HEADERS), rows_out)
+
+    sheets[EXIT_CAUSE_SHEET] = (
+        list(EXIT_CAUSE_HEADERS),
+        [
+            [row[0], row[1], row[2], row[3],
+             _parse_cell(row[4]), _parse_cell(row[5]), row[6]]
+            for row in _cause_rows(state)
+        ],
+    )
 
     longterm = {
         group: (
@@ -451,6 +507,21 @@ def read_state(path: str | Path) -> dict[str, Any]:
                     ),
                     "note": text(ws.cell(row, 4).value),
                 }
+
+        if EXIT_CAUSE_SHEET in wb.sheetnames:
+            ws = wb[EXIT_CAUSE_SHEET]
+            causes: list[list[str]] = []
+            for row in range(2, ws.max_row + 1):
+                name = text(ws.cell(row, 1).value)
+                if not name or name[:1] in _NOTE_PREFIXES:
+                    continue
+                values = [
+                    _cell_text(ws.cell(row, c).value)
+                    for c in range(1, len(EXIT_CAUSE_HEADERS) + 1)
+                ]
+                if any(values[2:]):
+                    causes.append(values)
+            state["exit_causes"] = causes
 
         if BENEFIT_RULE_SHEET in wb.sheetnames:
             ws = wb[BENEFIT_RULE_SHEET]

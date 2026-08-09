@@ -32,8 +32,15 @@ from .formula import Formula, FormulaError
 from .normalize import Gender, text
 
 __all__ = [
+    "ATTRIBUTIONS",
+    "ATTRIB_IMMEDIATE",
+    "ATTRIB_SERVICE",
     "BENEFIT_MODES",
+    "CAUSE_DEATH",
+    "CAUSE_NORMAL",
+    "CAUSE_VOLUNTARY",
     "CUMULATIVE",
+    "EXIT_CAUSES",
     "FORMULA",
     "LONGTERM_TYPES",
     "LT_AVERAGE_WAGE",
@@ -44,6 +51,8 @@ __all__ = [
     "STATUTORY_RULE",
     "Assumptions",
     "BenefitScale",
+    "CauseBenefit",
+    "CauseBenefits",
     "DiscountCurve",
     "LongTermRule",
     "MortalityTable",
@@ -72,6 +81,8 @@ BENEFIT_RULE_SHEET: Final = "지급률규정"
 """규정별 방식(누적/누진/수식)과 수식 코드를 적는 시트."""
 LONGTERM_RULE_SHEET: Final = "장기급여규정"
 """장기급여 규정별 지급유형과 현물 상승률을 적는 시트."""
+EXIT_CAUSE_SHEET: Final = "퇴직사유"
+"""퇴직사유(중도/사망/정년)별 지급 차등을 적는 시트."""
 
 # ── 장기급여 지급유형 ────────────────────────────────────────────
 # 근속 포상은 회사마다 주는 것이 다르다. 실제 규정에서 확인한 형태:
@@ -348,6 +359,103 @@ class BenefitScale:
         return name in self.curves or name in self.formulas
 
 
+CAUSE_VOLUNTARY: Final = "중도"
+"""퇴직사유 — 자발적 중도퇴직."""
+
+CAUSE_DEATH: Final = "사망"
+"""퇴직사유 — 재직 중 사망."""
+
+CAUSE_NORMAL: Final = "정년"
+"""퇴직사유 — 정년 도달."""
+
+EXIT_CAUSES: Final = (CAUSE_VOLUNTARY, CAUSE_DEATH, CAUSE_NORMAL)
+
+ATTRIB_SERVICE: Final = "근속비례"
+"""가산 귀속 — 근속에 따라 나누어 쌓는다."""
+
+ATTRIB_IMMEDIATE: Final = "즉시"
+"""가산 귀속 — 전액을 지금 귀속한다."""
+
+ATTRIBUTIONS: Final = (ATTRIB_SERVICE, ATTRIB_IMMEDIATE)
+
+
+@dataclass(slots=True, frozen=True)
+class CauseBenefit:
+    """퇴직사유 하나에 붙는 지급 규정.
+
+    같은 회사라도 중도퇴직·사망·정년퇴직의 지급률이 다른 경우가 흔하다.
+    자료요청서 6번에도 세 줄이 따로 있다.
+
+        중도퇴직시 퇴직금 지급률   6월이상 1년 미만은 1년분, 6월 미만은 1/2
+        사망시 퇴직금 지급률       동일, 정액 가산금 5,000만원
+        정년퇴직시 퇴직금 지급률   임원 배수 별도
+
+    비워 둔 항목은 기본 지급률 규정을 그대로 쓴다.
+    """
+
+    benefit_rule: str = ""
+    """이 사유일 때 대신 쓸 지급률 규정명. 비면 기본 규정."""
+    extra_rule: str = ""
+    """기본 급여에 **더할** 배수를 내는 지급률 규정명.
+
+    '사망 시 기본급 3개월분 가산' 처럼 얹어 주는 몫이다. 근속에 따라 달라지면
+    (10년 미만 3개월 / 이상 5개월) 지급률 표나 수식으로 적는다.
+    """
+    extra_amount: float = 0.0
+    """정액 가산액(원). '정액 가산금 5,000만원' 같은 것."""
+    min_service: float = 0.0
+    """이 사유의 근속 하한(년).
+
+    '재직 중 사망으로 퇴직 시 1년 미만도 1년으로 계산' 을 담는다. 가입자격
+    문턱과 다르다 — 문턱은 못 넘으면 0 원이고, 이것은 짧은 근속을 끌어올린다.
+    """
+    attribution: str = ""
+    """가산분의 귀속 방식. 비면 사유별 기본값(:meth:`attribution_basis`)."""
+
+    def attribution_basis(self, cause: str) -> str:
+        """가산분을 어떻게 귀속할지.
+
+        사망 가산은 기본이 ``즉시`` 다. 재직 중 사망하면 근속이 하루든 20년이든
+        같은 금액을 주므로, 더 일해도 급여가 늘지 않는다 — 문단 70 은 그 시점에
+        귀속을 멈추라고 한다. 반대로 정년 가산은 정년까지 남아야 받으므로
+        ``근속비례`` 로 쌓는다.
+        """
+        if self.attribution:
+            return self.attribution
+        return ATTRIB_IMMEDIATE if cause == CAUSE_DEATH else ATTRIB_SERVICE
+
+    def is_empty(self) -> bool:
+        return not (
+            self.benefit_rule or self.extra_rule
+            or self.extra_amount or self.min_service
+        )
+
+
+@dataclass(slots=True)
+class CauseBenefits:
+    """``(지급률 규정, 퇴직사유) → 사유별 규정`` 묶음."""
+
+    rules: dict[tuple[str, str], CauseBenefit] = field(default_factory=dict)
+
+    def get(self, rule: str, cause: str) -> CauseBenefit:
+        return self.rules.get((text(rule), text(cause)), _NO_CAUSE_BENEFIT)
+
+    def is_empty(self) -> bool:
+        return not self.rules
+
+    def rule_names(self) -> list[str]:
+        """사유별 규정이 참조하는 지급률 규정명 전부. 검증에 쓴다."""
+        names: list[str] = []
+        for entry in self.rules.values():
+            for name in (entry.benefit_rule, entry.extra_rule):
+                if name and name not in names:
+                    names.append(name)
+        return names
+
+
+_NO_CAUSE_BENEFIT: Final = CauseBenefit()
+
+
 @dataclass(slots=True)
 class LongTermRule:
     """장기급여 규정 하나의 지급유형.
@@ -386,6 +494,9 @@ class Assumptions:
     )
     longterm_rules: dict[str, LongTermRule] = field(default_factory=dict)
     """장기급여 규정명 → 지급유형. 없으면 ``휴가`` 로 본다(기존 동작)."""
+
+    exit_causes: CauseBenefits = field(default_factory=CauseBenefits)
+    """퇴직사유별 지급 차등. 비면 사유를 가리지 않는다(기존 동작)."""
 
     def longterm_rule(self, rule: str) -> LongTermRule:
         return self.longterm_rules.get(text(rule), LongTermRule())
@@ -634,6 +745,59 @@ def _read_longterm_rules(wb) -> tuple[dict[str, LongTermRule], list[str]]:
     return rules, problems
 
 
+def _read_exit_causes(wb) -> tuple[CauseBenefits, list[str]]:
+    """``퇴직사유`` 시트에서 사유별 지급 차등을 읽는다.
+
+    시트가 없으면 빈 표를 돌려준다 — 그러면 사유를 가리지 않아 기존 동작과
+    같아진다.
+    """
+    result = CauseBenefits()
+    problems: list[str] = []
+    if EXIT_CAUSE_SHEET not in wb.sheetnames:
+        return result, problems
+
+    ws = wb[EXIT_CAUSE_SHEET]
+    for row, _ in _rows(ws):
+        rule = text(ws.cell(row, 1).value)
+        if not rule or rule.startswith(("·", "*", "※", "#")):
+            continue
+        cause = text(ws.cell(row, 2).value)
+        if cause not in EXIT_CAUSES:
+            problems.append(
+                f"{EXIT_CAUSE_SHEET}!B{row}: 퇴직사유 '{cause}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(EXIT_CAUSES)} 중 하나)"
+            )
+            continue
+
+        basis = text(ws.cell(row, 7).value)
+        if basis and basis not in ATTRIBUTIONS:
+            problems.append(
+                f"{EXIT_CAUSE_SHEET}!G{row}: 가산 귀속 '{basis}' 을(를) 알 수 없습니다 "
+                f"({' / '.join(ATTRIBUTIONS)} 중 하나)"
+            )
+            continue
+
+        entry = CauseBenefit(
+            benefit_rule=text(ws.cell(row, 3).value),
+            extra_rule=text(ws.cell(row, 4).value),
+            extra_amount=_as_number(ws.cell(row, 5).value) or 0.0,
+            min_service=_as_number(ws.cell(row, 6).value) or 0.0,
+            attribution=basis,
+        )
+        if entry.is_empty():
+            # 한 칸도 안 채운 줄은 규정이 아니다. 담아 두면 '사유별 차등이
+            # 있다' 고 잘못 읽힌다.
+            continue
+        if (rule, cause) in result.rules:
+            problems.append(
+                f"{EXIT_CAUSE_SHEET}!A{row}: '{rule} / {cause}' 이 두 번 적혀 있습니다"
+            )
+            continue
+        result.rules[(rule, cause)] = entry
+
+    return result, problems
+
+
 def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assumptions:
     """기초율 워크북을 읽는다.
 
@@ -659,7 +823,8 @@ def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assum
 
         modes, formulas, problems = _read_rule_modes(wb)
         longterm_rules, longterm_problems = _read_longterm_rules(wb)
-        problems = problems + longterm_problems
+        exit_causes, cause_problems = _read_exit_causes(wb)
+        problems = problems + longterm_problems + cause_problems
         if problems:
             raise ValueError(
                 "지급 규정을 읽지 못했습니다:\n  · " + "\n  · ".join(problems)
@@ -678,6 +843,7 @@ def load_assumptions(path: str | Path, *, label: str = "당기 가정") -> Assum
             ),
             longterm_benefit=_read_benefit_scale(wb, LONGTERM_SHEET, statutory=False),
             longterm_rules=longterm_rules,
+            exit_causes=exit_causes,
             label=label,
         )
     finally:
@@ -839,6 +1005,21 @@ def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
         LONGTERM_SHEET, ["근속연수", *rules],
         "· 근속 포상·장기근속휴가의 지급일수입니다(일 기본급 × 일수). 해당 근속연수 도달 시 지급으로 봅니다.",
         [[10, *[10] * len(rules)], [20, *[20] * len(rules)], [30, *[30] * len(rules)]],
+    )
+    make(
+        EXIT_CAUSE_SHEET,
+        ["지급률 규정", "퇴직사유", "대체 지급률 규정", "가산 규정",
+         "가산액(원)", "근속 하한(년)", "가산 귀속"],
+        "· 중도퇴직·사망·정년퇴직의 지급률이 다를 때만 씁니다. 비워 두면 사유를 가리지 않습니다."
+        "\n· 퇴직사유: " + " / ".join(EXIT_CAUSES) +
+        "\n· 대체 지급률 규정: 그 사유일 때 기본 규정 대신 쓸 '지급률' 시트의 열 이름"
+        "\n· 가산 규정: 기본 급여에 **더할** 배수를 내는 규정 (예: 사망 시 기본급 3개월분)"
+        "\n· 가산액(원): 정액 가산 (예: 정액 가산금 5,000만원)"
+        "\n· 근속 하한(년): '사망 시 1년 미만도 1년으로 계산' 처럼 짧은 근속을 끌어올릴 때"
+        "\n· 가산 귀속: " + " / ".join(ATTRIBUTIONS) +
+        " — 비우면 사망은 '즉시', 나머지는 '근속비례'"
+        "\n· 예) 정규직 | 사망 | (비움) | (비움) | 50000000 | 1 | (비움)",
+        [],
     )
 
     del wb["Sheet"]

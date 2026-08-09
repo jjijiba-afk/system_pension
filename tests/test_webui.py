@@ -82,6 +82,53 @@ class TestAssumptionForm:
         assert back["longterm_rules"]["생산직"]["escalation"] == "3%"
         assert back["mapping"] == state["mapping"]
 
+    def test_exit_causes_survive_the_round_trip(self, tmp_path) -> None:
+        """퇴직사유 차등이 왕복에서 사라지면 엉뚱한 급여로 산출된다."""
+        state = form.example_state(["생산직", "임원"])
+        state["exit_causes"] = [
+            ["생산직", "사망", "", "", "50000000", "1", ""],
+            ["임원", "정년", "생산직", "", "", "", "근속비례"],
+        ]
+
+        back = form.read_state(form.write_state(state, tmp_path / "기초율.xlsx"))
+        assert back["exit_causes"] == [
+            ["생산직", "사망", "", "", "50000000", "1", ""],
+            ["임원", "정년", "생산직", "", "", "", "근속비례"],
+        ]
+
+    def test_a_row_with_only_a_cause_is_dropped(self, tmp_path) -> None:
+        """규정과 사유만 고르고 값을 안 넣은 줄을 남기면 '차등 있음' 으로 읽힌다."""
+        state = form.example_state(["생산직"])
+        state["exit_causes"] = [["생산직", "사망", "", "", "", "", ""]]
+        back = form.read_state(form.write_state(state, tmp_path / "기초율.xlsx"))
+        assert back["exit_causes"] == []
+
+    def test_unknown_cause_blocks_saving(self, tmp_path) -> None:
+        state = form.example_state(["생산직"])
+        state["exit_causes"] = [["생산직", "명예퇴직", "", "", "1000000", "", ""]]
+        assert any("명예퇴직" in p for p in form.state_problems(state))
+
+    def test_duplicate_cause_rows_block_saving(self) -> None:
+        state = form.example_state(["생산직"])
+        state["exit_causes"] = [
+            ["생산직", "사망", "", "", "1000000", "", ""],
+            ["생산직", "사망", "", "", "2000000", "", ""],
+        ]
+        assert any("두 번" in p for p in form.state_problems(state))
+
+    def test_causes_reach_the_engine(self, tmp_path) -> None:
+        """만든 워크북을 산출 엔진이 그대로 읽어야 한다."""
+        from pension.assumptions import load_assumptions
+
+        state = form.example_state(["생산직"])
+        state["exit_causes"] = [["생산직", "사망", "", "", "50000000", "1", "즉시"]]
+        path = form.write_state(state, tmp_path / "기초율.xlsx")
+
+        entry = load_assumptions(path).exit_causes.get("생산직", "사망")
+        assert entry.extra_amount == 50_000_000
+        assert entry.min_service == 1.0
+        assert entry.attribution == "즉시"
+
     def test_written_file_feeds_the_engine(self, tmp_path) -> None:
         """만든 워크북이 산출 엔진의 로더·규정 리더로 그대로 읽혀야 한다."""
         from pension.pipeline import _read_payout_rules
@@ -162,6 +209,9 @@ class TestApi:
         ]
         assert meta["apply_choices"] == ["반영", "미반영"]
         assert "AA0" in meta["grades"]
+        assert meta["exit_causes"] == ["중도", "사망", "정년"]
+        assert meta["attributions"] == ["근속비례", "즉시"]
+        assert len(meta["exit_cause_headers"]) == 7
 
     def test_state_write_reports_problems_instead_of_raising(self, tmp_path) -> None:
         state = form.empty_state()

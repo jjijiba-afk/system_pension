@@ -9,8 +9,10 @@ K-IFRS 1019호 '종업원급여' 가 요구하는 예측단위적립방식(Proje
 각 연도 ``t`` 마다
 
 * **임금 투영** — 30일 평균임금에 Base-up 과 승급률을 복리로 곱한다.
-* **탈퇴 확률** — 중도퇴직률 ``w`` 와 사망률 ``q`` 를 함께 적용하고
-  (``1 - (1-w)(1-q)``), 탈퇴는 연중앙(``t - 0.5``)에 일어난 것으로 본다.
+* **탈퇴 확률** — 중도퇴직률 ``w`` 와 사망률 ``q`` 를 함께 적용하되
+  (합계는 ``1 - (1-w)(1-q)``) **사유별로 갈라 둔다**. 회사 규정이 중도퇴직·
+  사망·정년퇴직에 다른 지급률을 주는 일이 흔해서, 뭉뚱그리면 어느 규정을
+  적용할지 정할 수 없다. 탈퇴는 연중앙(``t - 0.5``)에 일어난 것으로 보고,
   정년까지 남은 사람은 마지막 시점에 전원 퇴직한다.
 * **급여 산정** — ``지급률(총근속) × 투영임금``.
 * **귀속** — PUC 이므로 급여 중 기준일까지의 근속에 해당하는 몫만 부채로 잡는다
@@ -32,12 +34,23 @@ from __future__ import annotations
 
 import datetime as _dt
 from dataclasses import dataclass, field
+from typing import Final
 
 from .actuarial import FRACTION_HALF, apply_fraction, round_amount
-from .assumptions import Assumptions
+from .assumptions import (
+    ATTRIB_IMMEDIATE,
+    CAUSE_DEATH,
+    CAUSE_NORMAL,
+    CAUSE_VOLUNTARY,
+    Assumptions,
+    CauseBenefit,
+)
 from .config import CalculationConfig
 from .models import ActiveMember, Roster
 from .normalize import BenefitPlan
+
+#: 사유별 규정이 없을 때 쓰는 빈 규정. 기본 지급률을 그대로 쓴다는 뜻이다.
+_NO_CAUSE: Final = CauseBenefit()
 
 __all__ = [
     "MemberValuation",
@@ -328,7 +341,9 @@ def value_member(
     extra_payment = max(0.0, member.extra_pay_base_wage)
     result.extra_payment = extra_payment
 
-    def multiple_at(service: float, age: float) -> float:
+    causes = assumptions.exit_causes
+
+    def multiple_at(service: float, age: float, rule_name: str = "") -> float:
         """근속 ``service`` 년까지 쌓인 지급배수. 가입자격 문턱은 보지 않는다.
 
         귀속비율을 재는 자다. 가입자격을 못 채운 구간을 0 으로 깎으면 요건 직전
@@ -336,9 +351,28 @@ def value_member(
         되는 근무가 **시작된 때** 부터 귀속하라고 한다. 요건 미달로 못 받는 것은
         그 시나리오의 급여액이 0 이 되는 것으로 이미 반영된다.
         """
-        return assumptions.severance_benefit.multiple(rule, service, x=age, **context)
+        return assumptions.severance_benefit.multiple(
+            rule_name or rule, service, x=age, **context
+        )
 
-    def benefit_at(service: float, age: float, wage: float) -> float:
+    def parts_at(
+        cause: CauseBenefit, service: float, age: float, wage: float
+    ) -> tuple[float, float]:
+        """``(기본 급여, 가산 급여)``. 가입자격 문턱과 반올림 전이다.
+
+        둘로 나누는 이유는 귀속 방식이 다르기 때문이다. 기본 급여는 급여식이
+        내는 배수를 따라 쌓이고, 가산은 사유에 따라 즉시 귀속될 수 있다.
+        """
+        service = max(service, cause.min_service)
+        base = multiple_at(service, age, cause.benefit_rule) * wage
+        extra = cause.extra_amount
+        if cause.extra_rule:
+            extra += multiple_at(service, age, cause.extra_rule) * wage
+        return base, extra
+
+    def benefit_at(
+        service: float, age: float, wage: float, cause: CauseBenefit = _NO_CAUSE
+    ) -> float:
         """퇴직 시점 지급액.
 
         가입자격(최소 근속연수)을 못 채우고 나가면 지급 대상이 아니다. 대상에서
@@ -346,13 +380,15 @@ def value_member(
         정년까지 남아 요건을 채우면 그때는 지급 대상이 되므로, 그 몫은 그대로
         부채에 잡혀야 하기 때문이다.
         """
-        if minimum > 0 and service < minimum:
+        if minimum > 0 and max(service, cause.min_service) < minimum:
             return 0.0
-        amount = multiple_at(service, age) * wage
+        base, extra = parts_at(cause, service, age, wage)
         # 전별금·위로금 등 정액 추가지급. 금액이 적힌 사람만 대상이다.
-        return round_amount(amount + extra_payment, rounding_unit, rounding_mode)
+        return round_amount(base + extra + extra_payment, rounding_unit, rounding_mode)
 
-    def attribution_at(total_service: float, age: float) -> tuple[float, float]:
+    def attribution_at(
+        total_service: float, age: float, cause: CauseBenefit = _NO_CAUSE
+    ) -> tuple[float, float]:
         """(기준일까지 귀속비율, 당기 1년치 귀속비율).
 
         급여식이 근속에 비례하지 않으면 ``과거근속 ÷ 총근속`` 이 틀린다.
@@ -368,21 +404,76 @@ def value_member(
         if total_service <= 0:
             return 0.0, 0.0
 
-        total_multiple = multiple_at(total_service, age)
+        total_multiple = multiple_at(
+            max(total_service, cause.min_service), age, cause.benefit_rule
+        )
         if total_multiple <= 0:
             # 배수가 0 이거나 음수인 규정(가감 규정 등)은 근속비로 되돌린다.
             return min(1.0, past_service / total_service), 1.0 / total_service
 
-        earned = multiple_at(past_service, age)
+        earned = multiple_at(
+            max(past_service, cause.min_service), age, cause.benefit_rule
+        )
         # 당기 1년치는 '한 해 더 일했을 때 배수가 얼마나 느는가'.
-        next_year = multiple_at(min(past_service + 1.0, total_service), age)
+        next_year = multiple_at(
+            max(min(past_service + 1.0, total_service), cause.min_service),
+            age, cause.benefit_rule,
+        )
 
         attributed = min(1.0, max(0.0, earned / total_multiple))
         unit = max(0.0, (next_year - earned) / total_multiple)
         return attributed, unit
 
+    def weigh(
+        cause_name: str, total_service: float, exit_age: float, wage: float
+    ) -> tuple[float, float]:
+        """``(귀속된 급여, 당기 1년치 급여)``. 확률·할인 전 금액이다.
+
+        기본 급여와 가산 급여를 따로 귀속한 뒤 합친다. 반올림은 실제 지급액에
+        거는 것이므로, 합계에 한 번 걸고 그 비율만큼 두 몫을 함께 조정한다.
+        """
+        cause = causes.get(rule, cause_name)
+        service = max(total_service, cause.min_service)
+        if minimum > 0 and service < minimum:
+            return 0.0, 0.0
+
+        base, extra = parts_at(cause, total_service, exit_age, wage)
+        raw = base + extra + extra_payment
+        if raw <= 0:
+            return 0.0, 0.0
+        paid = round_amount(raw, rounding_unit, rounding_mode)
+        scale = paid / raw
+
+        share, unit_share = attribution_at(total_service, exit_age, cause)
+        attributed = (base + extra_payment) * share
+        unit = (base + extra_payment) * unit_share
+
+        if extra:
+            if cause.attribution_basis(cause_name) == ATTRIB_IMMEDIATE:
+                # 근속을 더 쌓아도 늘지 않는 급여다. **오늘 근속으로 재어** 그만큼
+                # 전액 귀속한다. 정액 가산금 5,000만원처럼 근속과 무관하면 언제나
+                # 전액이고, '10년 미만 3개월분 / 이상 5개월분' 처럼 근속에 따라
+                # 계단이 있으면 지금 올라선 칸까지만 잡힌다.
+                _, earned = parts_at(cause, past_service, exit_age, wage)
+                _, next_year = parts_at(
+                    cause, min(past_service + 1.0, total_service), exit_age, wage
+                )
+                # 퇴직 시점에 실제로 받을 금액을 넘길 수는 없다.
+                earned = min(earned, extra)
+                attributed += earned
+                unit += max(0.0, min(next_year, extra) - earned)
+            else:
+                attributed += extra * share
+                unit += extra * unit_share
+
+        return attributed * scale, unit * scale
+
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
-    result.accrued_benefit = benefit_at(past_service, float(member.age), member.monthly_wage)
+    # 추계액은 '지금 자발적으로 나가면 얼마' 이므로 중도퇴직 규정으로 잰다.
+    result.accrued_benefit = benefit_at(
+        past_service, float(member.age), member.monthly_wage,
+        causes.get(rule, CAUSE_VOLUNTARY),
+    )
 
     survival = 1.0  # 기준일부터 t년 초까지 재직해 있을 확률
     wage = member.monthly_wage
@@ -420,28 +511,38 @@ def value_member(
         is_final = t == years
         if is_final:
             # 정년 도달자는 전원 퇴직한다.
-            exit_probability = survival
             timing = float(t)
+            exits = ((CAUSE_NORMAL, survival),)
         else:
-            exit_probability = survival * (1.0 - (1.0 - withdrawal) * (1.0 - mortality))
             timing = t - 0.5
+            # 두 탈퇴원인을 갈라 놓는다. 사유별로 지급률이 다르면 뭉뚱그린
+            # ``1-(1-w)(1-q)`` 로는 어느 규정을 적용할지 정할 수 없다.
+            # 연중 균등발생을 가정하면 두 몫의 합은 원래 확률 그대로다.
+            exits = (
+                (CAUSE_VOLUNTARY, survival * withdrawal * (1.0 - mortality / 2.0)),
+                (CAUSE_DEATH, survival * mortality * (1.0 - withdrawal / 2.0)),
+            )
         total_service = service_at(timing)
 
-        if exit_probability > 0.0:
-            # 퇴직 시점의 연령·근속으로 평가한다. 정년 임박자 감액 같은 규정이
-            # 기준일이 아니라 실제 퇴직 시점을 보고 판단해야 하기 때문이다.
-            exit_age = member.age + timing
-            benefit = benefit_at(total_service, exit_age, wage)
-            discount = assumptions.discount.discount_factor(timing)
-            attribution, unit_attribution = attribution_at(total_service, exit_age)
+        # 퇴직 시점의 연령·근속으로 평가한다. 정년 임박자 감액 같은 규정이
+        # 기준일이 아니라 실제 퇴직 시점을 보고 판단해야 하기 때문이다.
+        exit_age = member.age + timing
+        discount = assumptions.discount.discount_factor(timing)
 
-            weighted = benefit * exit_probability * discount
-            dbo += weighted * attribution
-            service_cost += weighted * unit_attribution
-            benefit_pv += weighted
-            weighted_time += weighted * attribution * timing
+        for cause_name, exit_probability in exits:
+            if exit_probability <= 0.0:
+                continue
+            attributed, unit = weigh(cause_name, total_service, exit_age, wage)
+            benefit = benefit_at(
+                total_service, exit_age, wage, causes.get(rule, cause_name)
+            )
+
+            dbo += attributed * exit_probability * discount
+            service_cost += unit * exit_probability * discount
+            benefit_pv += benefit * exit_probability * discount
+            weighted_time += attributed * exit_probability * discount * timing
             # 할인 전 현금흐름. 단일할인율 역산에 쓴다.
-            flow = benefit * exit_probability * attribution
+            flow = attributed * exit_probability
             if flow:
                 result.cash_flows[timing] = result.cash_flows.get(timing, 0.0) + flow
 
