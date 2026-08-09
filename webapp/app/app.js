@@ -23,9 +23,12 @@ let pyApi = null;
 let META = null;
 
 // ── 파이썬 경계 ──────────────────────────────────────────────────
-function py(op, args = {}) {
+// ``quiet`` 를 주면 실패를 던지지 않고 ``{ok:false, error}`` 를 그대로 돌려준다.
+// 파이썬이 세어 본 뒤 막는 경우(단체 안에 산출이 남았을 때 등)에 그 문장을
+// 사람에게 그대로 보여 주고 다시 물어보기 위한 것이다.
+function py(op, args = {}, { quiet = false } = {}) {
   const response = JSON.parse(pyApi(JSON.stringify({ op, ...args })));
-  if (!response.ok) throw new Error(response.error);
+  if (!response.ok && !quiet) throw new Error(response.error);
   return response;
 }
 
@@ -1489,7 +1492,8 @@ $("run-save").addEventListener("click", async () => {
     });
     await persistHome();
     refreshRuns();
-    status(`산출 '${name}' 을(를) 이 기기에 저장했습니다. [산출 내역] 탭에서 볼 수 있습니다.`);
+    status(`산출 '${name}' 을(를) 단체 '${CLIENT}' 에 저장했습니다. `
+           + "[산출 내역] 탭에서 볼 수 있습니다.");
   } catch (error) {
     alert("저장하지 못했습니다.\n\n" + error.message);
   }
@@ -1523,8 +1527,71 @@ $("prior-run").addEventListener("change", () => {
   }
 });
 
+// ── 단체 ─────────────────────────────────────────────────────────
+// 가장 먼저 고르는 것. 산출 내역·전기 산출 목록이 모두 이 단체 안으로 좁혀진다.
+// 전기 확정급여채무를 다른 단체 것으로 끌어오면 증감분석이 통째로 틀리는데,
+// 목록에 뜬 이름만 보고는 알아채기 어렵다.
+
+let CLIENT = "";
+
+function renderClients(client, list) {
+  CLIENT = client;
+  const pick = $("client-pick");
+  pick.replaceChildren(...list.map((c) => el(
+    "option", { value: c.name },
+    c.runs ? `${c.name} (${c.runs}건)` : c.name)));
+  pick.value = client;
+  const here = list.find((c) => c.name === client);
+  $("client-runs").textContent = `${here ? here.runs : 0}건`;
+  $("client-remove").disabled = list.length <= 1;
+  $("runs-client").textContent = client;
+  $("save-client").textContent = client;
+}
+
+$("client-pick").addEventListener("change", async () => {
+  applyRuns(py("client_select", { name: $("client-pick").value }));
+  await persistHome();
+  // 단체를 바꾸면 전기 산출은 앞 단체 것이므로 반드시 놓는다.
+  $("prior-run").value = "";
+  $("prior-run").dispatchEvent(new Event("change"));
+});
+
+$("client-add").addEventListener("click", async () => {
+  const name = prompt("새 단체 이름 (예: 1번단체, 가나다㈜)", "");
+  if (!name || !name.trim()) return;
+  applyRuns(py("client_add", { name: name.trim() }));
+  await persistHome();
+});
+
+$("client-rename").addEventListener("click", async () => {
+  const name = prompt("단체 이름 바꾸기", CLIENT);
+  if (!name || !name.trim() || name.trim() === CLIENT) return;
+  applyRuns(py("client_rename", { name: CLIENT, new_name: name.trim() }));
+  await persistHome();
+});
+
+$("client-remove").addEventListener("click", async () => {
+  const here = $("client-pick").value;
+  let answer = py("client_remove", { name: here }, { quiet: true });
+  if (!answer.ok) {
+    // 안에 산출이 남아 있으면 파이썬이 건수를 세어 막는다. 그 문장 그대로 묻는다.
+    if (!confirm(`${answer.error}\n\n정말 '${here}' 를 산출까지 함께 지울까요?`)) return;
+    answer = py("client_remove", { name: here, force: true });
+  }
+  applyRuns(answer);
+  await persistHome();
+});
+
+function applyRuns(answer) {
+  renderClients(answer.client, answer.clients || []);
+  renderRuns(answer.runs || []);
+}
+
 function refreshRuns() {
-  const { runs } = py("run_list");
+  applyRuns(py("run_list"));
+}
+
+function renderRuns(runs) {
   const target = $("runs-list");
 
   // 전기 선택 목록도 같이 새로 고친다.
@@ -1538,7 +1605,8 @@ function refreshRuns() {
 
   if (!runs.length) {
     target.replaceChildren(el("p", { class: "notice" },
-      "아직 저장된 산출이 없습니다. 산출을 마친 뒤 결과 아래 [이 산출을 기기에 저장] 에서 이름을 붙여 저장하세요."));
+      `'${CLIENT}' 에 아직 저장된 산출이 없습니다. 산출을 마친 뒤 결과 아래 ` +
+      "[이 산출을 기기에 저장] 에서 이름을 붙여 저장하세요."));
     return;
   }
   const header = el("tr", {}, ...["산출명", "저장일", "기준일", "인원", "DBO", ""]

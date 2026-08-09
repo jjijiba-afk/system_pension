@@ -15,6 +15,7 @@ import openpyxl
 import pytest
 
 from pension import assumption_form as form
+from pension import clients
 from pension.assumptions import DISCOUNT_SHEET, FORMULA, load_assumptions
 from pension.webui import api
 
@@ -823,7 +824,7 @@ class TestRunHistory:
         import json as _json
 
         self._saved_run(tmp_path, roster_path)
-        folder = Path(os.environ["PENSION_HOME"]) / "산출내역" / "2412 1번단체"
+        folder = clients.folder() / "2412 1번단체"
         meta = _json.loads((folder / "meta.json").read_text(encoding="utf-8"))
         meta["report"].pop("values")
         (folder / "meta.json").write_text(
@@ -848,6 +849,102 @@ class TestRunHistory:
             assumptions=assumptions, work=str(tmp_path), report={},
         )
         assert saved["runs"][0]["name"] == "24 12  1번 단체"
+
+
+class TestClients:
+    """단체 — 앱에서 가장 먼저 고르는 것. 산출 내역이 이 안에 쌓인다."""
+
+    @pytest.fixture(autouse=True)
+    def _boot(self):
+        """앱을 열면 제일 먼저 목록을 읽는다 — 기본 단체는 그때 생긴다."""
+        call("client_list")
+
+    def _saved_run(self, tmp_path, roster_path, name: str, **extra) -> dict:
+        state = form.example_state(["1정규직", "2임원", "3계약직"])
+        assumptions = str(tmp_path / f"{name}_기초율.xlsx")
+        call("state_write", state=state, path=assumptions)
+        return call(
+            "run_save", name=name, roster=str(roster_path),
+            assumptions=assumptions, work=str(tmp_path), report={}, **extra,
+        )
+
+    def test_starts_with_one_default_client(self) -> None:
+        listing = call("client_list")
+        assert listing["client"] == clients.DEFAULT_CLIENT
+        assert [c["name"] for c in listing["clients"]] == [clients.DEFAULT_CLIENT]
+
+    def test_add_switches_to_the_new_client(self) -> None:
+        assert call("client_add", name="1번단체")["client"] == "1번단체"
+        assert call("client_add", name="2번단체")["client"] == "2번단체"
+        assert {c["name"] for c in call("client_list")["clients"]} == {
+            clients.DEFAULT_CLIENT, "1번단체", "2번단체"}
+
+    def test_runs_do_not_leak_between_clients(self, tmp_path, roster_path) -> None:
+        """다른 단체의 산출이 목록에 섞이면 전기 DBO 를 남의 것으로 끌어온다."""
+        call("client_add", name="가단체")
+        self._saved_run(tmp_path, roster_path, "2312")
+        call("client_add", name="나단체")
+        self._saved_run(tmp_path, roster_path, "2412")
+
+        assert [r["name"] for r in call("run_list")["runs"]] == ["2412"]
+        assert [r["name"] for r in call("run_list", client="가단체")["runs"]] == ["2312"]
+
+        # 이름이 같아도 단체가 다르면 다른 산출이다.
+        assert "없습니다" in call_error("run_restore", name="2312")
+        assert call("run_restore", name="2312", client="가단체",
+                    work=str(tmp_path / "w"))["meta"]["name"] == "2312"
+
+    def test_client_count_follows_its_runs(self, tmp_path, roster_path) -> None:
+        call("client_add", name="가단체")
+        listing = self._saved_run(tmp_path, roster_path, "2412")
+        here = next(c for c in listing["clients"] if c["name"] == "가단체")
+        assert here["runs"] == 1
+
+    def test_rename_keeps_the_runs(self, tmp_path, roster_path) -> None:
+        call("client_add", name="가단체")
+        self._saved_run(tmp_path, roster_path, "2412")
+        renamed = call("client_rename", name="가단체", new_name="가나다㈜")
+
+        assert renamed["client"] == "가나다㈜"
+        assert [r["name"] for r in renamed["runs"]] == ["2412"]
+        assert "가단체" not in {c["name"] for c in renamed["clients"]}
+
+    def test_rename_onto_an_existing_name_is_refused(self) -> None:
+        call("client_add", name="가단체")
+        call("client_add", name="나단체")
+        assert "이미 있습니다" in call_error(
+            "client_rename", name="가단체", new_name="나단체")
+
+    def test_remove_needs_force_when_runs_remain(self, tmp_path, roster_path) -> None:
+        call("client_add", name="가단체")
+        self._saved_run(tmp_path, roster_path, "2412")
+
+        assert "1건" in call_error("client_remove", name="가단체")
+        left = call("client_remove", name="가단체", force=True)
+        assert "가단체" not in {c["name"] for c in left["clients"]}
+        assert left["client"] == clients.DEFAULT_CLIENT
+
+    def test_last_client_cannot_be_removed(self) -> None:
+        assert "마지막" in call_error("client_remove", name=clients.DEFAULT_CLIENT)
+
+    def test_name_is_required_and_sanitized(self) -> None:
+        assert "단체명" in call_error("client_add", name="   ")
+        assert call("client_add", name="가/나:다")["client"] == "가 나 다"
+
+    def test_legacy_runs_move_into_the_default_client(self, tmp_path, roster_path) -> None:
+        """단체를 쓰기 전에 저장한 산출도 그대로 보여야 한다."""
+        import shutil
+
+        self._saved_run(tmp_path, roster_path, "2412")
+        # 예전 판이 두던 자리(산출내역 바로 아래)로 되돌려 놓는다.
+        old = clients.root() / "2412"
+        shutil.move(str(clients.folder() / "2412"), str(old))
+        shutil.rmtree(clients.root() / clients.DEFAULT_CLIENT)
+
+        listing = call("run_list")
+        assert listing["client"] == clients.DEFAULT_CLIENT
+        assert [r["name"] for r in listing["runs"]] == ["2412"]
+        assert not old.exists()
 
 
 class TestPlanAssetsAndAmendment:

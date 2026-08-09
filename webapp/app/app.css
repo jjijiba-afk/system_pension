@@ -19,6 +19,18 @@ body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
 h1 { font-size: 1.45rem; color: var(--navy); margin: 0 0 2px; }
 h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display: block; }
 
+/* ── 단체 고르는 줄 ──
+   탭보다 위에 둔다. 지금 어느 단체를 보고 있는지가 화면 어디에서나 보여야
+   전기 산출을 남의 회사 것으로 끌어오는 일이 없다. */
+#clientbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--navy);
+  border-radius: 10px; background: var(--bg-soft); }
+#clientbar label { margin: 0; color: var(--navy); }
+#clientbar select { flex: 1; min-width: 150px; max-width: 320px; font-weight: 600;
+  background: var(--paper); }
+#clientbar .spacer { flex: 1; }
+#clientbar button.small { background: var(--paper); }
+
 /* ── 큰 탭 ── */
 nav.tabs { display: flex; gap: 6px; margin: 14px 0 18px; }
 nav.tabs button { flex: 1; padding: 13px 6px; font-size: 1.02rem; font-weight: bold;
