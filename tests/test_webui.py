@@ -258,6 +258,39 @@ class TestApi:
         assert meta["longterm_timings"] == ["근속도달", "퇴직시", "정년시"]
         assert len(meta["longterm_item_headers"]) == 9
 
+    def test_editor_groups_place_every_sheet(self) -> None:
+        """묶음에 빠진 표가 있으면 그 표가 화면에서 통째로 사라진다.
+
+        규정이 늘 때마다 탭을 하나씩 붙이던 것을 네 묶음으로 접었다. 새 표를
+        만들고 묶음에 넣는 것을 잊으면, 값을 넣을 자리가 없는 채로 산출된다.
+        """
+        meta = call("meta")
+        placed = [
+            section["sheet"]
+            for group in meta["editor_groups"]
+            for section in group["sections"]
+            if section.get("sheet")
+        ]
+        assert sorted(placed) == sorted(s["sheet"] for s in meta["sheets"])
+        assert len(placed) == len(set(placed)), "같은 표가 두 묶음에 들어갔습니다"
+
+    def test_editor_groups_only_name_panels_the_screen_knows(self) -> None:
+        """화면이 모르는 패널 이름을 넣으면 그 자리가 조용히 빈다."""
+        known = {"map", "payout", "rule", "cause", "longterm", "longterm_items"}
+        panels = [
+            section["panel"]
+            for group in call("meta")["editor_groups"]
+            for section in group["sections"]
+            if section.get("panel")
+        ]
+        assert set(panels) <= known
+        assert sorted(panels) == sorted(known)
+
+    def test_the_editor_fits_in_four_tabs(self) -> None:
+        """아이패드에서 가로로 밀지 않고 다 보여야 한다."""
+        groups = call("meta")["editor_groups"]
+        assert [g["name"] for g in groups] == ["직군", "기초율", "퇴직급여", "장기급여"]
+
     def test_state_write_reports_problems_instead_of_raising(self, tmp_path) -> None:
         state = form.empty_state()
         result = call("state_write", state=state, path=str(tmp_path / "a.xlsx"))
@@ -734,10 +767,41 @@ class TestPlanAssetsAndAmendment:
             report["values"]["dbo"] - 17_200_000_000
         )
 
-    def test_no_asset_input_means_no_asset_table(self, tmp_path) -> None:
+    def test_the_roster_sheet_fills_the_asset_table_by_itself(self, tmp_path) -> None:
+        """명부의 ``1)일반사항`` 에 표가 있으면 손으로 안 넣어도 나와야 한다."""
         case = self._pack(tmp_path)
         report = call("run", roster=case["roster"], assumptions=case["assumptions"],
                       work=str(tmp_path), sensitivity=False, longterm=False)
+        rows = dict(report["assets"])
+        assert rows["기초 사외적립자산 공정가치"] > 0
+        assert rows["기말 사외적립자산 공정가치"] > 0
+        assert rows["순확정급여부채"] == pytest.approx(
+            report["values"]["dbo"] - rows["기말 사외적립자산 공정가치"]
+        )
+
+    def test_a_typed_amount_beats_the_roster_sheet(self, tmp_path) -> None:
+        """화면에 넣은 값이 있으면 그쪽이 우선이다 — 명부보다 나중 자료다."""
+        case = self._pack(tmp_path)
+        report = call(
+            "run", roster=case["roster"], assumptions=case["assumptions"],
+            work=str(tmp_path), sensitivity=False, longterm=False,
+            asset_opening=15_000_000_000, asset_closing=17_200_000_000,
+        )
+        rows = dict(report["assets"])
+        assert rows["기초 사외적립자산 공정가치"] == 15_000_000_000
+
+    def test_no_general_sheet_means_no_asset_table(self, tmp_path) -> None:
+        """일반사항이 없는 명부(업로드용 변환본 등)는 표가 나오지 않는다."""
+        import openpyxl
+
+        source = openpyxl.load_workbook(case_roster := self._pack(tmp_path)["roster"])
+        del source["1)일반사항"]
+        stripped = str(tmp_path / "일반사항없음.xlsx")
+        source.save(stripped)
+        assert case_roster != stripped
+
+        report = call("run", roster=stripped, assumptions=self._pack(tmp_path)[
+            "assumptions"], work=str(tmp_path / "b"), sensitivity=False, longterm=False)
         assert report["assets"] == []
 
     def test_benefit_change_becomes_past_service_cost(self, tmp_path) -> None:

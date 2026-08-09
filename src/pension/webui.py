@@ -85,6 +85,13 @@ def _meta(_request: dict) -> dict[str, Any]:
             }
             for spec in form.FORM_SHEETS
         ],
+        "editor_groups": [
+            {
+                "name": group["name"], "note": group["note"],
+                "sections": [dict(section) for section in group["sections"]],
+            }
+            for group in form.EDITOR_GROUPS
+        ],
         "default_groups": list(DEFAULT_GROUPS),
         "apply_choices": list(form.APPLY_CHOICES),
         "rounding_units": list(form.ROUNDING_UNITS),

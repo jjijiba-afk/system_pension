@@ -55,6 +55,7 @@ from .standard_rates import SALARY_BASE_UP
 
 __all__ = [
     "APPLY_CHOICES",
+    "EDITOR_GROUPS",
     "EXIT_CAUSE_HEADERS",
     "FORM_SHEETS",
     "LONGTERM_ITEM_HEADERS",
@@ -147,6 +148,58 @@ FORM_SHEETS: Final[tuple[dict[str, Any], ...]] = (
         "sheet": LONGTERM_SHEET, "tab": "장기급여", "key": "근속연수", "fixed": (),
         "note": "근속 포상·장기근속휴가의 지급일수입니다(일 기본급 × 일수).",
         "key_choices": (),
+    },
+)
+
+#: 산출가정 화면의 묶음. 탭 하나에 관련된 표를 모두 세로로 쌓는다.
+#:
+#: 규정이 늘 때마다 탭을 하나씩 붙였더니 열세 개가 되어, 아이패드에서 가로로
+#: 밀어야 보였다. 무엇을 어디에 넣었는지도 알기 어려웠다. 화면 구성을 여기
+#: 자료로 두는 이유는 탭 이름과 순서를 JS 에 흩어 두지 않기 위해서다.
+#:
+#: 나누는 기준은 **어디서 오는 값인가** 다. 기초율은 금리표·표준률에서 통째로
+#: 불러오는 것들이고, 나머지는 회사 규정을 보고 손으로 정하는 것들이다.
+EDITOR_GROUPS: Final[tuple[dict[str, Any], ...]] = (
+    {
+        "name": "직군",
+        "note": "직군을 어떻게 나눌지와, 직군마다 무엇을 적용할지 정합니다. "
+                "여기서 켜고 끈 것이 아래 기초율 표들에 그대로 걸립니다.",
+        "sections": (
+            {"panel": "map", "title": "직군 매핑"},
+            {"panel": "payout", "title": "지급규정 (정년·근속·반올림·적용 여부)"},
+            {"sheet": SALARY_SHEET, "title": "Base-up (공통 임금인상률)"},
+        ),
+    },
+    {
+        "name": "기초율",
+        "note": "금리표와 표준률에서 불러오는 표들입니다. 위쪽 [표준률 불러오기] "
+                "한 번으로 승급률·퇴직률·사망률이 한꺼번에 채워집니다. "
+                "직군별 반영 여부는 [직군] 탭의 지급규정에서 켜고 끕니다.",
+        "sections": (
+            {"sheet": DISCOUNT_SHEET, "title": "할인율"},
+            {"sheet": PROMOTION_SHEET, "title": "승급률"},
+            {"sheet": WITHDRAWAL_SHEET, "title": "퇴직률"},
+            {"sheet": MORTALITY_SHEET, "title": "사망률"},
+        ),
+    },
+    {
+        "name": "퇴직급여",
+        "note": "지급률 표와 그 값을 어떻게 읽을지가 한 화면에 있습니다. "
+                "표만 보고는 누적인지 누진인지 알 수 없으니 함께 보십시오.",
+        "sections": (
+            {"sheet": BENEFIT_SHEET, "title": "지급률 표"},
+            {"panel": "rule", "title": "지급률 규정 (누적·누진·수식)"},
+            {"panel": "cause", "title": "퇴직사유별 차등 (중도·사망·정년)"},
+        ),
+    },
+    {
+        "name": "장기급여",
+        "note": "근속 포상·장기근속휴가입니다. 없으면 통째로 비워 두십시오.",
+        "sections": (
+            {"sheet": LONGTERM_SHEET, "title": "장기급여 지급률 표"},
+            {"panel": "longterm", "title": "지급유형·지급시점"},
+            {"panel": "longterm_items", "title": "복합 지급 (한 근속연수에 항목이 여럿)"},
+        ),
     },
 )
 

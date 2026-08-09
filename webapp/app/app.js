@@ -174,14 +174,19 @@ function buildEditor() {
     return button;
   };
 
-  addTab("직군 매핑", buildMapTab).classList.add("on");
+  // 규정이 늘 때마다 탭을 붙였더니 열세 개가 되어 아이패드에서 가로로 밀어야
+  // 했다. 이제 네 묶음으로 접고, 한 묶음 안의 표는 세로로 쌓아 펼쳐 본다.
+  // 어떤 표가 어느 묶음에 들어가는지는 파이썬(EDITOR_GROUPS)이 정한다.
+  const specs = Object.fromEntries(META.sheets.map((s) => [s.sheet, s]));
+  for (const group of META.editor_groups) {
+    addTab(group.name, (page) => {
+      if (group.note) page.append(el("div", { class: "hint" }, group.note));
+      group.sections.forEach((section, index) =>
+        buildSection(page, section, specs, index === 0));
+    });
+  }
+  tabs.firstChild.classList.add("on");
   pages.firstChild.classList.add("on");
-  for (const spec of META.sheets) addTab(spec.tab, (page) => buildGridTab(page, spec));
-  addTab("지급규정", buildPayoutTab);
-  addTab("지급률 규정", buildRuleTab);
-  addTab("퇴직사유", buildCauseTab);
-  addTab("장기급여 유형", buildLongtermTab);
-  addTab("장기급여 복합", buildLongtermItemTab);
 
   $("ed-grade").replaceChildren(...META.grades.map((g) => el("option", {}, g)));
   $("ed-grade").value = "AA0";
@@ -192,6 +197,16 @@ function buildEditor() {
   $("page-edit").addEventListener("change", flushEditor);
   $("page-edit").addEventListener("focusout", flushEditor);
 }
+
+/** 패널 이름 → 그리는 함수. 파이썬이 이름만 넘기고 그리기는 여기서 한다. */
+const SECTION_PANELS = {
+  map: (page) => buildMapTab(page),
+  payout: (page) => buildPayoutTab(page),
+  rule: (page) => buildRuleTab(page),
+  cause: (page) => buildCauseTab(page),
+  longterm: (page) => buildLongtermTab(page),
+  longterm_items: (page) => buildLongtermItemTab(page),
+};
 
 let saveTimer = null;
 
@@ -215,6 +230,33 @@ function saveEditorLocal() {
 }
 
 // ── 표 입력 탭 ──
+/** 묶음 안의 접이식 구획 하나. 표는 시트 이름으로, 나머지는 패널 이름으로 찾는다. */
+function buildSection(page, section, specs, first) {
+  const body = el("div", { class: "section-body" });
+  // 접힌 구획도 채워졌는지는 보여야 한다. 제목 옆 숫자가 그 몫이다 —
+  // 없으면 무엇을 아직 안 넣었는지 하나씩 열어 봐야 안다.
+  const count = el("span", { class: "count" });
+  const attrs = {
+    class: "section",
+    // 시험(e2e)이 구획을 이름으로 집을 수 있게 표시를 남긴다. 제목은 문구가
+    // 바뀌지만 시트·패널 이름은 자료 구조와 함께 움직인다.
+    "data-section": section.sheet || section.panel || "",
+  };
+  if (first) attrs.open = "";
+  page.append(el("details", attrs,
+                 el("summary", {}, section.title, count), body));
+  if (section.sheet) {
+    const spec = specs[section.sheet];
+    if (spec) {
+      buildGridTab(body, spec);
+      gridBodies[spec.sheet].countEl = count;
+    }
+    return;
+  }
+  const build = SECTION_PANELS[section.panel];
+  if (build) build(body);
+}
+
 function buildGridTab(page, spec) {
   const toolbar = el("div", { class: "toolbar" });
   let keySelect = null;
@@ -263,7 +305,14 @@ function gridRows(sheet) {
     const values = [...tr.querySelectorAll("input")].map((i) => i.value.trim());
     if (values.some(Boolean)) rows.push(values);
   }
+  const badge = gridBodies[sheet].countEl;
+  if (badge) badge.textContent = rows.length ? `${rows.length}줄` : "비어 있음";
   return rows;
+}
+
+/** 접힌 구획의 제목 옆 숫자를 지금 값으로 맞춘다. */
+function refreshSectionCounts() {
+  for (const sheet of Object.keys(gridBodies)) gridRows(sheet);
 }
 
 function addGridRow(sheet) {
@@ -770,6 +819,7 @@ function renderState(state) {
              retired: seen?.retired || 0, suggest: seen?.suggest || target };
   });
   renderMap();
+  refreshSectionCounts();
   syncEditorHint();
 }
 

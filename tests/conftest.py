@@ -219,10 +219,17 @@ def write_general_sheet(
         ws.cell(row, 5, (payout or {}).get(key, ""))
 
     if longterm is not None:
-        ws.cell(130, 3, "장기근속 지급액")
-        ws.cell(130, 5, longterm[0])
-        ws.cell(131, 3, "장기근속 받은금액")
-        ws.cell(131, 5, longterm[1])
+        # 표 제목이 항목 이름을 그대로 품는다 — 실제 서식 그대로 둔다. 제목을
+        # 먼저 집으면 금액 칸이 비어 0 원으로 읽힌다.
+        ws.cell(133, 3, "2) 기중 장기근속 지급액")
+        ws.cell(134, 3, "구분")
+        ws.cell(134, 5, "금액")
+        ws.cell(135, 3, "(-)감소")
+        ws.cell(135, 4, "장기근속 지급액")
+        ws.cell(135, 5, longterm[0])
+        ws.cell(136, 3, "(+)증가")
+        ws.cell(136, 4, "장기근속 받은금액")
+        ws.cell(136, 5, longterm[1])
 
 
 #: 6번 '회사의 퇴직금 지급규정' 항목의 행 배치.
