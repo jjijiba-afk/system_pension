@@ -82,6 +82,86 @@ class TestAssumptionForm:
         assert back["longterm_rules"]["생산직"]["escalation"] == "3%"
         assert back["mapping"] == state["mapping"]
 
+    def test_every_setting_still_reaches_the_engine(self, tmp_path) -> None:
+        """화면을 합쳐도 **넣을 수 있는 값은 하나도 줄지 않아야 한다.**
+
+        탭을 묶고 표를 합치는 것은 보기 좋자는 일이다. 그 과정에서 칸이 하나라도
+        사라지면 그 규정을 쓰는 회사는 산출을 못 하게 된다. 한 벌을 통째로 채워
+        엔진까지 닿는지 본다.
+        """
+        from pension.assumptions import load_assumptions
+
+        state = form.example_state(["정규직", "임원"])
+        state["payout"]["임원"].update(
+            withdrawal="미반영", excluded=False, min_service="3",
+            nra="65", executive_nra="70", add_age="3",
+            basis="월할", fraction="절사", unit="10원",
+        )
+        state["mapping"] = [["사원", "정규사원", "정규직"], ["대표", "등기임원", "임원"]]
+        state["benefit_rules"]["임원"] = {"mode": "수식", "formula": "=t*배수"}
+
+        # 지급률에 직군 아닌 열을 하나 더 만들고 퇴직사유가 그것을 가리킨다.
+        state["grids"]["지급률"]["extra"] = ["사망가산"]
+        state["grids"]["지급률"]["rows"] = [
+            ["0", "1.0", "1.0", "3.0"], ["10", "10.0", "20.0", "5.0"],
+        ]
+        state["benefit_rules"]["사망가산"] = {"mode": "누적", "formula": ""}
+        state["exit_causes"] = [
+            ["정규직", "사망", "", "사망가산", "50000000", "1", "즉시"],
+            ["정규직", "정년", "임원", "", "", "", "근속비례"],
+        ]
+
+        # 장기급여도 항목 열을 더 만들고 항목마다 다르게 준다.
+        state["grids"]["장기급여지급률"]["extra"] = ["금"]
+        state["grids"]["장기급여지급률"]["rows"] = [["10", "3", "3", "5000000"]]
+        state["longterm_rules"]["정규직"].update(anniversary="10-01", every="5")
+        state["longterm_rules"]["금"] = dict(
+            form.default_longterm_rule("정규직"),
+            kind="현물", escalation="3%", timing="퇴직시",
+            accumulate=True, note="현물 포상",
+        )
+
+        loaded = load_assumptions(form.write_state(state, tmp_path / "기초율.xlsx"))
+
+        # 지급률 — 직군 열과 따로 만든 열이 모두 살아 있다.
+        assert loaded.severance_benefit.multiple("정규직", 12) == 10.0
+        assert loaded.severance_benefit.multiple("사망가산", 12) == 5.0
+        assert loaded.severance_benefit.mode("임원") == "수식"
+
+        # 퇴직사유 — 두 줄 모두, 모든 칸이.
+        death = loaded.exit_causes.get("정규직", "사망")
+        assert death.extra_rule == "사망가산"
+        assert death.extra_amount == 50_000_000
+        assert death.min_service == 1.0
+        assert death.attribution == "즉시"
+        normal = loaded.exit_causes.get("정규직", "정년")
+        assert normal.benefit_rule == "임원"
+        assert normal.attribution == "근속비례"
+
+        # 장기급여 — 직군 항목과 추가 항목이 모두.
+        items = {i.column("정규직"): i for i in loaded.longterm_items("정규직")}
+        assert items["정규직"].anniversary == "10-01"
+        assert items["정규직"].every_years == 5
+        assert items["금"].kind == "현물"
+        assert items["금"].escalation == pytest.approx(0.03)
+        assert items["금"].timing == "퇴직시"
+        assert items["금"].accumulate is True
+        assert "현물 포상" in items["금"].note
+
+        # 지급규정 — 직군 규칙이 명부 조합마다 한 줄씩.
+        from pension.pipeline import _read_payout_rules
+
+        rules = {r.source_name: r for r in _read_payout_rules(
+            tmp_path / "기초율.xlsx")}
+        assert rules["대표"].severance_nra == 65
+        assert rules["대표"].executive_nra == 70
+        assert rules["대표"].min_service_years == 3
+        assert rules["대표"].service_basis == "월할"
+        assert rules["대표"].service_fraction == "절사"
+        assert rules["대표"].benefit_rounding_unit == 10
+        assert rules["대표"].apply_withdrawal is False
+        assert rules["대표"].employee_type_filter == "등기임원"
+
     def test_exit_causes_survive_the_round_trip(self, tmp_path) -> None:
         """퇴직사유 차등이 왕복에서 사라지면 엉뚱한 급여로 산출된다."""
         state = form.example_state(["생산직", "임원"])
@@ -116,28 +196,40 @@ class TestAssumptionForm:
         ]
         assert any("두 번" in p for p in form.state_problems(state))
 
-    def test_longterm_extras_survive_the_round_trip(self, tmp_path) -> None:
-        """복합 지급 항목이 왕복에서 사라지면 포상금·금이 통째로 빠진다."""
+    def test_longterm_extra_columns_survive_the_round_trip(self, tmp_path) -> None:
+        """항목 열이 왕복에서 사라지면 포상금·금이 통째로 빠진다."""
         state = form.example_state(["생산직"])
         state["longterm_rules"]["생산직"]["anniversary"] = "10-01"
-        state["longterm_items"] = [
-            ["생산직", "금", "현물", "3%", "퇴직시", "", "Y", "", "현물 포상"],
-        ]
+        state["grids"]["장기급여지급률"]["extra"] = ["금"]
+        state["grids"]["장기급여지급률"]["rows"] = [["10", "10", "5000000"]]
+        state["longterm_rules"]["금"] = dict(
+            form.default_longterm_rule("생산직"),
+            kind="현물", escalation="3%", timing="퇴직시",
+            accumulate=True, note="현물 포상",
+        )
 
         back = form.read_state(form.write_state(state, tmp_path / "기초율.xlsx"))
+        assert back["grids"]["장기급여지급률"]["extra"] == ["금"]
+        assert back["grids"]["장기급여지급률"]["rows"] == [["10", "10", "5000000"]]
         assert back["longterm_rules"]["생산직"]["anniversary"] == "10-01"
-        assert back["longterm_items"] == [
-            ["생산직", "금", "현물", "3%", "퇴직시", "", "Y", "", "현물 포상"],
-        ]
+        gold = back["longterm_rules"]["금"]
+        assert gold["rule"] == "생산직"
+        assert gold["kind"] == "현물"
+        assert gold["escalation"] == "3%"
+        assert gold["timing"] == "퇴직시"
+        assert gold["accumulate"] is True
+        assert gold["note"] == "현물 포상"
 
-    def test_longterm_extras_reach_the_engine(self, tmp_path) -> None:
+    def test_longterm_extra_columns_reach_the_engine(self, tmp_path) -> None:
         from pension.assumptions import load_assumptions
 
         state = form.example_state(["생산직"])
-        state["grids"]["장기급여지급률"]["rows"] = [["10", "10"]]
-        state["longterm_items"] = [
-            ["생산직", "금", "현금", "", "퇴직시", "5", "Y", "", ""],
-        ]
+        state["grids"]["장기급여지급률"]["extra"] = ["금"]
+        state["grids"]["장기급여지급률"]["rows"] = [["10", "10", "5000000"]]
+        state["longterm_rules"]["금"] = dict(
+            form.default_longterm_rule("생산직"),
+            kind="현금", timing="퇴직시", every="5", accumulate=True,
+        )
         path = form.write_state(state, tmp_path / "기초율.xlsx")
 
         items = load_assumptions(path).longterm_items("생산직")
@@ -146,18 +238,37 @@ class TestAssumptionForm:
         assert items[1].timing == "퇴직시"
         assert items[1].every_years == 5
         assert items[1].accumulate is True
+        assert items[1].column("생산직") == "금"
 
     def test_an_unknown_longterm_timing_blocks_saving(self) -> None:
         state = form.example_state(["생산직"])
-        state["longterm_items"] = [["생산직", "금", "현금", "", "아무때나", "", "", "", ""]]
+        state["longterm_rules"]["생산직"]["timing"] = "아무때나"
         assert any("아무때나" in p for p in form.state_problems(state))
 
-    def test_a_row_without_an_item_name_is_dropped(self, tmp_path) -> None:
-        """항목 이름이 없으면 지급률 표에서 열을 찾을 수 없다."""
+    def test_an_extra_column_needs_a_job_group(self) -> None:
+        """어느 직군의 급여인지 없으면 그 열이 아무에게도 안 걸린다."""
         state = form.example_state(["생산직"])
-        state["longterm_items"] = [["생산직", "", "현금", "", "퇴직시", "", "", "", ""]]
-        back = form.read_state(form.write_state(state, tmp_path / "기초율.xlsx"))
-        assert back["longterm_items"] == []
+        state["grids"]["장기급여지급률"]["extra"] = ["금"]
+        state["longterm_rules"]["금"] = form.default_longterm_rule("")
+        assert any("어느 직군" in p for p in form.state_problems(state))
+
+    def test_benefit_extra_columns_become_their_own_scale(self, tmp_path) -> None:
+        """'사망가산' 처럼 직군이 아닌 지급률을 만들 수 있어야 한다.
+
+        [퇴직사유] 의 가산 규정이 이 이름을 가리킨다. 직군 열만 있으면
+        '사망 시 기본급 3개월분' 을 적을 자리가 아예 없다.
+        """
+        from pension.assumptions import load_assumptions
+
+        state = form.example_state(["생산직"])
+        state["grids"]["지급률"]["extra"] = ["사망가산"]
+        state["grids"]["지급률"]["rows"] = [["0", "1.0", "3.0"], ["10", "10.0", "5.0"]]
+        state["benefit_rules"]["사망가산"] = dict(form.default_benefit_rule(), mode="누적")
+        state["exit_causes"] = [["생산직", "사망", "", "사망가산", "", "", ""]]
+
+        loaded = load_assumptions(form.write_state(state, tmp_path / "기초율.xlsx"))
+        assert loaded.severance_benefit.multiple("사망가산", 12) == 5.0
+        assert loaded.exit_causes.get("생산직", "사망").extra_rule == "사망가산"
 
     def test_causes_reach_the_engine(self, tmp_path) -> None:
         """만든 워크북을 산출 엔진이 그대로 읽어야 한다."""
@@ -256,7 +367,9 @@ class TestApi:
         assert meta["attributions"] == ["근속비례", "즉시"]
         assert len(meta["exit_cause_headers"]) == 7
         assert meta["longterm_timings"] == ["근속도달", "퇴직시", "정년시"]
-        assert len(meta["longterm_item_headers"]) == 9
+        panels = {s["sheet"]: s["column_panel"] for s in meta["sheets"]}
+        assert panels["지급률"] == "benefit"
+        assert panels["장기급여지급률"] == "longterm"
 
     def test_editor_groups_place_every_sheet(self) -> None:
         """묶음에 빠진 표가 있으면 그 표가 화면에서 통째로 사라진다.
@@ -276,7 +389,7 @@ class TestApi:
 
     def test_editor_groups_only_name_panels_the_screen_knows(self) -> None:
         """화면이 모르는 패널 이름을 넣으면 그 자리가 조용히 빈다."""
-        known = {"map", "payout", "rule", "cause", "longterm", "longterm_items"}
+        known = {"map", "payout", "cause"}
         panels = [
             section["panel"]
             for group in call("meta")["editor_groups"]

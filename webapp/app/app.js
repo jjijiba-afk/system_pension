@@ -126,8 +126,6 @@ document.addEventListener("visibilitychange", () => {
 let groups = [];            // 현재 직군 묶음
 let gridBodies = {};        // 시트명 → {spec, keySelect, tbody, table}
 let payoutBody = null;      // 지급규정 tbody — 행마다 위젯 참조를 붙인다
-let ruleBody = null;        // 지급률 규정
-let ltBody = null;          // 장기급여 유형
 let mapData = [];           // 직군 매핑 행 [{source, kind, normalized, active, retired, target, suggest}]
 const MIN_ROWS = 8;
 
@@ -202,10 +200,7 @@ function buildEditor() {
 const SECTION_PANELS = {
   map: (page) => buildMapTab(page),
   payout: (page) => buildPayoutTab(page),
-  rule: (page) => buildRuleTab(page),
   cause: (page) => buildCauseTab(page),
-  longterm: (page) => buildLongtermTab(page),
-  longterm_items: (page) => buildLongtermItemTab(page),
 };
 
 let saveTimer = null;
@@ -269,28 +264,122 @@ function buildGridTab(page, spec) {
     el("button", { class: "small", type: "button", onclick: () => addGridRow(spec.sheet) }, "행 추가"),
     el("button", { class: "small", type: "button", onclick: () => compactGrid(spec.sheet) }, "빈 행 정리"),
   );
+  if (spec.allow_extra) {
+    toolbar.append(el("button", { class: "small", type: "button",
+                                  onclick: () => addGridColumn(spec.sheet) }, "항목 추가"));
+  }
+  if (spec.column_panel === "benefit") {
+    toolbar.append(el("button", { class: "small", type: "button",
+                                  onclick: previewFormulas }, "수식 미리보기"));
+  }
+  if (spec.column_panel === "longterm") {
+    toolbar.append(el("button", { class: "small", type: "button",
+                                  onclick: () => toggleDetailRows(spec.sheet) },
+                      "세부 설정"));
+  }
   const table = el("table", { class: "grid" });
   const tbody = el("tbody");
   table.append(tbody);
   page.append(toolbar, el("div", { class: "hint" }, "· " + spec.note),
               el("div", { class: "scroll-x" }, table));
-  gridBodies[spec.sheet] = { spec, keySelect, tbody };
+  if (spec.extra_hint) page.append(el("div", { class: "hint" }, "· " + spec.extra_hint));
+  if (spec.column_panel === "benefit") page.append(...benefitGuide());
+  if (spec.column_panel === "longterm") page.append(...longtermGuide());
+  gridBodies[spec.sheet] = { spec, keySelect, tbody, extra: [], columnWidgets: {} };
 }
 
-function gridHeaders(spec, keyLabel) {
-  return [keyLabel, ...(spec.fixed.length ? spec.fixed : groups)];
+function benefitGuide() {
+  const vars = Object.entries(META.formula_variables)
+    .map(([k, v]) => `${k}=${v}`).join(" · ");
+  return [
+    el("div", { class: "hint", style: "white-space:pre-line" },
+       "누적  표의 값이 그 근속연수의 누적 배수입니다. (10년 → 10.0)\n" +
+       "누진  표의 값이 그 구간에서만 적용할 연 배수입니다. " +
+       "0년 1.0 / 5년 1.5 / 10년 2.0 이면 근속 12년 = 5×1.0 + 5×1.5 + 2×2.0 = 16.5\n" +
+       "수식  방식을 '수식' 으로 두고 그 아래 칸에 직접 씁니다."),
+    el("div", { class: "hint" }, "변수  " + vars),
+    el("div", { class: "hint" }, "함수  " + META.formula_functions.join(" ")),
+    el("div", { class: "hint" },
+       '예시  =IF(t<10, t*1.0, 10 + (t-10)*2.0)     =IF(제도="DB", t*1.5, t)     =MIN(t, 30)'),
+  ];
 }
 
-function renderGrid(sheet, key, rows) {
+function longtermGuide() {
+  return [
+    el("div", { class: "hint", style: "white-space:pre-line" },
+       "휴가        표 값 = 지급일수 → 일 기본급 × 일수 (임금상승률 반영)\n" +
+       "평균임금    표 값 = 배수 → 30일 평균임금 × 배수 (임금상승률 반영)\n" +
+       "현물        표 값 = 정액(원) → 평가시점 시세로 환산해 넣고 현물 상승률로 올림\n" +
+       "현금        표 값 = 정액(원) → 규정 금액이 고정이므로 올리지 않음"),
+    el("div", { class: "hint", style: "white-space:pre-line" },
+       "근속도달    재직 중 그 근속에 닿는 해에 줍니다.\n" +
+       "퇴직시      나갈 때 줍니다. 중도퇴직자도 받습니다.\n" +
+       "정년시      정년퇴직자만 받습니다.\n" +
+       "누적        켜면 도달한 지급 시점의 값을 모두 더합니다 (소멸기한 없는 휴가).\n" +
+       "반복 주기   마지막 지급 이후 되풀이하는 주기 (건강검진 2년마다 → 2).\n" +
+       "지급일      창립기념일처럼 날짜가 와야 줄 때 (10-01). '근속도달' 에만 씁니다."),
+  ];
+}
+
+/** 그 표의 열 이름들 — 직군 다음에 따로 만든 열. 파이썬 grid_columns() 와 같다. */
+function gridColumns(sheet) {
+  const grid = gridBodies[sheet];
+  if (grid.spec.fixed.length) return [...grid.spec.fixed];
+  const extra = (grid.extra || []).filter((n) => n && !groups.includes(n));
+  return [...groups, ...new Set(extra)];
+}
+
+function addGridColumn(sheet) {
+  const name = prompt("항목 이름을 정하세요. (예: 사망가산, 금, 특별상여)", "");
+  if (name === null) return;
+  const clean = name.trim();
+  if (!clean) return;
+  if (gridColumns(sheet).includes(clean)) { alert("이미 있는 이름입니다."); return; }
+  const state = collectState();
+  state.grids[sheet].extra = [...(state.grids[sheet].extra || []), clean];
+  renderState(state);
+  saveEditorLocal();
+}
+
+function removeGridColumn(sheet, name) {
+  if (!confirm(`'${name}' 열을 지웁니다. 그 열의 값도 함께 사라집니다.`)) return;
+  const state = collectState();
+  state.grids[sheet].extra = (state.grids[sheet].extra || []).filter((n) => n !== name);
+  renderState(state);
+  saveEditorLocal();
+}
+
+function renderGrid(sheet, key, rows, extra, columnValues) {
   const grid = gridBodies[sheet];
   if (grid.keySelect) grid.keySelect.value = key || grid.spec.key;
-  const headers = gridHeaders(grid.spec, grid.keySelect ? grid.keySelect.value : grid.spec.key);
-  grid.tbody.replaceChildren(
-    el("tr", {}, ...headers.map((h) => el("th", {}, h))));
+  grid.extra = [...(extra || [])];
+  const columns = gridColumns(sheet);
+  const keyLabel = grid.keySelect ? grid.keySelect.value : grid.spec.key;
+
+  const head = el("tr", {}, el("th", {}, keyLabel));
+  for (const name of columns) {
+    const cell = el("th", {}, name);
+    // 따로 만든 열만 지울 수 있다. 직군 열은 [직군별 규정] 에서 다룬다.
+    if (!groups.includes(name)) {
+      cell.append(el("button", { class: "link", type: "button", title: "열 삭제",
+                                 onclick: () => removeGridColumn(sheet, name) }, "×"));
+    }
+    head.append(cell);
+  }
+  grid.tbody.replaceChildren(head);
+
+  // 열 머리 아래에 그 열을 **어떻게 읽을지** 를 붙인다. 표만 떼어 놓고 보면
+  // 값이 누적 배수인지 휴가 일수인지 알 수 없어 늘 다른 탭과 번갈아 봐야 했다.
+  grid.columnWidgets = {};
+  const panel = COLUMN_PANELS[grid.spec.column_panel];
+  if (panel) panel(grid, columns, columnValues || {});
+
   const count = Math.max(rows.length + 2, MIN_ROWS);
   for (let r = 0; r < count; r += 1) {
-    grid.tbody.append(el("tr", {}, ...headers.map((_, c) =>
-      el("td", {}, el("input", { type: "text", value: (rows[r] || [])[c] || "" })))));
+    // 값 줄에만 표시를 남긴다 — 열 머리 패널도 <tr> 이라 그냥 세면 섞인다.
+    grid.tbody.append(el("tr", { "data-row": "" },
+      ...[keyLabel, ...columns].map((_, c) =>
+        el("td", {}, el("input", { type: "text", value: (rows[r] || [])[c] || "" })))));
   }
 }
 
@@ -301,10 +390,11 @@ function relabelGrid(sheet) {
 
 function gridRows(sheet) {
   const rows = [];
-  for (const tr of [...gridBodies[sheet].tbody.children].slice(1)) {
+  for (const tr of gridBodies[sheet].tbody.querySelectorAll("tr[data-row]")) {
     const values = [...tr.querySelectorAll("input")].map((i) => i.value.trim());
     if (values.some(Boolean)) rows.push(values);
   }
+  syncDetailRows(gridBodies[sheet]);
   const badge = gridBodies[sheet].countEl;
   if (badge) badge.textContent = rows.length ? `${rows.length}줄` : "비어 있음";
   return rows;
@@ -318,8 +408,8 @@ function refreshSectionCounts() {
 function addGridRow(sheet) {
   const grid = gridBodies[sheet];
   const width = grid.tbody.firstChild.children.length;
-  grid.tbody.append(el("tr", {}, ...Array.from({ length: width }, () =>
-    el("td", {}, el("input", { type: "text" })))));
+  grid.tbody.append(el("tr", { "data-row": "" },
+    ...Array.from({ length: width }, () => el("td", {}, el("input", { type: "text" })))));
 }
 
 function compactGrid(sheet) {
@@ -412,68 +502,87 @@ async function loadGeneralInfo() {
   }
 }
 
-// ── 지급률 규정 탭 ──
-function buildRuleTab(page) {
-  const guide =
-    "누적  표의 값이 그 근속연수의 누적 배수입니다. (10년 → 10.0)\n" +
-    "누진  표의 값이 그 구간에서만 적용할 연 배수입니다. " +
-    "0년 1.0 / 5년 1.5 / 10년 2.0 이면 근속 12년 = 5×1.0 + 5×1.5 + 2×2.0 = 16.5\n" +
-    "수식  아래 수식으로 직접 계산합니다. 표로 담기 어려운 규정에만 쓰세요.";
-  const vars = Object.entries(META.formula_variables)
-    .map(([k, v]) => `${k}=${v}`).join(" · ");
-  const table = el("table", { class: "grid" });
-  ruleBody = el("tbody");
-  table.append(ruleBody);
-  page.append(
-    el("div", { class: "hint", style: "white-space:pre-line" }, guide),
-    el("div", { class: "hint" }, "변수  " + vars),
-    el("div", { class: "hint" }, "함수  " + META.formula_functions.join(" ")),
-    el("div", { class: "hint" },
-       '예시  =IF(t<10, t*1.0, 10 + (t-10)*2.0)     =IF(제도="DB", t*1.5, t)     =MIN(t, 30)'),
-    el("div", { class: "scroll-x" }, table),
-    el("div", { class: "toolbar" },
-       el("button", { class: "small", type: "button", onclick: previewFormulas },
-          "수식 미리보기")));
+// ── 열 머리 패널 ──
+// 표 값이 무엇을 뜻하는지는 열마다 다르다. 그것을 다른 탭에 떼어 두었더니
+// 표를 보면서 늘 번갈아 봐야 했다. 열 머리 바로 아래에 붙인다.
+
+/** 패널 한 줄. 첫 칸은 이름표, 나머지는 열마다 하나씩.
+ *
+ * ``detail`` 로 표시한 줄은 [세부 설정] 을 눌러야 보인다. 대부분의 규정은
+ * 위 두세 줄만 쓰는데 여덟 줄을 늘 펼쳐 두면 정작 값을 넣을 표가 밀린다.
+ */
+function panelRow(label, columns, make, detail = false) {
+  const tr = el("tr", { class: detail ? "panel detail" : "panel" },
+                el("td", { class: "name" }, label));
+  for (const name of columns) tr.append(el("td", {}, make(name)));
+  return tr;
 }
 
-function renderRules(rules) {
-  ruleBody.replaceChildren(el("tr", {},
-    ...["규정명(직군)", "방식", "수식", "상태"].map((h) => el("th", {}, h))));
-  for (const group of groups) {
-    const item = rules[group] || {};
-    const mode = makeSelect(META.benefit_modes, item.mode || META.benefit_modes[0]);
-    const formula = el("input", { type: "text", value: item.formula || "",
-                                  style: "width:280px;text-align:left" });
-    const state = el("span", { class: "hint" });
-    const sync = () => {
-      const isFormula = mode.value === "수식";
-      formula.disabled = !isFormula;
-      if (!isFormula) { state.textContent = ""; return; }
-      const source = formula.value.trim();
-      if (!source) { state.textContent = "수식 필요"; state.className = "bad-text"; return; }
+/** 세부 줄에 값이 하나라도 있으면 저절로 펼친다 — 숨은 채로 걸려 있으면 안 된다. */
+function syncDetailRows(grid) {
+  const filled = [...grid.tbody.querySelectorAll("tr.detail")].some((tr) =>
+    [...tr.querySelectorAll("input, select")].some(
+      (w) => (w.type === "checkbox" ? w.checked : w.value.trim())));
+  grid.tbody.classList.toggle("show-detail", filled || grid.showDetail === true);
+}
+
+function toggleDetailRows(sheet) {
+  const grid = gridBodies[sheet];
+  grid.showDetail = !grid.tbody.classList.contains("show-detail");
+  syncDetailRows(grid);
+}
+
+/** 지급률 — 누적·누진·수식과 그 수식. */
+function benefitColumnPanel(grid, columns, values) {
+  const widgets = grid.columnWidgets;
+  const states = {};
+  const syncAll = () => {
+    for (const name of columns) {
+      const w = widgets[name];
+      const isFormula = w.mode.value === "수식";
+      w.formula.disabled = !isFormula;
+      const mark = states[name];
+      if (!isFormula) { mark.textContent = ""; mark.className = "hint"; continue; }
+      const source = w.formula.value.trim();
+      if (!source) { mark.textContent = "수식 필요"; mark.className = "bad-text"; continue; }
       try {
         const check = py("formula_check", { source });
-        state.textContent = check.error ? "✕ " + check.error : "✓ 확인됨";
-        state.className = check.error ? "bad-text" : "ok-text";
+        mark.textContent = check.error ? "✕ " + check.error : "✓";
+        mark.className = check.error ? "bad-text" : "ok-text";
       } catch { /* 부팅 전이면 그냥 둔다 */ }
-    };
-    mode.addEventListener("change", sync);
-    formula.addEventListener("input", sync);
-    sync();
-    const tr = el("tr", {}, el("td", { class: "name" }, group),
-      el("td", {}, mode), el("td", {}, formula), el("td", {}, state));
-    tr.dataset.group = group;
-    tr.widgets = { mode, formula };
-    ruleBody.append(tr);
-  }
+    }
+  };
+
+  grid.tbody.append(panelRow("방식", columns, (name) => {
+    const item = values[name] || {};
+    const mode = makeSelect(META.benefit_modes, item.mode || META.benefit_modes[0]);
+    mode.addEventListener("change", syncAll);
+    (widgets[name] ||= {}).mode = mode;
+    return mode;
+  }));
+  grid.tbody.append(panelRow("수식", columns, (name) => {
+    const item = values[name] || {};
+    const box = el("input", { type: "text", value: item.formula || "",
+                              style: "text-align:left" });
+    box.addEventListener("input", syncAll);
+    widgets[name].formula = box;
+    // 확인 표시는 수식 칸에 붙인다. 줄을 따로 두면 표 방식일 때 통째로 빈다.
+    const mark = el("span", { class: "hint" });
+    states[name] = mark;
+    return el("div", { class: "with-mark" }, box, mark);
+  }));
+  syncAll();
+}
+
+function benefitSheet() {
+  return META.sheets.find((s) => s.column_panel === "benefit").sheet;
 }
 
 function ruleValues() {
   const result = {};
-  for (const tr of [...ruleBody.children].slice(1)) {
-    result[tr.dataset.group] = {
-      mode: tr.widgets.mode.value, formula: tr.widgets.formula.value.trim(),
-    };
+  const grid = gridBodies[benefitSheet()];
+  for (const [name, w] of Object.entries(grid.columnWidgets)) {
+    result[name] = { mode: w.mode.value, formula: w.formula.value.trim() };
   }
   return result;
 }
@@ -531,10 +640,13 @@ function buildCauseTab(page) {
 }
 
 function causeRow(values) {
-  const rule = makeSelect(["", ...groups], values[0] || "");
+  // 지급률 표의 **모든 열** 을 고를 수 있어야 한다. 직군만 고를 수 있으면
+  // '사망 시 기본급 3개월분 가산' 같은 별도 지급률을 가리킬 수가 없다.
+  const scales = gridColumns(benefitSheet());
+  const rule = makeSelect(["", ...scales], values[0] || "");
   const cause = makeSelect(["", ...META.exit_causes], values[1] || "");
-  const alt = makeSelect(["", ...groups], values[2] || "");
-  const extraRule = makeSelect(["", ...groups], values[3] || "");
+  const alt = makeSelect(["", ...scales], values[2] || "");
+  const extraRule = makeSelect(["", ...scales], values[3] || "");
   const amount = el("input", { type: "text", value: values[4] || "" });
   const floor = el("input", { type: "text", value: values[5] || "" });
   const basis = makeSelect(["", ...META.attributions], values[6] || "");
@@ -566,73 +678,82 @@ function causeValues() {
   return result;
 }
 
-// ── 장기급여 유형 탭 ──
-function buildLongtermTab(page) {
-  const guide =
-    "휴가        '장기급여' 탭의 값 = 지급일수 → 일 기본급 × 일수 (임금상승률 반영)\n" +
-    "평균임금    값 = 배수 → 30일 평균임금 × 배수 (임금상승률 반영)\n" +
-    "현물        값 = 정액(원) → 평가시점 시세로 환산해 넣고 현물 상승률로 올림\n" +
-    "현금        값 = 정액(원) → 규정 금액이 고정이므로 올리지 않음";
-  const table = el("table", { class: "grid" });
-  ltBody = el("tbody");
-  table.append(ltBody);
-  page.append(
-    el("div", { class: "hint", style: "white-space:pre-line" }, guide),
-    el("div", { class: "scroll-x" }, table),
-    el("div", { class: "hint" },
-       "현물 상승률은 '현물' 유형에만 씁니다. 환산 근거에는 " +
-       "'현물 포상 @ 2026-12-31 시세' 처럼 남겨 두세요."));
+/** 장기급여 — 표 값의 뜻과 언제 주는지. */
+function longtermColumnPanel(grid, columns, values) {
+  const widgets = grid.columnWidgets;
+  const syncAll = () => {
+    for (const name of columns) {
+      const w = widgets[name];
+      const inKind = w.kind.value === "현물";
+      w.escalation.disabled = !inKind;
+      if (!inKind) w.escalation.value = "";
+      // 창립기념일은 '근속도달' 에만 뜻이 있다.
+      const atMilestone = w.timing.value === META.longterm_timings[0];
+      w.anniversary.disabled = !atMilestone;
+      if (!atMilestone) w.anniversary.value = "";
+    }
+  };
+  const field = (key, build, detail = false) => panelRow(
+    LONGTERM_PANEL_LABELS[key], columns, (name) => {
+      const widget = build(values[name] || {}, name);
+      (widgets[name] ||= {})[key] = widget;
+      return widget;
+    }, detail);
+
+  // '어느 직군' 은 따로 만든 열이 있을 때만 뜻이 있다. 직군 열은 제 이름이
+  // 곧 규정이라, 늘 띄워 두면 고를 것 없는 줄이 하나 는다.
+  if (columns.some((name) => !groups.includes(name))) {
+    grid.tbody.append(field("rule", (item, name) =>
+      makeSelect(groups, groups.includes(name) ? name : (item.rule || groups[0] || ""))));
+  } else {
+    for (const name of columns) (widgets[name] ||= {}).rule = { value: name };
+  }
+  grid.tbody.append(field("kind", (item) =>
+    makeSelect(META.longterm_types, item.kind || META.longterm_types[0])));
+  grid.tbody.append(field("timing", (item) =>
+    makeSelect(META.longterm_timings, item.timing || META.longterm_timings[0])));
+  grid.tbody.append(field("every", (item) =>
+    el("input", { type: "text", value: item.every || "" }), true));
+  grid.tbody.append(field("accumulate", (item) => {
+    const box = el("input", { type: "checkbox" });
+    box.checked = Boolean(item.accumulate);
+    return box;
+  }, true));
+  grid.tbody.append(field("escalation", (item) =>
+    el("input", { type: "text", value: item.escalation || "" }), true));
+  grid.tbody.append(field("anniversary", (item) =>
+    el("input", { type: "text", value: item.anniversary || "", placeholder: "10-01" }),
+    true));
+  grid.tbody.append(field("note", (item) =>
+    el("input", { type: "text", value: item.note || "", style: "text-align:left" }),
+    true));
+
+  for (const name of columns) {
+    widgets[name].kind.addEventListener("change", syncAll);
+    widgets[name].timing.addEventListener("change", syncAll);
+    // 직군 열은 제 이름이 곧 규정이라 바꿀 것이 없다.
+    if (groups.includes(name) && widgets[name].rule.tagName) {
+      widgets[name].rule.disabled = true;
+    }
+  }
+  syncAll();
+  syncDetailRows(grid);
 }
 
-function renderLongterm(rules) {
-  const heads = ["규정명(직군)", "지급유형", "현물 상승률", "지급시점",
-                 "반복 주기(년)", "누적", "지급일(월-일)", "환산 근거"];
-  ltBody.replaceChildren(el("tr", {}, ...heads.map((h) => el("th", {}, h))));
-  for (const group of groups) {
-    const item = rules[group] || {};
-    const kind = makeSelect(META.longterm_types, item.kind || META.longterm_types[0]);
-    const escalation = el("input", { type: "text", value: item.escalation || "" });
-    const timing = makeSelect(META.longterm_timings,
-                              item.timing || META.longterm_timings[0]);
-    const every = el("input", { type: "text", value: item.every || "", size: "6" });
-    const accumulate = el("input", { type: "checkbox" });
-    accumulate.checked = Boolean(item.accumulate);
-    const anniversary = el("input", { type: "text", value: item.anniversary || "",
-                                      size: "8", placeholder: "10-01" });
-    const note = el("input", { type: "text", value: item.note || "",
-                               style: "width:200px;text-align:left" });
-    const sync = () => {
-      const inKind = kind.value === "현물";
-      escalation.disabled = !inKind;
-      if (!inKind) escalation.value = "";
-      // 창립기념일은 '근속도달' 에만 뜻이 있다. 나갈 때 주는 급여에 적으면
-      // 두 규칙이 서로 어긋난다.
-      const atMilestone = timing.value === META.longterm_timings[0];
-      anniversary.disabled = !atMilestone;
-      if (!atMilestone) anniversary.value = "";
-    };
-    kind.addEventListener("change", sync);
-    timing.addEventListener("change", sync);
-    sync();
-    if (item.escalation && kind.value === "현물") escalation.value = item.escalation;
-    const tr = el("tr", {}, el("td", { class: "name" }, group),
-      ...[kind, escalation, timing, every, accumulate, anniversary, note]
-        .map((w) => el("td", {}, w)));
-    tr.dataset.group = group;
-    tr.widgets = { kind, escalation, timing, every, accumulate, anniversary, note };
-    ltBody.append(tr);
-  }
-}
+const LONGTERM_PANEL_LABELS = {
+  rule: "어느 직군", kind: "지급유형", timing: "지급시점", every: "반복 주기(년)",
+  accumulate: "누적", escalation: "현물 상승률", anniversary: "지급일(월-일)",
+  note: "환산 근거",
+};
 
 function longtermValues() {
   const result = {};
-  for (const tr of [...ltBody.children].slice(1)) {
-    const w = tr.widgets;
-    result[tr.dataset.group] = {
-      kind: w.kind.value,
+  const grid = gridBodies[META.sheets.find((s) => s.column_panel === "longterm").sheet];
+  for (const [name, w] of Object.entries(grid.columnWidgets)) {
+    result[name] = {
+      rule: w.rule.value, kind: w.kind.value,
       escalation: w.escalation.value.trim(),
-      timing: w.timing.value,
-      every: w.every.value.trim(),
+      timing: w.timing.value, every: w.every.value.trim(),
       accumulate: w.accumulate.checked,
       anniversary: w.anniversary.value.trim(),
       note: w.note.value.trim(),
@@ -641,73 +762,10 @@ function longtermValues() {
   return result;
 }
 
-// ── 장기급여 복합 지급 ──
-// '10년 : 휴가 3일 , 금 10돈, 특별상여' 처럼 한 근속연수에 성격이 다른 급여가
-// 여럿 걸리는 규정이 흔하다. 직군별 한 줄로는 담을 수 없어 여기서 더 적는다.
-let ltItemBody = null;
-const LT_ITEM_MIN_ROWS = 3;
-
-function buildLongtermItemTab(page) {
-  const guide =
-    "한 규정에 항목이 여럿일 때만 채웁니다. 항목마다 '장기급여' 탭에 열을 하나씩 두세요.\n" +
-    "예) 정규직 | 금 | 현물 | … → '장기급여' 탭에 '금' 열을 만들고 근속별 금액을 적습니다.\n" +
-    "'장기급여 유형' 탭의 직군 줄이 그 규정의 첫 항목이고, 여기 적는 것이 그 위에 더해집니다.";
-  const table = el("table", { class: "grid" });
-  ltItemBody = el("tbody");
-  table.append(ltItemBody);
-  page.append(
-    el("div", { class: "hint", style: "white-space:pre-line" }, guide),
-    el("div", { class: "scroll-x" }, table),
-    el("div", { class: "toolbar" },
-       el("button", { class: "small", type: "button",
-                      onclick: () => { ltItemBody.append(ltItemRow([])); } },
-          "줄 추가")));
-}
-
-function ltItemRow(values) {
-  const rule = makeSelect(["", ...groups], values[0] || "");
-  const name = el("input", { type: "text", value: values[1] || "", size: "10" });
-  const kind = makeSelect(META.longterm_types, values[2] || META.longterm_types[0]);
-  const escalation = el("input", { type: "text", value: values[3] || "", size: "6" });
-  const timing = makeSelect(META.longterm_timings,
-                            values[4] || META.longterm_timings[0]);
-  const every = el("input", { type: "text", value: values[5] || "", size: "6" });
-  const accumulate = el("input", { type: "checkbox" });
-  accumulate.checked = values[6] === "Y";
-  const anniversary = el("input", { type: "text", value: values[7] || "", size: "8",
-                                    placeholder: "10-01" });
-  const note = el("input", { type: "text", value: values[8] || "",
-                             style: "width:160px;text-align:left" });
-  const widgets = [rule, name, kind, escalation, timing, every, accumulate,
-                   anniversary, note];
-  const tr = el("tr", {}, ...widgets.map((w) => el("td", {}, w)));
-  tr.widgets = { rule, name, kind, escalation, timing, every, accumulate,
-                 anniversary, note };
-  return tr;
-}
-
-function renderLongtermItems(rows) {
-  ltItemBody.replaceChildren(el("tr", {},
-    ...META.longterm_item_headers.map((h) => el("th", {}, h))));
-  for (const row of rows) ltItemBody.append(ltItemRow(row));
-  for (let i = rows.length; i < LT_ITEM_MIN_ROWS; i += 1) {
-    ltItemBody.append(ltItemRow([]));
-  }
-}
-
-function longtermItemValues() {
-  const result = [];
-  for (const tr of [...ltItemBody.children].slice(1)) {
-    const w = tr.widgets;
-    const row = [w.rule.value, w.name.value.trim(), w.kind.value,
-                 w.escalation.value.trim(), w.timing.value, w.every.value.trim(),
-                 w.accumulate.checked ? "Y" : "", w.anniversary.value.trim(),
-                 w.note.value.trim()];
-    // 규정과 항목 이름이 둘 다 있어야 지급률 표에서 열을 찾을 수 있다.
-    if (row[0] && row[1]) result.push(row);
-  }
-  return result;
-}
+const COLUMN_PANELS = {
+  benefit: benefitColumnPanel,
+  longterm: longtermColumnPanel,
+};
 
 // ── 직군 매핑 탭 ──
 let mapTable = null;
@@ -785,6 +843,7 @@ function collectState() {
     grids[spec.sheet] = {
       key: grid.keySelect ? grid.keySelect.value : spec.key,
       rows: gridRows(spec.sheet),
+      extra: [...(grid.extra || [])],
     };
   }
   return {
@@ -793,24 +852,24 @@ function collectState() {
     payout: payoutValues(),
     benefit_rules: ruleValues(),
     longterm_rules: longtermValues(),
-    longterm_items: longtermItemValues(),
     exit_causes: causeValues(),
     mapping: mapData.map((r) => [r.source, r.kind, r.target]),
   };
 }
+
+//: 열 머리 패널이 읽을 값. 시트마다 state 의 어느 자리에서 오는지.
+const PANEL_SOURCE = { benefit: "benefit_rules", longterm: "longterm_rules" };
 
 function renderState(state) {
   groups = state.job_groups?.length ? [...state.job_groups] : [...META.default_groups];
   $("ed-groups").value = groups.join(", ");
   for (const spec of META.sheets) {
     const item = state.grids?.[spec.sheet] || {};
-    renderGrid(spec.sheet, item.key || spec.key, item.rows || []);
+    renderGrid(spec.sheet, item.key || spec.key, item.rows || [], item.extra || [],
+               state[PANEL_SOURCE[spec.column_panel]] || {});
   }
   renderPayout(state.payout || {});
-  renderRules(state.benefit_rules || {});
   renderCauses(state.exit_causes || []);
-  renderLongterm(state.longterm_rules || {});
-  renderLongtermItems(state.longterm_items || []);
   const scanned = new Map(mapData.map((r) => [pairKey(r.source, r.kind), r]));
   mapData = (state.mapping || []).map(([source, kind, target]) => {
     const seen = scanned.get(pairKey(source, kind));
@@ -834,9 +893,16 @@ function applyGroups(names) {
   const old = state.job_groups;
   for (const spec of META.sheets) {
     if (spec.fixed.length) continue;
+    // 값은 **열 이름** 을 따라 옮긴다. 자리로 옮기면 직군을 하나 지웠을 때
+    // 그 뒤 열의 값이 통째로 한 칸씩 밀린다.
+    const before = gridColumns(spec.sheet);
+    const extra = (state.grids[spec.sheet].extra || []).filter(
+      (n) => n && !cleaned.includes(n));
+    const after = [...cleaned, ...new Set(extra)];
+    state.grids[spec.sheet].extra = extra;
     state.grids[spec.sheet].rows = state.grids[spec.sheet].rows.map((row) => {
-      const byGroup = Object.fromEntries(old.map((g, i) => [g, row[i + 1] || ""]));
-      return [row[0], ...cleaned.map((g) => byGroup[g] || "")];
+      const byName = Object.fromEntries(before.map((n, i) => [n, row[i + 1] || ""]));
+      return [row[0], ...after.map((n) => byName[n] || "")];
     });
   }
   state.job_groups = cleaned;
@@ -1168,6 +1234,12 @@ async function fillFromGeneralSheet() {
       lines.push("⚠ " + info.problems.join(" · "));
       note.className = "warn-box";
     }
+    // 채워 넣은 구획은 펼쳐 둔다. 접힌 채로 값만 들어가면 담당자가 확인할
+    // 기회 없이 그대로 산출된다 — 회사 표가 틀렸을 때 잡을 수 없다.
+    if ("base_date" in fields || "period_start" in fields) $("sec-dates").open = true;
+    if ("asset_opening" in fields) $("sec-assets").open = true;
+
+    refreshCalcBadges();
     if (!lines.length) return;
     note.textContent = lines.join("  ");
     note.style.display = "block";
@@ -1194,6 +1266,38 @@ $("roster-save").addEventListener("click", async () => {
 });
 
 // ═════════ 산출 ══════════════════════════════════════════════════
+// 보통 쓰는 것은 명부와 기초율 둘뿐이고, 기준일·옵션·전기·자산은 손대지 않는
+// 회차가 많다. 접어 두되 **무엇이 설정돼 있는지는 접힌 채로 보여야** 한다 —
+// 안 그러면 전기 채무를 넣어 둔 것을 잊고 다시 넣거나, 넣은 줄 알고 안 넣는다.
+function calcBadge(id, value) {
+  const box = document.querySelector(`#${id} > summary > .count`);
+  if (box) box.textContent = value;
+}
+
+function money(raw) {
+  const value = parseNumber(raw);
+  return value ? value.toLocaleString("ko-KR") + "원" : "";
+}
+
+function refreshCalcBadges() {
+  const base = $("base_date").value;
+  const start = $("period_start").value;
+  calcBadge("sec-dates",
+    base || start ? [start, base].filter(Boolean).join(" ~ ") : "명부 값 사용");
+
+  const on = [];
+  if ($("force").checked) on.push("강행");
+  if ($("sensitivity").checked) on.push("민감도");
+  if ($("longterm").checked) on.push("장기급여");
+  calcBadge("sec-options", on.join(" · ") || "기본");
+
+  const prior = priorLink ? priorLink.name : money($("prior_dbo").value);
+  calcBadge("sec-prior", prior || "없음 (최초 평가)");
+
+  const closing = money($("asset_closing").value);
+  calcBadge("sec-assets", closing ? "기말 " + closing : "없음");
+}
+
 function parseNumber(raw) {
   const token = raw.replaceAll(",", "").trim();
   return token ? parseFloat(token) : 0;
@@ -1671,3 +1775,8 @@ async function registerGenerated(item) {
     alert(error.message);
   }
 }
+
+// 접힌 구획의 제목 옆 요약은 값이 바뀔 때마다 다시 맞춘다.
+$("page-calc").addEventListener("input", refreshCalcBadges);
+$("page-calc").addEventListener("change", refreshCalcBadges);
+refreshCalcBadges();

@@ -86,9 +86,17 @@ def grid(page, sheet: str):
     return section(page, sheet).locator("tbody")
 
 
-def grid_row(page, sheet: str, row: int = 2):
-    """그 표의 ``row`` 번째 줄 입력칸들(1행은 머리글)."""
-    return grid(page, sheet).locator(f"tr:nth-child({row}) input")
+def grid_row(page, sheet: str, row: int = 1):
+    """그 표의 ``row`` 번째 **값** 줄. 머리글과 열 머리 패널은 건너뛴다."""
+    return grid(page, sheet).locator("tr[data-row]").nth(row - 1).locator("input")
+
+
+def open_calc(page, section_id: str):
+    """산출 탭에서 접어 둔 구획을 펼친다. 사람이 하는 것과 같은 순서다."""
+    page.click("#tab-calc")
+    box = page.locator(f"#{section_id}")
+    if not box.evaluate("node => node.open"):
+        box.locator("summary").click()
 
 
 def test_upload_run_download(page, tmp_path) -> None:
@@ -128,6 +136,9 @@ def test_roster_fills_the_asset_boxes(page, tmp_path) -> None:
     page.set_input_files("#roster", str(roster))
     page.wait_for_selector("#general-filled", state="visible", timeout=60_000)
 
+    # 채워 넣은 구획은 저절로 펼쳐져야 한다 — 접힌 채로 값만 들어가면
+    # 담당자가 확인할 기회 없이 그대로 산출된다.
+    assert page.locator("#sec-assets").evaluate("node => node.open")
     assert page.input_value("#base_date")
     assert page.input_value("#period_start") < page.input_value("#base_date")
     assert float(page.input_value("#asset_opening")) > 0
@@ -278,6 +289,7 @@ def test_saved_roster_and_prior_link_and_backup(page, tmp_path, shared_dir) -> N
     page.set_input_files("#assumptions", str(assumptions))
 
     # 전기 산출을 고르면 DBO·할인율이 자동으로 채워진다.
+    open_calc(page, "sec-prior")
     page.select_option("#prior-run", "2312 1번단체")
     assert page.input_value("#prior_dbo").replace(",", "").isdigit()
     assert page.input_value("#prior_rate").endswith("%")
