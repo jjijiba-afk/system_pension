@@ -82,8 +82,13 @@ def value_longterm_member(
     member: ActiveMember,
     config: CalculationConfig,
     assumptions: Assumptions,
+    trace: list[dict] | None = None,
 ) -> LongTermMemberValuation:
-    """재직자 한 명의 장기종업원급여 채무를 계산한다."""
+    """재직자 한 명의 장기종업원급여 채무를 계산한다.
+
+    :param trace: 리스트를 주면 지급 시점 하나마다 계산 근거가 한 줄씩 담긴다.
+        결과 숫자에는 영향이 없다.
+    """
     daily = member.effective_daily_base_pay()
     result = LongTermMemberValuation(
         employee_id=member.employee_id,
@@ -183,10 +188,11 @@ def value_longterm_member(
 
     for item, milestones in by_item:
         points = _expand(milestones, item.every_years, past_service + horizon)
+        label = f"{item.column(rule)} ({item.kind}·{item.timing})"
         if item.timing == LT_AT_MILESTONE:
             item_dbo, item_cost, count, first = _value_at_milestones(
                 points, item, past_service, horizon, member, config,
-                assumptions, amount, survival_at,
+                assumptions, amount, survival_at, trace=trace, label=label,
             )
             upcoming += count
             if first is not None and (
@@ -195,7 +201,8 @@ def value_longterm_member(
                 result.next_milestone = first
         else:
             item_dbo, item_cost = _value_at_exit(
-                points, item, past_service, horizon, assumptions, amount, survival
+                points, item, past_service, horizon, assumptions, amount, survival,
+                trace=trace, label=label,
             )
         dbo += item_dbo
         service_cost += item_cost
@@ -253,7 +260,8 @@ def _anniversary_delay(item, member, config, target_service: float) -> float:
 
 
 def _value_at_milestones(
-    points, item, past_service, horizon, member, config, assumptions, amount, survival_at
+    points, item, past_service, horizon, member, config, assumptions, amount,
+    survival_at, trace=None, label="",
 ):
     """근속에 닿는 해에 받는 급여. 이미 지나간 시점은 채무가 아니다."""
     dbo = 0.0
@@ -276,17 +284,27 @@ def _value_at_milestones(
             first = target_service
 
         benefit = amount(item, value, remaining)
-        weighted = (
-            benefit * survival_at(remaining)
-            * assumptions.discount.discount_factor(remaining)
-        )
-        dbo += weighted * min(1.0, past_service / target_service)
+        survival = survival_at(remaining)
+        discount = assumptions.discount.discount_factor(remaining)
+        weighted = benefit * survival * discount
+        share = min(1.0, past_service / target_service)
+        dbo += weighted * share
         service_cost += weighted / target_service
+
+        if trace is not None:
+            trace.append({
+                "item": label, "target_service": target_service,
+                "timing": remaining, "value": value, "benefit": benefit,
+                "survival": survival, "discount": discount, "share": share,
+                "dbo": weighted * share,
+                "service_cost": weighted / target_service,
+            })
 
     return dbo, service_cost, count, first
 
 
-def _value_at_exit(points, item, past_service, horizon, assumptions, amount, survival):
+def _value_at_exit(points, item, past_service, horizon, assumptions, amount, survival,
+                   trace=None, label=""):
     """나갈 때 받는 급여(``퇴직시`` / ``정년시``).
 
     재직 중에는 주지 않으므로 지급 시점이 탈퇴 시점이다. 금액은 그때까지 쌓인
@@ -327,9 +345,19 @@ def _value_at_exit(points, item, past_service, horizon, assumptions, amount, sur
             # 한 번에 튄다.
             share = min(1.0, past_service / target) if target > 0 else 1.0
             next_share = min(1.0, (past_service + 1.0) / target) if target > 0 else 1.0
-            weighted = amount(item, value, timing) * leaving * discount
+            benefit = amount(item, value, timing)
+            weighted = benefit * leaving * discount
             dbo += weighted * share
             service_cost += weighted * max(0.0, next_share - share)
+
+            if trace is not None:
+                trace.append({
+                    "item": label, "target_service": target, "timing": timing,
+                    "value": value, "benefit": benefit, "survival": leaving,
+                    "discount": discount, "share": share,
+                    "dbo": weighted * share,
+                    "service_cost": weighted * max(0.0, next_share - share),
+                })
 
     return dbo, service_cost
 
