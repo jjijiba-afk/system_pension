@@ -26,6 +26,7 @@ from .assumption_form import (
     APPLY_CHOICES as _APPLY_CHOICES,
 )
 from .assumption_form import (
+    EXIT_CAUSE_HEADERS,
     FORM_SHEETS,
 )
 from .assumption_form import (
@@ -37,9 +38,11 @@ from .assumption_form import (
 from .assumption_form import read_state as _read_state
 from .assumption_form import state_to_sheets as _state_to_sheets
 from .assumptions import (
+    ATTRIBUTIONS,
     BENEFIT_MODES,
     BENEFIT_SHEET,
     DISCOUNT_SHEET,
+    EXIT_CAUSES,
     FORMULA,
     LONGTERM_SHEET,
     LONGTERM_TYPES,
@@ -936,6 +939,101 @@ class _LongTermRuleTab(ttk.Frame):
             self._sync(group)
 
 
+class _ExitCauseTab(ttk.Frame):
+    """퇴직사유별 지급 차등 탭.
+
+    자료요청서 6번에는 '중도퇴직시 / 사망시 / 정년퇴직시 퇴직금 지급률' 이 따로
+    있고, 실제로 다르게 적어 오는 회사가 많다 — '동일, 유족지원금 5,000만원',
+    '대표이사 3배, 이사/감사 1.5배', '재직 중 사망은 1년 미만도 1년으로 계산'.
+
+    직군 수와 무관하게 줄을 늘렸다 줄였다 해야 하므로, 다른 탭과 달리 직군마다
+    한 줄이 아니라 **빈 줄 여러 개** 를 두고 골라 채우게 한다.
+    """
+
+    ROWS = 8
+
+    def __init__(self, parent, job_groups: list[str]) -> None:
+        super().__init__(parent, padding=_PAD)
+        self.job_groups = list(job_groups)
+        self._rows: list[dict[str, Any]] = []
+
+        box = ttk.LabelFrame(self, text="언제 쓰나", padding=_PAD)
+        box.pack(fill="x")
+        ttk.Label(
+            box,
+            text="중도퇴직·사망·정년퇴직의 지급이 다를 때만 채웁니다. 비우면 사유를 가리지 않습니다.\n"
+                 "대체 지급률 규정   그 사유일 때 기본 규정 대신 쓸 '지급률' 탭의 열 이름\n"
+                 "가산 규정          기본 급여에 더할 배수를 내는 규정 (예: 사망 시 기본급 3개월분)\n"
+                 "가산액(원)         정액 가산 (예: 유족지원금 50,000,000)\n"
+                 "근속 하한(년)      '사망 시 1년 미만도 1년으로 계산' 처럼 짧은 근속을 끌어올릴 때\n"
+                 "가산 귀속          즉시=근속이 늘어도 안 느는 급여라 지금 전액 귀속 / 근속비례=쌓아 감\n"
+                 "                   비우면 사망은 '즉시', 나머지는 '근속비례' 입니다.",
+            style="Hint.TLabel", justify="left", font=("", 9),
+        ).pack(anchor="w")
+
+        self._body = ttk.Frame(self)
+        self._body.pack(fill="both", expand=True, pady=(8, 0))
+        self.rebuild(self.job_groups)
+
+    def rebuild(self, job_groups: list[str]) -> None:
+        previous = self.get_values()
+        for child in self._body.winfo_children():
+            child.destroy()
+        self._rows.clear()
+        self.job_groups = list(job_groups)
+
+        for col, title in enumerate(EXIT_CAUSE_HEADERS):
+            ttk.Label(self._body, text=title, style="Col.TLabel").grid(
+                row=0, column=col, sticky="w", padx=3, pady=(0, 6)
+            )
+
+        groups = ["", *self.job_groups]
+        for index in range(1, self.ROWS + 1):
+            saved = previous[index - 1] if index <= len(previous) else [""] * 7
+            row = {key: tk.StringVar(value=saved[position]) for position, key in enumerate(
+                ("rule", "cause", "alt", "extra", "amount", "floor", "basis")
+            )}
+            combos = (
+                ("rule", groups, 12), ("cause", ["", *EXIT_CAUSES], 8),
+                ("alt", groups, 12), ("extra", groups, 12),
+            )
+            for column, (key, values, width) in enumerate(combos):
+                ttk.Combobox(
+                    self._body, textvariable=row[key], values=values,
+                    state="readonly", width=width,
+                ).grid(row=index, column=column, padx=3, pady=1)
+            for column, key in ((4, "amount"), (5, "floor")):
+                ttk.Entry(self._body, textvariable=row[key], width=14,
+                          justify="right").grid(row=index, column=column, padx=3, pady=1)
+            ttk.Combobox(
+                self._body, textvariable=row["basis"], values=["", *ATTRIBUTIONS],
+                state="readonly", width=10,
+            ).grid(row=index, column=6, padx=3, pady=1)
+            self._rows.append(row)
+
+    def get_values(self) -> list[list[str]]:
+        """값이 든 줄만. 규정과 사유만 고른 빈 줄은 규정이 아니다."""
+        result: list[list[str]] = []
+        for row in self._rows:
+            values = [
+                row[key].get().strip()
+                for key in ("rule", "cause", "alt", "extra", "amount", "floor", "basis")
+            ]
+            if values[0] and any(values[2:]):
+                result.append(values)
+        return result
+
+    def set_values(self, rows: list[list[str]]) -> None:
+        keys = ("rule", "cause", "alt", "extra", "amount", "floor", "basis")
+        for row in self._rows:
+            for key in keys:
+                row[key].set("")
+        for index, values in enumerate(rows[: len(self._rows)]):
+            padded = list(values) + [""] * (len(keys) - len(values))
+            for key, value in zip(keys, padded, strict=False):
+                self._rows[index][key].set(str(value))
+
+
 class AssumptionsEditor(tk.Toplevel):
     """산출 가정 입력 창."""
 
@@ -1187,6 +1285,7 @@ class AssumptionsEditor(tk.Toplevel):
         self._map_tab.rebuild(names)
         self._payout_tab.rebuild(names)
         self._rule_tab.rebuild(names)
+        self._cause_tab.rebuild(names)
         self._longterm_tab.rebuild(names)
 
     def _load_from_roster(self) -> None:
@@ -1237,6 +1336,9 @@ class AssumptionsEditor(tk.Toplevel):
 
         self._rule_tab = _BenefitRuleTab(book, self.job_groups)
         book.add(self._rule_tab, text="지급률 규정")
+
+        self._cause_tab = _ExitCauseTab(book, self.job_groups)
+        book.add(self._cause_tab, text="퇴직사유")
 
         self._longterm_tab = _LongTermRuleTab(book, self.job_groups)
         book.add(self._longterm_tab, text="장기급여 유형")
@@ -1310,6 +1412,7 @@ class AssumptionsEditor(tk.Toplevel):
             self._map_tab.set_rows([tuple(row) for row in state["mapping"]])
         self._longterm_tab.set_values(state["longterm_rules"])
         self._rule_tab.set_values(state["benefit_rules"])
+        self._cause_tab.set_values(state.get("exit_causes", []))
 
     def save(self) -> None:
         problems = self._rule_tab.problems()
@@ -1368,6 +1471,7 @@ class AssumptionsEditor(tk.Toplevel):
             "payout": self._payout_tab.get_values(),
             "benefit_rules": self._rule_tab.get_values(),
             "longterm_rules": self._longterm_tab.get_values(),
+            "exit_causes": self._cause_tab.get_values(),
             "mapping": [list(row) for row in self._map_tab.rows()],
         }
 
