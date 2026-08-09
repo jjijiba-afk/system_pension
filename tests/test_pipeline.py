@@ -7,6 +7,7 @@ from pathlib import Path
 
 import openpyxl
 import pytest
+from conftest import ASSET_CLOSING, write_general_sheet
 
 from pension.config import read_config
 from pension.errors import IssueLog, PensionDataError
@@ -309,11 +310,88 @@ class TestReport:
 def test_load_inputs_returns_all_four_pieces(
     roster_path: Path, assumptions_path: Path
 ) -> None:
-    config, roster, assumptions, log = load_inputs(roster_path, assumptions_path)
+    config, roster, assumptions, log, _g = load_inputs(roster_path, assumptions_path)
     assert config.base_date == dt.date(2025, 12, 31)
     assert roster.active and roster.retired
     assert assumptions.discount.level_rate > 0
     assert not log.has_errors()
+
+
+class TestGeneralSheetIsUsed:
+    """``1)일반사항`` 에 이미 적혀 온 것은 다시 입력받지 않는다."""
+
+    @staticmethod
+    def _with_general(roster_path: Path, **kwargs) -> Path:
+        wb = openpyxl.load_workbook(roster_path)
+        write_general_sheet(wb.create_sheet("1)일반사항"), **kwargs)
+        path = roster_path.with_name("일반사항포함.xlsx")
+        wb.save(path)
+        return path
+
+    def test_period_end_becomes_the_base_date(
+        self, roster_path: Path, assumptions_path: Path
+    ) -> None:
+        """2번 '기말' 이 곧 산출기준일이다 — 화면에 다시 적을 이유가 없다."""
+        path = self._with_general(
+            roster_path, period=(dt.date(2026, 1, 1), dt.date(2026, 3, 31))
+        )
+        config, _, _, _, general = load_inputs(path, assumptions_path)
+        assert config.base_date == dt.date(2026, 3, 31)
+        assert general.period_start == dt.date(2026, 1, 1)
+
+    def test_an_explicit_base_date_still_wins(
+        self, roster_path: Path, assumptions_path: Path
+    ) -> None:
+        path = self._with_general(
+            roster_path, period=(dt.date(2026, 1, 1), dt.date(2026, 3, 31))
+        )
+        config, _, _, _, _ = load_inputs(
+            path, assumptions_path, dt.date(2025, 12, 31)
+        )
+        assert config.base_date == dt.date(2025, 12, 31)
+
+    def test_asset_table_flows_into_the_plan_asset_statement(
+        self, roster_path: Path, assumptions_path: Path
+    ) -> None:
+        """담당자가 신탁 명세서를 보고 채운 표를 그대로 쓴다."""
+        path = self._with_general(roster_path)
+        run = run_valuation(
+            RunOptions(
+                roster_path=path,
+                assumptions_path=assumptions_path,
+                output_path=path.with_name("결과.xlsx"),
+                allow_errors=True,
+            )
+        )
+        assert run.plan_assets is not None
+        assert run.plan_assets.opening_fair_value == pytest.approx(12_044_373_875.0)
+        assert run.plan_assets.closing_fair_value == pytest.approx(12_993_972_710.0)
+        assert run.plan_assets.contributions == pytest.approx(1_710_353_902.0)
+
+    def test_unbalanced_asset_table_is_reported_not_swallowed(
+        self, roster_path: Path, assumptions_path: Path
+    ) -> None:
+        """회사 표가 스스로 안 맞으면 재측정손익이 그만큼 틀어진다."""
+        path = self._with_general(roster_path, closing=ASSET_CLOSING + 9_103_134.0)
+        _, _, _, log, _ = load_inputs(path, assumptions_path)
+        codes = [issue.code for issue in log.warnings]
+        assert "GEN_ASSET_NOT_BALANCED" in codes
+
+    def test_balanced_table_raises_no_warning(
+        self, roster_path: Path, assumptions_path: Path
+    ) -> None:
+        path = self._with_general(roster_path)
+        _, _, _, log, _ = load_inputs(path, assumptions_path)
+        assert "GEN_ASSET_NOT_BALANCED" not in [i.code for i in log.warnings]
+
+    def test_roster_without_the_sheet_is_still_fine(
+        self, roster_path: Path, assumptions_path: Path
+    ) -> None:
+        """업로드용으로 변환한 명부에는 일반사항이 없다 — 막으면 안 된다."""
+        _, _, _, log, general = load_inputs(roster_path, assumptions_path)
+        assert general is not None
+        assert general.assets.is_empty()
+        assert not log.has_errors()
 
 
 class TestAssumptionTemplateColumns:

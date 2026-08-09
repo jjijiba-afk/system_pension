@@ -86,7 +86,7 @@ class TestOutOfTheBox:
         """기초율의 `지급규정` 시트가 명부 Input 보다 우선한다."""
         from pension.pipeline import load_inputs
 
-        config, roster, _a, _log = load_inputs(
+        config, roster, _a, _log, _g = load_inputs(
             pack / ROSTER_TEMPLATE, pack / STANDARD_ASSUMPTIONS
         )
         assert config.mapped_names() == ["정규직", "계약직", "임원"]
@@ -198,7 +198,7 @@ class TestDefaultRoster:
         from pension.pipeline import load_inputs
         from pension.samples import ROSTER_DEFAULT
 
-        _cfg, _roster, _a, log = load_inputs(
+        _cfg, _roster, _a, log, _g = load_inputs(
             pack / ROSTER_DEFAULT, pack / STANDARD_ASSUMPTIONS
         )
         assert log.has_errors()

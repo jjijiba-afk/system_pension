@@ -114,7 +114,12 @@ class RunOptions:
     shocks: tuple[Shock, ...] = DEFAULT_SHOCKS
     prior: PriorPeriod = field(default_factory=PriorPeriod)
     plan_assets: PlanAssetInput = field(default_factory=PlanAssetInput)
-    """사외적립자산. 비우면 자산 표를 만들지 않는다(채무만 산출)."""
+    """사외적립자산. 비우면 명부의 ``1)일반사항`` 5번 표에서 읽어 온다."""
+    read_general_info: bool = True
+    """``1)일반사항`` 의 회계기간·사외적립자산·추계액 변동내역을 자동으로 쓸지.
+
+    담당자가 이미 채워 보낸 표를 화면에 다시 옮겨 적게 할 이유가 없다. 명시적으로
+    넣은 값이 있으면 그쪽이 이긴다."""
     fill_missing_ids: bool = True
     allow_errors: bool = False
     """검증 오류가 있어도 산출을 강행할지. 기본은 중단."""
@@ -134,6 +139,8 @@ class PensionRun:
     rollforward: RollForward | None = None
     plan_assets: PlanAssets | None = None
     """사외적립자산 증감과 순확정급여부채. 입력이 없으면 ``None``."""
+    general_info: Any = None
+    """``1)일반사항`` 에서 읽은 것. 시트가 없으면 ``None``."""
     active_upload: list[list[Any]] = field(default_factory=list)
     retired_upload: list[list[Any]] = field(default_factory=list)
 
@@ -203,7 +210,7 @@ def load_inputs(
     base_date: _dt.date | None = None,
     *,
     label: str = "당기 가정",
-) -> tuple[CalculationConfig, Roster, Assumptions, IssueLog]:
+) -> tuple[CalculationConfig, Roster, Assumptions, IssueLog, Any]:
     """명부 워크북과 기초율 워크북을 읽어 검증까지 마친다.
 
     직군 규칙은 두 곳에 있을 수 있다. 명부의 ``Input`` 시트와, 가정 입력 화면이
@@ -224,19 +231,59 @@ def load_inputs(
     wb = open_workbook(roster_path)
     try:
         config = read_config(wb)
+        general = _read_general_sheet(wb)
+        if base_date is None and general is not None and general.period_end:
+            # 자료요청서 2번 '대상 회계기간' 기말이 곧 산출기준일이다.
+            config = replace(config, base_date=general.period_end)
         if base_date is not None:
             config = replace(config, base_date=base_date)
         if payout_rules:
             # 직군 배정이 명부를 읽는 도중에 일어나므로 읽기 전에 바꿔 끼워야 한다.
             config = replace(config, job_group_rules=payout_rules, inferred=False)
         log = IssueLog()
+        _check_general_sheet(general, log)
         roster = read_roster(wb, config, log)
     finally:
         wb.close()
 
     assumptions = load_assumptions(assumptions_path, label=label)
     validate_roster(roster, config, log)
-    return config, roster, assumptions, log
+    return config, roster, assumptions, log, general
+
+
+def _read_general_sheet(wb):
+    """``1)일반사항`` 을 읽는다. 없거나 깨졌으면 ``None``.
+
+    일반사항이 없는 명부(업로드용으로 변환한 것 등)도 많으므로, 못 읽는다고
+    산출을 막지는 않는다.
+    """
+    from .general_info import read_general_info
+
+    try:
+        info = read_general_info(wb)
+    except Exception:
+        return None
+    return info
+
+
+def _check_general_sheet(general, log: IssueLog) -> None:
+    """5-2) 표가 스스로 맞는지 본다.
+
+    서식에 '검증' 줄이 있는데도 맞지 않은 채로 오는 파일이 있다. 그 표를
+    말없이 쓰면 재측정손익이 차이만큼 틀어지므로, 여기서 짚어 둔다.
+    """
+    if general is None or general.assets.is_empty():
+        return
+    difference = general.assets.difference
+    if round(difference) != 0:
+        log.warning(
+            "GEN_ASSET_NOT_BALANCED",
+            "사외적립자산 변동내역이 맞지 않습니다 "
+            f"(기초+유입−유출−기말 = {difference:,.0f}원). "
+            "회사가 보내온 표를 확인하세요",
+            sheet="1)일반사항",
+            value=round(difference),
+        )
 
 
 def _read_payout_rules(assumptions_path: str | Path) -> list:
@@ -260,7 +307,7 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
     :raises PensionDataError: 검증 오류가 있고 ``allow_errors`` 가 거짓일 때.
     """
     progress("명부와 기초율을 읽는 중", 0.05)
-    config, roster, assumptions, log = load_inputs(
+    config, roster, assumptions, log, general = load_inputs(
         options.roster_path, options.assumptions_path, options.base_date
     )
 
@@ -285,6 +332,7 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
         assumptions=assumptions,
         issues=log,
         valuation=valuation,
+        general_info=general if options.read_general_info else None,
         active_upload=active_upload,
         retired_upload=retired_upload,
     )
@@ -321,8 +369,19 @@ def _build_rollforward(
     if prior.is_empty():
         return initial_period(run.valuation.dbo, run.valuation.service_cost)
 
-    benefits_paid = run.benefits_paid
-    settlements = run.settlements_paid
+    # 지급액은 회사 장부(자료요청서 5-1 표)가 있으면 그것을 쓴다. 명부에서
+    # 더한 값은 파생치라, 공시에 나갈 증감표는 장부 숫자와 맞아야 한다.
+    book = run.general_info.obligation if run.general_info is not None else None
+    if book is not None and not book.is_empty():
+        benefits_paid = book.benefits_paid
+        settlements = book.settlement_paid + book.dc_converted + book.transfer_out
+        other_paid = book.other_paid
+        transfers_in = book.transfer_in + book.merger_in
+    else:
+        benefits_paid = run.benefits_paid
+        settlements = run.settlements_paid
+        other_paid = run.other_payments
+        transfers_in = run.transfers_in
 
     # ── 전기 가정으로 다시 산출 ──────────────────────────────────
     # 두 벌이 필요하다. 하나는 전기 가정 그대로(A), 하나는 전기 계리가정에
@@ -359,7 +418,7 @@ def _build_rollforward(
     #
     # 기간은 보통 1년이지만 결산기가 바뀌면 아니다. 산출 시작일을 주면 실제
     # 기간으로 환산한다 — 1년으로 두면 9개월 결산에서 이자원가가 3할 부풀려진다.
-    years = _period_years(run.config.base_date, options.period_start)
+    years = _period_years(run.config.base_date, _period_start(run, options))
     interest_cost = (
         prior.dbo * rate * years
         + (service_cost - benefits_paid - settlements) * rate * years * 0.5
@@ -378,8 +437,8 @@ def _build_rollforward(
         benefits_paid=benefits_paid,
         settlement_paid=settlements,
         settlement_obligation=prior.settlement_obligation,
-        other_paid=run.other_payments,
-        transfers_in=run.transfers_in,
+        other_paid=other_paid,
+        transfers_in=transfers_in,
         closing_dbo=run.valuation.dbo,
         dbo_with_prior_assumptions=dbo_prior_all,
         dbo_after_amendment=dbo_after_amendment,
@@ -388,23 +447,52 @@ def _build_rollforward(
 
 
 def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | None:
-    """사외적립자산 증감표. 입력이 없으면 만들지 않는다."""
+    """사외적립자산 증감표.
+
+    담당자가 화면에 넣은 값이 없으면 명부의 ``1)일반사항`` 5-2) 표를 그대로
+    쓴다. 신탁 명세서를 보고 이미 채워 보낸 표라 다시 옮겨 적을 이유가 없다.
+    """
     given = options.plan_assets
-    if given.is_empty():
+    info = run.general_info
+    from_sheet = (
+        info.assets if (info is not None and not info.assets.is_empty()) else None
+    )
+
+    if given.is_empty() and from_sheet is None:
         return None
 
+    if given.is_empty() and from_sheet is not None:
+        opening = from_sheet.opening
+        closing = from_sheet.closing
+        contributions = from_sheet.contributions
+        # 자산에서 나간 돈은 전부 뺀다 — 수수료도 자산을 줄인다.
+        paid = from_sheet.total_paid - from_sheet.total_received
+        unpaid = 0.0
+    else:
+        opening = given.opening_fair_value
+        closing = given.closing_fair_value
+        contributions = given.contributions
+        paid = given.benefits_paid or run.fund_assets_paid
+        unpaid = given.unpaid_benefits
+
     return build_plan_assets(
-        opening_fair_value=given.opening_fair_value,
-        closing_fair_value=given.closing_fair_value,
-        contributions=given.contributions,
-        # 명부에 사외자산 지급액이 적혀 있으면 그것을 쓴다. 따로 넣은 값이 있으면
-        # 그쪽이 우선이다 — 명부에 안 잡히는 지급이 있을 수 있다.
-        benefits_paid=given.benefits_paid or run.fund_assets_paid,
+        opening_fair_value=opening,
+        closing_fair_value=closing,
+        contributions=contributions,
+        benefits_paid=paid,
         discount_rate=options.prior.discount_rate or _fallback_rate(run),
         closing_dbo=run.valuation.dbo,
-        unpaid_benefits=given.unpaid_benefits,
-        period_years=_period_years(run.config.base_date, options.period_start),
+        unpaid_benefits=unpaid,
+        period_years=_period_years(run.config.base_date, _period_start(run, options)),
     )
+
+
+def _period_start(run: PensionRun, options: RunOptions) -> _dt.date | None:
+    """산출 시작일. 화면 입력이 없으면 자료요청서 2번 '기시' 를 쓴다."""
+    if options.period_start is not None:
+        return options.period_start
+    info = run.general_info
+    return info.period_start if info is not None else None
 
 
 def _fallback_rate(run: PensionRun) -> float:
