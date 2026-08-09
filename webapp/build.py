@@ -189,6 +189,14 @@ def build() -> Path:
     worker = worker.replace("__PRECACHE__", json.dumps(files, ensure_ascii=False))
     (DIST / "sw.js").write_text(worker, encoding="utf-8")
 
+    # 화면 아래에도 같은 값을 박아 둔다. 새 빌드를 올렸는데 옛 캐시가 도는지
+    # 눈으로 가려낼 수단이 없으면, 고친 것이 안 고쳐진 것처럼 보인다.
+    # 해시를 낸 **뒤** 에 끼워 넣는다 — 넣고 나서 재면 값이 자기를 바꾼다.
+    page = (DIST / "index.html").read_text(encoding="utf-8")
+    (DIST / "index.html").write_text(
+        page.replace("__BUILD__", stamp), encoding="utf-8"
+    )
+
     total = sum(p.stat().st_size for p in DIST.rglob("*") if p.is_file())
     print(f"  완료: {DIST}  ({total / 1e6:.1f} MB, 캐시 버전 {stamp})")
     return DIST

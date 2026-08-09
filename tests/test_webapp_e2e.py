@@ -519,3 +519,16 @@ def test_member_lookup_and_reports(page, tmp_path) -> None:
     assert "확정급여부채 평가보고서" in frame.locator("body").inner_text()
     assert "민감도 분석" in frame.locator("body").inner_text()
     page.click("#print-dialog >> text=닫기")
+
+
+def test_build_stamp_is_visible_and_matches_the_cache(page) -> None:
+    """화면의 빌드 값 = 서비스워커 캐시 이름.
+
+    새 빌드를 올렸는데 옛 캐시가 도는 것을 눈으로 가려낼 수단이다. 치환이
+    빠지면 화면에 ``__BUILD__`` 가 그대로 뜨므로 그것도 함께 막는다.
+    """
+    import re
+
+    stamp = page.inner_text("#build-stamp").strip()
+    assert re.fullmatch(r"[0-9a-f]{12}", stamp), f"빌드 값이 이상하다: {stamp}"
+    assert f'"pension-{stamp}"' in (DIST / "sw.js").read_text(encoding="utf-8")
