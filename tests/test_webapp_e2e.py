@@ -428,3 +428,61 @@ def test_standard_rates_fill_the_grids(page) -> None:
     assert "불러왔습니다" in page.inner_text("#ed-status")
 
     assert grid_row(page, "사망률").first.input_value() == "15"
+
+
+def test_client_bar_keeps_run_history_apart(page, tmp_path) -> None:
+    """단체를 갈아 끼우면 산출 내역과 전기 산출 목록이 그 단체 것만 남는다."""
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    # 앞 테스트가 기본 단체에 "2412 1번단체" 를 저장해 두었다.
+    page.click("#tab-runs")
+    assert "2412 1번단체" in page.inner_text("#runs-list")
+
+    page.once("dialog", lambda dialog: dialog.accept("나단체"))
+    page.click("#client-add")
+    assert page.input_value("#client-pick") == "나단체"
+    assert "아직 저장된 산출이 없습니다" in page.inner_text("#runs-list")
+
+    # 전기 산출 목록에도 앞 단체 것이 남으면 안 된다.
+    open_calc(page, "sec-prior")
+    assert "2412 1번단체" not in page.inner_text("#prior-run")
+
+    # 이 단체에 한 건 저장하면 여기에만 쌓인다.
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    page.fill("#run-name", "2412")
+    page.click("#run-save")
+    page.wait_for_selector("text=저장했습니다", timeout=30_000)
+
+    page.click("#tab-runs")
+    listing = page.inner_text("#runs-list")
+    assert "2412" in listing and "1번단체" not in listing
+    assert page.inner_text("#client-runs") == "1건"
+
+    # 이름을 바꿔도 산출은 따라간다.
+    page.once("dialog", lambda dialog: dialog.accept("나단체㈜"))
+    page.click("#client-rename")
+    assert page.input_value("#client-pick") == "나단체㈜"
+    assert "2412" in page.inner_text("#runs-list")
+
+    # 되돌아가면 앞 단체 것이 그대로 있다.
+    page.select_option("#client-pick", "기본 단체")
+    assert "2412 1번단체" in page.inner_text("#runs-list")
+
+    # 산출이 남은 단체는 한 번 더 물어본 뒤에야 지워진다.
+    page.select_option("#client-pick", "나단체㈜")
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    page.click("#client-remove")
+    assert page.input_value("#client-pick") == "나단체㈜"
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.click("#client-remove")
+    assert page.input_value("#client-pick") == "기본 단체"
+    assert "2412 1번단체" in page.inner_text("#runs-list")

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import assumption_form as form
+from . import clients
 from .actuarial import FRACTION_MODES, SERVICE_BASES
 from .assumptions import (
     ATTRIBUTIONS,
@@ -532,16 +533,16 @@ def _run(request: dict) -> dict[str, Any]:
 # ── 산출 내역 ────────────────────────────────────────────────────
 # 산출 하나(명부 + 기초율 + 결과 + 요약)를 이름 붙여 통째로 보관한다.
 # 등록 자료와 같은 PENSION_HOME 아래라, 브라우저에서는 IndexedDB 에 남는다.
-# "2412 1번단체" 처럼 결산기·단체명으로 이름을 지어 두면 다음 결산 때
-# 전기 입력을 그대로 끌어올 수 있다.
+# 산출은 **단체 안에** 들어간다(:mod:`pension.clients`). "2412" 처럼 결산기로만
+# 이름을 지어도 단체가 갈라져 있어 헷갈리지 않고, 전기 산출 목록에 다른 단체가
+# 섞이지 않는다.
 
 _RUN_ROSTER_SUFFIXES = (".xlsx", ".xlsm", ".xls")
 
 
-def _runs_dir() -> Path:
-    path = library_dir() / "산출내역"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def _runs_dir(request: dict | None = None) -> Path:
+    """산출을 넣을 폴더 — 요청이 가리키는 단체, 없으면 지금 고른 단체."""
+    return clients.folder((request or {}).get("client", ""))
 
 
 def _safe_run_name(name: str) -> str:
@@ -575,7 +576,7 @@ def _run_save(request: dict) -> dict[str, Any]:
     if not roster.exists() or not assumptions.exists():
         raise ValueError("저장할 명부·기초율이 없습니다. 먼저 산출을 실행하세요")
 
-    folder = _runs_dir() / name
+    folder = _runs_dir(request) / name
     if folder.exists():
         shutil.rmtree(folder)
     folder.mkdir(parents=True)
@@ -599,13 +600,16 @@ def _run_save(request: dict) -> dict[str, Any]:
     (folder / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
     )
-    return _run_list({})
+    return _run_list(request)
 
 
-def _run_list(_request: dict) -> dict[str, Any]:
+def run_summaries(client: str = "") -> list[dict[str, Any]]:
+    """한 단체의 산출 목록. 최근 저장한 것이 앞에 온다.
+
+    :mod:`pension.clients` 가 단체별 건수를 셀 때도 이 함수를 쓴다.
+    """
     runs = []
-    base = _runs_dir()
-    for folder in base.iterdir():
+    for folder in clients.folder(client).iterdir():
         if not folder.is_dir():
             continue
         meta = _run_meta(folder)
@@ -622,12 +626,17 @@ def _run_list(_request: dict) -> dict[str, Any]:
             "has_results": (folder / "산출결과.xlsx").exists(),
         })
     runs.sort(key=lambda r: r["saved"], reverse=True)
-    return {"runs": runs}
+    return runs
+
+
+def _run_list(request: dict) -> dict[str, Any]:
+    chosen = text(request.get("client")) or clients.current()
+    return {"runs": run_summaries(chosen), **_client_list({})}
 
 
 def _run_folder(request: dict) -> Path:
     name = _safe_run_name(request.get("name", ""))
-    folder = _runs_dir() / name
+    folder = _runs_dir(request) / name
     if not folder.is_dir() or _run_meta(folder) is None:
         raise ValueError(f"저장된 산출 '{name}' 이(가) 없습니다")
     return folder
@@ -671,6 +680,43 @@ def _run_results(request: dict) -> dict[str, Any]:
 
 def _run_delete(request: dict) -> dict[str, Any]:
     shutil.rmtree(_run_folder(request))
+    return _run_list(request)
+
+
+# ── 단체 ─────────────────────────────────────────────────────────
+# 앱을 열면 가장 먼저 고르는 것. 산출 내역이 이 아래에 쌓인다.
+
+
+def _client_list(_request: dict) -> dict[str, Any]:
+    return {
+        "client": clients.current(),
+        "clients": [
+            {"name": c.name, "memo": c.memo, "runs": c.runs,
+             "last_saved": c.last_saved}
+            for c in clients.entries()
+        ],
+    }
+
+
+def _client_select(request: dict) -> dict[str, Any]:
+    clients.select(request.get("name", ""))
+    return _run_list({})
+
+
+def _client_add(request: dict) -> dict[str, Any]:
+    """단체를 만들고 곧바로 그 단체로 옮겨 간다."""
+    made = clients.create(request.get("name", ""), text(request.get("memo")))
+    clients.select(made.name)
+    return _run_list({})
+
+
+def _client_rename(request: dict) -> dict[str, Any]:
+    clients.rename(request.get("name", ""), request.get("new_name", ""))
+    return _run_list({})
+
+
+def _client_remove(request: dict) -> dict[str, Any]:
+    clients.remove(request.get("name", ""), force=bool(request.get("force")))
     return _run_list({})
 
 
@@ -894,6 +940,11 @@ _OPS = {
     "run_results": _run_results,
     "run_delete": _run_delete,
     "run_prior": _run_prior,
+    "client_list": _client_list,
+    "client_select": _client_select,
+    "client_add": _client_add,
+    "client_rename": _client_rename,
+    "client_remove": _client_remove,
     "library_path": _library_path,
     "backup_export": _backup_export,
     "backup_import": _backup_import,
