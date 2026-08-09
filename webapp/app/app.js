@@ -181,6 +181,7 @@ function buildEditor() {
   addTab("지급률 규정", buildRuleTab);
   addTab("퇴직사유", buildCauseTab);
   addTab("장기급여 유형", buildLongtermTab);
+  addTab("장기급여 복합", buildLongtermItemTab);
 
   $("ed-grade").replaceChildren(...META.grades.map((g) => el("option", {}, g)));
   $("ed-grade").value = "AA0";
@@ -535,26 +536,41 @@ function buildLongtermTab(page) {
 }
 
 function renderLongterm(rules) {
-  ltBody.replaceChildren(el("tr", {},
-    ...["규정명(직군)", "지급유형", "현물 상승률", "환산 근거"].map((h) => el("th", {}, h))));
+  const heads = ["규정명(직군)", "지급유형", "현물 상승률", "지급시점",
+                 "반복 주기(년)", "누적", "지급일(월-일)", "환산 근거"];
+  ltBody.replaceChildren(el("tr", {}, ...heads.map((h) => el("th", {}, h))));
   for (const group of groups) {
     const item = rules[group] || {};
     const kind = makeSelect(META.longterm_types, item.kind || META.longterm_types[0]);
     const escalation = el("input", { type: "text", value: item.escalation || "" });
+    const timing = makeSelect(META.longterm_timings,
+                              item.timing || META.longterm_timings[0]);
+    const every = el("input", { type: "text", value: item.every || "", size: "6" });
+    const accumulate = el("input", { type: "checkbox" });
+    accumulate.checked = Boolean(item.accumulate);
+    const anniversary = el("input", { type: "text", value: item.anniversary || "",
+                                      size: "8", placeholder: "10-01" });
     const note = el("input", { type: "text", value: item.note || "",
-                               style: "width:240px;text-align:left" });
+                               style: "width:200px;text-align:left" });
     const sync = () => {
       const inKind = kind.value === "현물";
       escalation.disabled = !inKind;
       if (!inKind) escalation.value = "";
+      // 창립기념일은 '근속도달' 에만 뜻이 있다. 나갈 때 주는 급여에 적으면
+      // 두 규칙이 서로 어긋난다.
+      const atMilestone = timing.value === META.longterm_timings[0];
+      anniversary.disabled = !atMilestone;
+      if (!atMilestone) anniversary.value = "";
     };
     kind.addEventListener("change", sync);
+    timing.addEventListener("change", sync);
     sync();
     if (item.escalation && kind.value === "현물") escalation.value = item.escalation;
     const tr = el("tr", {}, el("td", { class: "name" }, group),
-      el("td", {}, kind), el("td", {}, escalation), el("td", {}, note));
+      ...[kind, escalation, timing, every, accumulate, anniversary, note]
+        .map((w) => el("td", {}, w)));
     tr.dataset.group = group;
-    tr.widgets = { kind, escalation, note };
+    tr.widgets = { kind, escalation, timing, every, accumulate, anniversary, note };
     ltBody.append(tr);
   }
 }
@@ -562,11 +578,84 @@ function renderLongterm(rules) {
 function longtermValues() {
   const result = {};
   for (const tr of [...ltBody.children].slice(1)) {
+    const w = tr.widgets;
     result[tr.dataset.group] = {
-      kind: tr.widgets.kind.value,
-      escalation: tr.widgets.escalation.value.trim(),
-      note: tr.widgets.note.value.trim(),
+      kind: w.kind.value,
+      escalation: w.escalation.value.trim(),
+      timing: w.timing.value,
+      every: w.every.value.trim(),
+      accumulate: w.accumulate.checked,
+      anniversary: w.anniversary.value.trim(),
+      note: w.note.value.trim(),
     };
+  }
+  return result;
+}
+
+// ── 장기급여 복합 지급 ──
+// '10년 : 휴가 3일 , 금 10돈, 특별상여' 처럼 한 근속연수에 성격이 다른 급여가
+// 여럿 걸리는 규정이 흔하다. 직군별 한 줄로는 담을 수 없어 여기서 더 적는다.
+let ltItemBody = null;
+const LT_ITEM_MIN_ROWS = 3;
+
+function buildLongtermItemTab(page) {
+  const guide =
+    "한 규정에 항목이 여럿일 때만 채웁니다. 항목마다 '장기급여' 탭에 열을 하나씩 두세요.\n" +
+    "예) 정규직 | 금 | 현물 | … → '장기급여' 탭에 '금' 열을 만들고 근속별 금액을 적습니다.\n" +
+    "'장기급여 유형' 탭의 직군 줄이 그 규정의 첫 항목이고, 여기 적는 것이 그 위에 더해집니다.";
+  const table = el("table", { class: "grid" });
+  ltItemBody = el("tbody");
+  table.append(ltItemBody);
+  page.append(
+    el("div", { class: "hint", style: "white-space:pre-line" }, guide),
+    el("div", { class: "scroll-x" }, table),
+    el("div", { class: "toolbar" },
+       el("button", { class: "small", type: "button",
+                      onclick: () => { ltItemBody.append(ltItemRow([])); } },
+          "줄 추가")));
+}
+
+function ltItemRow(values) {
+  const rule = makeSelect(["", ...groups], values[0] || "");
+  const name = el("input", { type: "text", value: values[1] || "", size: "10" });
+  const kind = makeSelect(META.longterm_types, values[2] || META.longterm_types[0]);
+  const escalation = el("input", { type: "text", value: values[3] || "", size: "6" });
+  const timing = makeSelect(META.longterm_timings,
+                            values[4] || META.longterm_timings[0]);
+  const every = el("input", { type: "text", value: values[5] || "", size: "6" });
+  const accumulate = el("input", { type: "checkbox" });
+  accumulate.checked = values[6] === "Y";
+  const anniversary = el("input", { type: "text", value: values[7] || "", size: "8",
+                                    placeholder: "10-01" });
+  const note = el("input", { type: "text", value: values[8] || "",
+                             style: "width:160px;text-align:left" });
+  const widgets = [rule, name, kind, escalation, timing, every, accumulate,
+                   anniversary, note];
+  const tr = el("tr", {}, ...widgets.map((w) => el("td", {}, w)));
+  tr.widgets = { rule, name, kind, escalation, timing, every, accumulate,
+                 anniversary, note };
+  return tr;
+}
+
+function renderLongtermItems(rows) {
+  ltItemBody.replaceChildren(el("tr", {},
+    ...META.longterm_item_headers.map((h) => el("th", {}, h))));
+  for (const row of rows) ltItemBody.append(ltItemRow(row));
+  for (let i = rows.length; i < LT_ITEM_MIN_ROWS; i += 1) {
+    ltItemBody.append(ltItemRow([]));
+  }
+}
+
+function longtermItemValues() {
+  const result = [];
+  for (const tr of [...ltItemBody.children].slice(1)) {
+    const w = tr.widgets;
+    const row = [w.rule.value, w.name.value.trim(), w.kind.value,
+                 w.escalation.value.trim(), w.timing.value, w.every.value.trim(),
+                 w.accumulate.checked ? "Y" : "", w.anniversary.value.trim(),
+                 w.note.value.trim()];
+    // 규정과 항목 이름이 둘 다 있어야 지급률 표에서 열을 찾을 수 있다.
+    if (row[0] && row[1]) result.push(row);
   }
   return result;
 }
@@ -655,6 +744,7 @@ function collectState() {
     payout: payoutValues(),
     benefit_rules: ruleValues(),
     longterm_rules: longtermValues(),
+    longterm_items: longtermItemValues(),
     exit_causes: causeValues(),
     mapping: mapData.map((r) => [r.source, r.kind, r.target]),
   };
@@ -671,6 +761,7 @@ function renderState(state) {
   renderRules(state.benefit_rules || {});
   renderCauses(state.exit_causes || []);
   renderLongterm(state.longterm_rules || {});
+  renderLongtermItems(state.longterm_items || []);
   const scanned = new Map(mapData.map((r) => [pairKey(r.source, r.kind), r]));
   mapData = (state.mapping || []).map(([source, kind, target]) => {
     const seen = scanned.get(pairKey(source, kind));

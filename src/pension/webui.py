@@ -26,7 +26,13 @@ from typing import Any, Final
 
 from . import assumption_form as form
 from .actuarial import FRACTION_MODES, SERVICE_BASES
-from .assumptions import ATTRIBUTIONS, BENEFIT_MODES, EXIT_CAUSES, LONGTERM_TYPES
+from .assumptions import (
+    ATTRIBUTIONS,
+    BENEFIT_MODES,
+    EXIT_CAUSES,
+    LONGTERM_TIMINGS,
+    LONGTERM_TYPES,
+)
 from .formula import FUNCTIONS, VARIABLES
 from .jobgroup import DEFAULT_GROUPS, scan_roster, suggest_group
 from .library import (
@@ -89,6 +95,8 @@ def _meta(_request: dict) -> dict[str, Any]:
         "exit_causes": list(EXIT_CAUSES),
         "attributions": list(ATTRIBUTIONS),
         "exit_cause_headers": list(form.EXIT_CAUSE_HEADERS),
+        "longterm_timings": list(LONGTERM_TIMINGS),
+        "longterm_item_headers": list(form.LONGTERM_ITEM_HEADERS),
         "grades": [*INVESTMENT_GRADES, "국고채"],
         "kinds": {"curve": CURVE_KIND, "rates": RATES_KIND,
                   "roster": ROSTER_KIND, "preset": PRESET_KIND},

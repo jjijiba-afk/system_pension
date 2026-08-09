@@ -116,6 +116,49 @@ class TestAssumptionForm:
         ]
         assert any("두 번" in p for p in form.state_problems(state))
 
+    def test_longterm_extras_survive_the_round_trip(self, tmp_path) -> None:
+        """복합 지급 항목이 왕복에서 사라지면 포상금·금이 통째로 빠진다."""
+        state = form.example_state(["생산직"])
+        state["longterm_rules"]["생산직"]["anniversary"] = "10-01"
+        state["longterm_items"] = [
+            ["생산직", "금", "현물", "3%", "퇴직시", "", "Y", "", "순금 10돈"],
+        ]
+
+        back = form.read_state(form.write_state(state, tmp_path / "기초율.xlsx"))
+        assert back["longterm_rules"]["생산직"]["anniversary"] == "10-01"
+        assert back["longterm_items"] == [
+            ["생산직", "금", "현물", "3%", "퇴직시", "", "Y", "", "순금 10돈"],
+        ]
+
+    def test_longterm_extras_reach_the_engine(self, tmp_path) -> None:
+        from pension.assumptions import load_assumptions
+
+        state = form.example_state(["생산직"])
+        state["grids"]["장기급여지급률"]["rows"] = [["10", "10"]]
+        state["longterm_items"] = [
+            ["생산직", "금", "현금", "", "퇴직시", "5", "Y", "", ""],
+        ]
+        path = form.write_state(state, tmp_path / "기초율.xlsx")
+
+        items = load_assumptions(path).longterm_items("생산직")
+        assert len(items) == 2
+        assert items[1].item == "금"
+        assert items[1].timing == "퇴직시"
+        assert items[1].every_years == 5
+        assert items[1].accumulate is True
+
+    def test_an_unknown_longterm_timing_blocks_saving(self) -> None:
+        state = form.example_state(["생산직"])
+        state["longterm_items"] = [["생산직", "금", "현금", "", "아무때나", "", "", "", ""]]
+        assert any("아무때나" in p for p in form.state_problems(state))
+
+    def test_a_row_without_an_item_name_is_dropped(self, tmp_path) -> None:
+        """항목 이름이 없으면 지급률 표에서 열을 찾을 수 없다."""
+        state = form.example_state(["생산직"])
+        state["longterm_items"] = [["생산직", "", "현금", "", "퇴직시", "", "", "", ""]]
+        back = form.read_state(form.write_state(state, tmp_path / "기초율.xlsx"))
+        assert back["longterm_items"] == []
+
     def test_causes_reach_the_engine(self, tmp_path) -> None:
         """만든 워크북을 산출 엔진이 그대로 읽어야 한다."""
         from pension.assumptions import load_assumptions
@@ -212,6 +255,8 @@ class TestApi:
         assert meta["exit_causes"] == ["중도", "사망", "정년"]
         assert meta["attributions"] == ["근속비례", "즉시"]
         assert len(meta["exit_cause_headers"]) == 7
+        assert meta["longterm_timings"] == ["근속도달", "퇴직시", "정년시"]
+        assert len(meta["longterm_item_headers"]) == 9
 
     def test_state_write_reports_problems_instead_of_raising(self, tmp_path) -> None:
         state = form.empty_state()

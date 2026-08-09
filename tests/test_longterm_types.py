@@ -41,7 +41,7 @@ def _assumptions(kind: str, escalation: float = 0.0, value: float = 10.0) -> Ass
         longterm_benefit=BenefitScale(
             curves={RULE: RateCurve({10: value})}, statutory_when_missing=False
         ),
-        longterm_rules={RULE: LongTermRule(kind=kind, escalation=escalation)},
+        longterm_rules={RULE: [LongTermRule(kind=kind, escalation=escalation)]},
     )
 
 
@@ -135,7 +135,7 @@ class TestWorkbook:
     def test_round_trip(self, tmp_path) -> None:
         path = write_assumptions(
             tmp_path / "기초율.xlsx", self._sheets(), None,
-            {RULE: (LT_IN_KIND, 0.045, "순금 30돈 @ 2025-12-31 시세")},
+            [[RULE, LT_IN_KIND, 0.045, "순금 30돈 @ 2025-12-31 시세"]],
         )
         loaded = load_assumptions(path)
         rule = loaded.longterm_rule(RULE)
@@ -145,7 +145,7 @@ class TestWorkbook:
 
     def test_unknown_kind_is_reported(self, tmp_path) -> None:
         path = write_assumptions(
-            tmp_path / "기초율.xlsx", self._sheets(), None, {RULE: ("포인트", 0.0, "")}
+            tmp_path / "기초율.xlsx", self._sheets(), None, [[RULE, "포인트", None, ""]]
         )
         with pytest.raises(ValueError, match="지급유형"):
             load_assumptions(path)
@@ -153,7 +153,7 @@ class TestWorkbook:
     def test_escalation_on_a_non_in_kind_kind_is_reported(self, tmp_path) -> None:
         """휴가에 현물 상승률을 적으면 어느 쪽이 의도인지 알 수 없다."""
         path = write_assumptions(
-            tmp_path / "기초율.xlsx", self._sheets(), None, {RULE: (LT_VACATION, 0.05, "")}
+            tmp_path / "기초율.xlsx", self._sheets(), None, [[RULE, LT_VACATION, 0.05, ""]]
         )
         with pytest.raises(ValueError, match="현물 상승률을 쓰지 않습니다"):
             load_assumptions(path)

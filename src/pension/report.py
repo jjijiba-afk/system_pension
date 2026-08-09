@@ -554,6 +554,20 @@ def _assumption_sheet(wb, run: PensionRun) -> None:
         section("지급률 방식")
         table(["규정명", "방식", "수식"], modes)
 
+    if a.longterm_rules:
+        section("장기급여 지급 항목")
+        table(
+            ["규정명", "항목(지급률 열)", "지급유형", "현물 상승률",
+             "지급시점", "반복 주기(년)", "누적", "지급일", "환산 근거"],
+            [
+                [name, entry.item, entry.kind, entry.escalation or "",
+                 entry.timing, entry.every_years or "",
+                 "Y" if entry.accumulate else "", entry.anniversary, entry.note]
+                for name, entries in sorted(a.longterm_rules.items())
+                for entry in entries
+            ],
+        )
+
     if not a.exit_causes.is_empty():
         section("퇴직사유별 지급 차등")
         table(
