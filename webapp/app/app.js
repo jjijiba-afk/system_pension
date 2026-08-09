@@ -96,8 +96,7 @@ boot();
 
 // ── 큰 탭 ────────────────────────────────────────────────────────
 const PAGES = [["tab-calc", "page-calc"], ["tab-edit", "page-edit"],
-               ["tab-lib", "page-lib"], ["tab-runs", "page-runs"],
-               ["tab-gen", "page-gen"]];
+               ["tab-lib", "page-lib"], ["tab-runs", "page-runs"]];
 for (const [tab, page] of PAGES) {
   $(tab).addEventListener("click", () => {
     // 탭을 옮기기 전에 편집 중이던 가정을 먼저 확정 저장한다. 디바운스만
@@ -1053,12 +1052,27 @@ function syncEditorHint() {
 }
 
 // ═════════ 기본가정 관리 ═════════════════════════════════════════
+// 접힌 구획은 안이 안 보인다. 몇 개 들어 있는지는 머리줄에 적어 둔다.
+function libCount(sectionId, data) {
+  const mark = $(sectionId).querySelector("summary .count");
+  if (!mark) return;
+  const n = data.entries.length;
+  if (!n) { mark.textContent = "없음"; return; }
+  mark.textContent = data.default ? `${n}개 · 기본 ${data.default}` : `${n}개`;
+}
+
 function refreshLibrary() {
   const { library, backup } = py("library_list");
   renderLibraryList("금리표", library["금리표"], $("lib-curve-list"));
   renderLibraryList("표준률", library["표준률"], $("lib-rates-list"));
   renderLibraryList("명부", library["명부"], $("lib-roster-list"), { pin: false });
   renderLibraryList("가정세트", library["가정세트"], $("lib-preset-list"));
+  libCount("sec-lib-preset", library["가정세트"]);
+  libCount("sec-lib-curve", library["금리표"]);
+  libCount("sec-lib-roster", library["명부"]);
+  libCount("sec-lib-rates", library["표준률"]);
+  $("lib-backup").querySelector("summary .count").textContent =
+    backup ? `마지막 ${backup}` : "내보낸 적 없음";
 
   const preset = $("ed-preset");
   const chosenPreset = preset.value;
