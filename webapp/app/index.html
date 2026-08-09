@@ -150,6 +150,26 @@
   <div class="warn-box" id="issues"></div>
   <button class="big" id="dl-result">결과 엑셀 내려받기</button>
   <button class="big secondary" id="dl-members">개인별 결과 내려받기</button>
+
+  <fieldset style="margin-top:16px"><legend>계리평가 보고서 (인쇄 → PDF)</legend>
+    <div class="row">
+      <button class="small primary" type="button" id="report-sev">퇴직급여 보고서</button>
+      <button class="small" type="button" id="report-lt">장기급여 보고서</button>
+    </div>
+    <div class="hint">표지·공시사항·민감도·주석·기초율 표까지 갖춘 평가보고서입니다.
+    미리보기에서 [인쇄 / PDF 저장] 을 누르면 아이패드에서는 인쇄 화면의 공유로
+    <b>파일에 저장</b>, PC 에서는 프린터 대신 <b>PDF로 저장</b>을 고르면 됩니다.</div>
+  </fieldset>
+
+  <fieldset><legend>사번 조회 — 개인별 산출 근거</legend>
+    <div class="row">
+      <input type="text" id="lookup-id" placeholder="사번 또는 성명 (예: A0001)">
+      <button class="small primary" type="button" id="lookup-run">조회</button>
+    </div>
+    <div class="hint">방금 산출한 명부·기초율로 <b>그 사람만 다시 산출</b>해
+    연차·퇴직사유별 계산 근거를 한 줄씩 보여줍니다. 여기 나온 채무의 합은
+    전체 산출의 그 사람 몫과 원 단위까지 같습니다.</div>
+  </fieldset>
   <fieldset style="margin-top:16px"><legend>이 산출을 기기에 저장</legend>
     <div class="row">
       <input type="text" id="run-name" placeholder="산출명 (예: 2412)">
@@ -335,6 +355,27 @@
   <button class="big secondary" onclick="this.closest('dialog').close()">닫기</button>
 </dialog>
 
+<dialog id="print-dialog" style="width:92vw;max-width:900px">
+  <h1 style="font-size:1.05rem" id="print-title"></h1>
+  <div class="toolbar">
+    <button class="small primary" type="button" id="print-go">인쇄 / PDF 저장</button>
+    <button class="small" type="button" id="print-download">HTML 내려받기</button>
+    <span class="spacer"></span>
+    <button class="small" type="button" onclick="this.closest('dialog').close()">닫기</button>
+  </div>
+  <iframe id="print-frame" style="width:100%;height:65vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>
+</dialog>
+
+<dialog id="member-dialog" style="width:94vw;max-width:980px">
+  <h1 style="font-size:1.05rem" id="member-title"></h1>
+  <div class="toolbar">
+    <span class="hint" id="member-note"></span>
+    <span class="spacer"></span>
+    <button class="small" type="button" onclick="this.closest('dialog').close()">닫기</button>
+  </div>
+  <div id="member-body"></div>
+</dialog>
+
 <p class="notice">모든 계산은 이 기기의 브라우저 안에서 이루어집니다. 명부·기초율은
 어디로도 전송되지 않습니다. Safari 공유 버튼 → <b>홈 화면에 추가</b> 를 누르면
 앱으로 설치되고, 한 번 연 뒤에는 오프라인에서도 동작합니다.</p>
@@ -345,6 +386,10 @@
   <table class="data" id="run-dialog-groups"></table>
   <button class="big" id="run-dl-result">저장된 결과 엑셀 내려받기</button>
   <button class="big secondary" id="run-dl-members">저장된 개인별 결과 내려받기</button>
+  <div class="row" style="margin-top:10px">
+    <input type="text" id="run-lookup-id" placeholder="사번 또는 성명 조회">
+    <button class="small primary" type="button" id="run-lookup-go">개인별 근거 조회</button>
+  </div>
   <button class="big secondary" onclick="this.closest('dialog').close()">닫기</button>
 </dialog>
 

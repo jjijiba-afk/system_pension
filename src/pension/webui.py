@@ -418,6 +418,11 @@ def _general_info(request: dict) -> dict[str, Any]:
 
 # ── 산출 ─────────────────────────────────────────────────────────
 
+#: 마지막으로 성공한 산출. 보고서·사번 조회가 산출 화면과 같은 숫자를 쓰도록
+#: 결과 객체를 그대로 들고 있는다(페이지를 닫으면 사라진다 — 저장은 run_save).
+_LAST_RUN: dict[str, Any] = {}
+
+
 def _run(request: dict) -> dict[str, Any]:
     """산출을 실행하고 화면 요약을 돌려준다. 결과 파일은 ``/work`` 아래에 남는다."""
     from .errors import PensionDataError, Severity
@@ -463,6 +468,9 @@ def _run(request: dict) -> dict[str, Any]:
 
     write_report(run, out)
     write_member_export(run, work / "개인별결과.xlsx")
+
+    _LAST_RUN.clear()
+    _LAST_RUN.update({"run": run, "request": dict(request)})
 
     valuation = run.valuation
     if run.assumptions.discount.flat is None:
@@ -681,6 +689,72 @@ def _run_results(request: dict) -> dict[str, Any]:
 def _run_delete(request: dict) -> dict[str, Any]:
     shutil.rmtree(_run_folder(request))
     return _run_list(request)
+
+
+# ── 사번 조회 ────────────────────────────────────────────────────
+# 전체 산출은 몇백 명의 합계라 "이 사람 채무가 왜 이 금액인가" 에는 답하지
+# 못한다. 사번 하나를 같은 명부·기초율로 다시 산출해 연차별 근거까지 돌려준다.
+
+
+def _member_detail(request: dict) -> dict[str, Any]:
+    from .memberdetail import lookup
+
+    if text(request.get("name")):
+        # 저장된 산출에서 조회 — 그 산출이 쓴 명부·기초율 그대로.
+        folder = _run_folder(request)
+        roster = _saved_roster(folder)
+        if roster is None:
+            raise ValueError("저장본에 명부가 없습니다")
+        roster_path, assumptions_path = str(roster), str(folder / "기초율.xlsx")
+        meta = _run_meta(folder) or {}
+        base_date = _as_date(meta.get("options", {}).get("base_date"))
+    else:
+        # 방금 산출한 명부·기초율 그대로 — 조회 결과가 산출 화면과 같은 값이 된다.
+        last = _LAST_RUN.get("request") or {}
+        roster_path = text(request.get("roster")) or text(last.get("roster"))
+        assumptions_path = (text(request.get("assumptions"))
+                            or text(last.get("assumptions")))
+        if not roster_path or not Path(roster_path).exists():
+            raise ValueError("먼저 산출을 실행하거나 저장된 산출을 고르세요")
+        base_date = _as_date(request.get("base_date") or last.get("base_date"))
+
+    return lookup(
+        roster_path, assumptions_path, text(request.get("employee_id")),
+        base_date=base_date,
+    )
+
+
+# ── 계리평가 보고서 ──────────────────────────────────────────────
+# 표지부터 용어정리까지 갖춘 인쇄용 HTML. 브라우저 인쇄 → PDF 저장으로 뽑는다.
+
+
+def _report_html(request: dict) -> dict[str, Any]:
+    from .webreport import REPORT_KINDS, render_html
+
+    if not _LAST_RUN:
+        raise ValueError("먼저 산출을 실행하세요. 보고서는 방금 산출한 결과로 만듭니다")
+    run = _LAST_RUN["run"]
+    remembered = _LAST_RUN.get("request") or {}
+
+    kind = text(request.get("kind")) or "severance"
+    if kind not in REPORT_KINDS:
+        raise ValueError(f"보고서 종류는 {' / '.join(REPORT_KINDS)} 입니다")
+
+    page = render_html(
+        run, kind=kind, client=text(request.get("client")),
+        period_start=_as_date(remembered.get("period_start")),
+    )
+
+    work = Path(request.get("work", "/work"))
+    work.mkdir(parents=True, exist_ok=True)
+    word = "퇴직급여" if kind == "severance" else "장기급여"
+    stamp = str(run.config.base_date).replace("-", "")
+    target = work / f"계리평가보고서_{word}_{stamp}.html"
+    target.write_text(page, encoding="utf-8")
+    return {
+        "path": str(target), "filename": target.name,
+        "longterm_available": run.longterm is not None,
+    }
 
 
 # ── 단체 ─────────────────────────────────────────────────────────
@@ -945,6 +1019,8 @@ _OPS = {
     "client_add": _client_add,
     "client_rename": _client_rename,
     "client_remove": _client_remove,
+    "member_detail": _member_detail,
+    "report_html": _report_html,
     "library_path": _library_path,
     "backup_export": _backup_export,
     "backup_import": _backup_import,

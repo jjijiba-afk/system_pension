@@ -1475,6 +1475,152 @@ $("form").addEventListener("submit", async (event) => {
 $("dl-result").addEventListener("click", () => download("/work/산출결과.xlsx", "산출결과.xlsx"));
 $("dl-members").addEventListener("click", () => download("/work/개인별결과.xlsx", "개인별결과.xlsx"));
 
+// ═════════ 계리평가 보고서 ═══════════════════════════════════════
+// 표지부터 용어정리까지 갖춘 인쇄용 HTML 을 파이썬이 만들고, 여기서는
+// 미리보기(iframe)와 인쇄만 한다. 인쇄 화면에서 PDF 로 저장하면 끝이다.
+
+function showValuationReport(kind) {
+  if (!lastRun) { alert("먼저 산출을 실행하세요."); return; }
+  try {
+    const { path, filename } = py("report_html", { kind, client: CLIENT, work: "/work" });
+    const page = new TextDecoder().decode(pyodide.FS.readFile(path));
+    $("print-title").textContent = filename.replace(/\.html$/, "");
+    const frame = $("print-frame");
+    frame.srcdoc = page;
+    $("print-go").onclick = () => {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    };
+    $("print-download").onclick = () => download(path, filename, "text/html");
+    $("print-dialog").showModal();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+$("report-sev").addEventListener("click", () => showValuationReport("severance"));
+$("report-lt").addEventListener("click", () => showValuationReport("longterm"));
+
+// ═════════ 사번 조회 ═════════════════════════════════════════════
+// 그 한 명을 같은 명부·기초율로 다시 산출해 연차별 근거를 보여준다.
+// 엔진의 같은 코드가 돌므로 여기 나온 채무 합은 전체 산출의 그 사람 몫과 같다.
+
+const won = (x) => (x == null ? "—" : Math.round(x).toLocaleString("ko-KR"));
+const rate = (x, d = 2) => (x == null ? "" : (x * 100).toFixed(d) + "%");
+
+function kvTable(pairs) {
+  return el("div", { class: "scroll-x" }, el("table", { class: "data" },
+    ...pairs.map(([k, v]) => el("tr", {}, el("td", {}, String(k)),
+                                 el("td", { class: "num" }, String(v))))));
+}
+
+function traceTable(trace) {
+  const head = ["연차", "시점", "연령", "근속", "월평균임금", "중도퇴직률", "사망률",
+                "연초 재직확률", "퇴직사유", "그 해 퇴직확률", "지급액",
+                "귀속액", "당기 1년치", "할인계수", "DBO 기여", "근무원가 기여"];
+  const rows = trace.map((r) => [
+    r.t, r.timing, r.age.toFixed(1), r.service.toFixed(2), won(r.wage),
+    rate(r.withdrawal), rate(r.mortality, 3), rate(r.survival),
+    r.cause, rate(r.exit_probability, 3), won(r.benefit),
+    won(r.attributed), won(r.unit), r.discount.toFixed(6),
+    won(r.dbo), won(r.service_cost),
+  ]);
+  return el("div", { class: "scroll-x" }, el("table", { class: "data" },
+    el("tr", {}, ...head.map((h) => el("th", {}, h))),
+    ...rows.map((cells) => el("tr", {},
+      ...cells.map((c, i) => el("td", { class: i >= 4 ? "num" : "" }, String(c)))))));
+}
+
+function longtermTraceTable(trace) {
+  const head = ["지급 항목", "도달 근속", "지급 시점(년)", "표 값", "지급액",
+                "도달(잔존) 확률", "할인계수", "귀속비율", "DBO 기여", "근무원가 기여"];
+  const rows = trace.map((r) => [
+    r.item, r.target_service, r.timing.toFixed(2), r.value, won(r.benefit),
+    rate(r.survival), r.discount.toFixed(6), rate(r.share), won(r.dbo),
+    won(r.service_cost),
+  ]);
+  return el("div", { class: "scroll-x" }, el("table", { class: "data" },
+    el("tr", {}, ...head.map((h) => el("th", {}, h))),
+    ...rows.map((cells) => el("tr", {},
+      ...cells.map((c, i) => el("td", { class: i >= 3 ? "num" : "" }, String(c)))))));
+}
+
+function showMemberDetail(args, sourceLabel) {
+  let detail;
+  try {
+    detail = py("member_detail", { work: "/work", ...args });
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+  const first = detail.rows[0];
+  const who = first
+    ? `${first.profile["사번"] || first.profile["성명"]} — ${first.profile["성명"]}`
+    : (detail.retired[0] ? `${detail.retired[0]["사번"]} — ${detail.retired[0]["성명"]} (퇴직자)` : "");
+  $("member-title").textContent = `개인별 산출 근거 · ${who}`;
+  $("member-note").textContent =
+    `${sourceLabel} · 산출기준일 ${detail.base_date} · 할인율 ${rate(detail.discount_rate, 3)}`;
+
+  const body = $("member-body");
+  body.replaceChildren();
+
+  detail.rows.forEach((row, i) => {
+    if (detail.rows.length > 1) {
+      body.append(el("h2", { style: "font-size:1rem;color:var(--navy)" },
+        `지급 구간 ${i + 1} / ${detail.rows.length}`));
+    }
+    if (row.excluded) {
+      body.append(el("p", { class: "warn-box" }, `산출 제외: ${row.excluded}`));
+    }
+    body.append(el("h3", {}, "인적사항"), kvTable(Object.entries(row.profile)));
+    body.append(el("h3", {}, "적용한 규정·가정"), kvTable(Object.entries(row.applied)));
+    body.append(el("h3", {}, "산출 결과"),
+      kvTable(Object.entries(row.result).map(([k, v]) =>
+        [k, k.includes("듀레이션") ? Number(v).toFixed(2) + "년" : won(v) + "원"])));
+    if (row.trace.length) {
+      body.append(el("h3", {}, "연차별 계산 근거 (퇴직급여)"), traceTable(row.trace));
+    }
+  });
+
+  detail.longterm.forEach((block) => {
+    body.append(el("h3", {}, "장기종업원급여"));
+    if (block.excluded) {
+      body.append(el("p", { class: "notice" }, `산출 제외: ${block.excluded}`));
+      return;
+    }
+    body.append(kvTable([
+      ["지급유형", block["지급유형"] || "—"],
+      ["1일 통상임금", won(block["1일 통상임금"]) + "원"],
+      ["다음 지급 근속", block["다음 지급 근속"] == null ? "—" : block["다음 지급 근속"] + "년"],
+      ["남은 지급 시점 수", block["남은 지급 시점 수"]],
+      ...Object.entries(block.result).map(([k, v]) => [k, won(v) + "원"]),
+    ]));
+    if ((block.trace || []).length) {
+      body.append(el("h3", {}, "지급 시점별 계산 근거 (장기급여)"),
+                  longtermTraceTable(block.trace));
+    }
+  });
+
+  if (detail.retired.length) {
+    body.append(el("h3", {}, "퇴직자명부 내역"));
+    detail.retired.forEach((row) => body.append(kvTable(
+      Object.entries(row).map(([k, v]) =>
+        [k, typeof v === "number" ? won(v) + "원" : (v || "—")]))));
+  }
+
+  if (detail.rows.length > 1) {
+    body.append(el("h3", {}, "합계 (지급 구간 전체)"),
+      kvTable(Object.entries(detail.total).map(([k, v]) => [k, won(v) + "원"])));
+  }
+  $("member-dialog").showModal();
+}
+
+$("lookup-run").addEventListener("click", () => {
+  const id = $("lookup-id").value.trim();
+  if (!id) { alert("사번 또는 성명을 입력하세요."); return; }
+  if (!lastRun) { alert("먼저 산출을 실행하세요."); return; }
+  showMemberDetail({ employee_id: id }, "방금 산출한 명부·기초율");
+});
+
 // ═════════ 산출 내역 ═════════════════════════════════════════════
 // 산출 하나(명부·가정·결과·요약)를 이름 붙여 IndexedDB 에 보관한다.
 // "2412 1번단체" 를 저장해 두면 다음 결산 때 전기 입력을 그대로 끌어온다.
@@ -1691,6 +1837,11 @@ function showRun(name) {
       [["직군", "인원", "확정급여채무", "당기근무원가"], ...(report.groups || [])], 1);
     $("run-dl-result").onclick = () => downloadRunFile(name, "산출결과.xlsx");
     $("run-dl-members").onclick = () => downloadRunFile(name, "개인별결과.xlsx");
+    $("run-lookup-go").onclick = () => {
+      const id = $("run-lookup-id").value.trim();
+      if (!id) { alert("사번을 입력하세요."); return; }
+      showMemberDetail({ name, employee_id: id }, `저장된 산출 '${name}'`);
+    };
     $("run-dialog").showModal();
   } catch (error) {
     alert(error.message);

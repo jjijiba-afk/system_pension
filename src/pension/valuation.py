@@ -151,6 +151,13 @@ class MemberValuation:
     단일할인율을 역산할 때 쓴다(IAS 19.85). 곡선으로 할인한 채무와 같은 값을
     내는 하나의 이자율을 찾으려면 시점별 현금흐름이 있어야 한다.
     """
+    benefit_flows: dict[float, float] = field(default_factory=dict)
+    """``{지급시점(년): 기대 지급총액}``. 할인 전, **귀속 전** 금액이다.
+
+    :attr:`cash_flows` 는 기준일까지 귀속된 몫만 담지만(가득반영), 이것은 그때
+    실제로 나갈 돈 전체다. 만기분석 공시(문단 147(c))의 '퇴직급여 지급 예상액'
+    열이 이 값이다.
+    """
 
     min_service_years: float = 0.0
     """적용한 가입자격(최소 근속연수). 0 이면 제한 없음."""
@@ -210,6 +217,14 @@ class ValuationResult:
         total: dict[float, float] = {}
         for m in self.members:
             for timing, amount in m.cash_flows.items():
+                total[timing] = total.get(timing, 0.0) + amount
+        return dict(sorted(total.items()))
+
+    def benefit_cash_flows(self) -> dict[float, float]:
+        """시점별 기대 지급총액(할인 전, 귀속 전). 만기분석 공시용이다."""
+        total: dict[float, float] = {}
+        for m in self.members:
+            for timing, amount in m.benefit_flows.items():
                 total[timing] = total.get(timing, 0.0) + amount
         return dict(sorted(total.items()))
 
@@ -292,11 +307,16 @@ def value_member(
     member: ActiveMember,
     config: CalculationConfig,
     assumptions: Assumptions,
+    trace: list[dict] | None = None,
 ) -> MemberValuation:
     """재직자 한 명의 DBO·근무원가·이자원가를 계산한다.
 
     DC 가입자는 확정기여제도이므로 확정급여채무가 생기지 않는다. 부담금 납입으로
     의무가 끝나기 때문이며, 결과에는 ``excluded_reason`` 을 달아 남긴다.
+
+    :param trace: 리스트를 주면 연차·퇴직사유별 계산 근거가 한 줄씩 담긴다.
+        감사인이 한 사람의 채무를 손으로 재계산할 수 있는 수준의 상세다.
+        결과 숫자에는 어떤 영향도 없다.
     """
     result = MemberValuation(
         employee_id=member.employee_id,
@@ -612,10 +632,28 @@ def value_member(
             service_cost += unit * exit_probability * discount
             benefit_pv += benefit * exit_probability * discount
             weighted_time += attributed * exit_probability * discount * timing
-            # 할인 전 현금흐름. 단일할인율 역산에 쓴다.
+            # 할인 전 현금흐름. 단일할인율 역산과 만기분석 공시에 쓴다.
             flow = attributed * exit_probability
             if flow:
                 result.cash_flows[timing] = result.cash_flows.get(timing, 0.0) + flow
+            paid_flow = benefit * exit_probability
+            if paid_flow:
+                result.benefit_flows[timing] = (
+                    result.benefit_flows.get(timing, 0.0) + paid_flow
+                )
+
+            if trace is not None:
+                trace.append({
+                    "t": t, "timing": timing, "age": exit_age,
+                    "service": total_service, "wage": wage,
+                    "withdrawal": withdrawal, "mortality": mortality,
+                    "survival": survival, "cause": cause_name,
+                    "exit_probability": exit_probability,
+                    "benefit": benefit, "attributed": attributed, "unit": unit,
+                    "discount": discount,
+                    "dbo": attributed * exit_probability * discount,
+                    "service_cost": unit * exit_probability * discount,
+                })
 
         survival *= (1.0 - withdrawal) * (1.0 - mortality)
         if survival <= 0.0:

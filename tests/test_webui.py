@@ -24,6 +24,9 @@ from pension.webui import api
 def home(tmp_path, monkeypatch):
     """등록 폴더를 시험용으로 갈아 끼운다. 사용자 폴더를 건드리면 안 된다."""
     monkeypatch.setenv("PENSION_HOME", str(tmp_path / "home"))
+    # 마지막 산출 캐시(보고서·사번 조회가 쓴다)가 시험 사이에 새면 안 된다.
+    from pension import webui
+    webui._LAST_RUN.clear()
     return tmp_path
 
 
@@ -931,6 +934,17 @@ class TestClients:
         assert "단체명" in call_error("client_add", name="   ")
         assert call("client_add", name="가/나:다")["client"] == "가 나 다"
 
+    def test_member_detail_from_saved_run(self, tmp_path, roster_path) -> None:
+        """저장된 산출에서도 사번 조회 — 그 산출이 쓴 명부·기초율 그대로."""
+        call("client_add", name="가단체")
+        self._saved_run(tmp_path, roster_path, "2412")
+        detail = call("member_detail", name="2412", employee_id="A001")
+        assert detail["rows"][0]["profile"]["성명"] == "김철수"
+        assert detail["rows"][0]["result"]["확정급여채무 (DBO)"] > 0
+        # 다른 단체에서는 그 산출이 안 보이므로 조회도 안 된다.
+        call("client_add", name="나단체")
+        assert "없습니다" in call_error("member_detail", name="2412", employee_id="A001")
+
     def test_legacy_runs_move_into_the_default_client(self, tmp_path, roster_path) -> None:
         """단체를 쓰기 전에 저장한 산출도 그대로 보여야 한다."""
         import shutil
@@ -945,6 +959,47 @@ class TestClients:
         assert listing["client"] == clients.DEFAULT_CLIENT
         assert [r["name"] for r in listing["runs"]] == ["2412"]
         assert not old.exists()
+
+
+class TestMemberDetailAndReport:
+    """산출 직후의 사번 조회와 계리평가 보고서 — 둘 다 마지막 산출을 쓴다."""
+
+    def _run(self, tmp_path, roster_path, **extra) -> dict:
+        state = form.example_state(["1정규직", "2임원", "3계약직"])
+        assumptions = str(tmp_path / "기초율.xlsx")
+        call("state_write", state=state, path=assumptions)
+        return call(
+            "run", roster=str(roster_path), assumptions=assumptions,
+            work=str(tmp_path), force=True, sensitivity=False, longterm=True,
+            **extra,
+        )
+
+    def test_member_detail_uses_the_last_run_inputs(self, tmp_path, roster_path) -> None:
+        """산출 뒤에는 경로를 다시 주지 않아도 그 명부·기초율로 조회된다."""
+        self._run(tmp_path, roster_path)
+        detail = call("member_detail", employee_id="A001")
+        row = detail["rows"][0]
+        assert row["profile"]["성명"] == "김철수"
+        assert sum(t["dbo"] for t in row["trace"]) == pytest.approx(
+            row["result"]["확정급여채무 (DBO)"])
+
+    def test_member_detail_before_any_run_is_refused(self) -> None:
+        assert "먼저 산출을" in call_error("member_detail", employee_id="A001")
+
+    def test_report_html_is_written_and_complete(self, tmp_path, roster_path) -> None:
+        self._run(tmp_path, roster_path, prior_dbo=300_000_000, prior_rate=0.04)
+        made = call("report_html", kind="severance", client="가나다㈜",
+                    work=str(tmp_path))
+        page = Path(made["path"]).read_text(encoding="utf-8")
+        assert "퇴직급여 확정급여부채 평가보고서" in page
+        assert "가나다㈜" in page
+        assert made["longterm_available"] is True
+
+        lt = call("report_html", kind="longterm", work=str(tmp_path))
+        assert "장기종업원급여부채" in Path(lt["path"]).read_text(encoding="utf-8")
+
+    def test_report_before_any_run_is_refused(self) -> None:
+        assert "먼저 산출을" in call_error("report_html", kind="severance")
 
 
 class TestPlanAssetsAndAmendment:

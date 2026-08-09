@@ -486,3 +486,36 @@ def test_client_bar_keeps_run_history_apart(page, tmp_path) -> None:
     page.click("#client-remove")
     assert page.input_value("#client-pick") == "기본 단체"
     assert "2412 1번단체" in page.inner_text("#runs-list")
+
+
+def test_member_lookup_and_reports(page, tmp_path) -> None:
+    """산출 → 사번 조회(연차별 근거) → 계리평가 보고서 미리보기까지."""
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+
+    # 사번 조회 — 그 사람만 재산출한 연차별 근거가 떠야 한다.
+    page.fill("#lookup-id", "A0001")
+    page.click("#lookup-run")
+    page.wait_for_selector("#member-dialog[open]", timeout=120_000)
+    body = page.inner_text("#member-body")
+    assert "연차별 계산 근거" in body
+    assert "확정급여채무 (DBO)" in body
+    page.click("#member-dialog >> text=닫기")
+
+    # 퇴직급여 보고서 — 미리보기 iframe 안에 표지 제목이 있어야 한다.
+    page.click("#report-sev")
+    page.wait_for_selector("#print-dialog[open]", timeout=120_000)
+    frame = page.frame_locator("#print-frame")
+    assert "확정급여부채 평가보고서" in frame.locator("body").inner_text()
+    assert "민감도 분석" in frame.locator("body").inner_text()
+    page.click("#print-dialog >> text=닫기")
