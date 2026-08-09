@@ -93,6 +93,8 @@ ACTIVE_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "progressive_rate": ("누진적용율", "누진직용율"),
     "annual_salary_date": ("연봉제전환추계일",),
     "group_hire_date": ("그룹입사일자", "그룹입사일"),
+    "period_start": ("지급률기산일", "지급구간시작일", "적용기간시작일"),
+    "period_end": ("지급률종료일", "지급구간종료일", "적용기간종료일"),
 }
 
 RETIRED_HEADER_ALIASES: dict[str, tuple[str, ...]] = {

@@ -13,6 +13,7 @@ VBA 는 첫 오류에서 멈추지만 여기서는 전부 모아 한 번에 돌�
 
 from __future__ import annotations
 
+import datetime as _dt
 from collections import defaultdict
 
 from .actuarial import attained_age
@@ -26,8 +27,14 @@ __all__ = ["validate_active", "validate_retired", "validate_roster"]
 
 
 def _col(sheet: str, key: str) -> str:
+    """이슈에 적을 열 문자.
+
+    일부 서식에만 있는 열(누진적용 근속연수 등)은 기본 배치에 자리가 없다.
+    열 문자는 안내일 뿐이므로, 모르면 비워 두고 메시지로 알린다.
+    """
     table = ACTIVE_COLUMNS if sheet == ACTIVE_SHEET else RETIRED_COLUMNS
-    return table[key].letter
+    column = table.get(key)
+    return column.letter if column is not None else ""
 
 
 def _report_gap(
@@ -110,10 +117,23 @@ def _check_duplicate_ids(members, sheet: str, log: IssueLog, code: str) -> None:
         if len(group) < 2:
             continue
         rows = ", ".join(str(m.row) for m in group)
+
+        # 지급 구간이 적혀 있으면 중복이 아니라 **한 사람을 기간으로 쪼갠 것**
+        # 이다. 임원 퇴직소득 세법한도가 2019.12.31 이전 3배수 / 2020.1.1 이후
+        # 2배수로 갈리는 명부가 그렇다.
+        if all(getattr(m, "has_period", False) for m in group):
+            _check_period_coverage(employee_id, group, rows, sheet, log)
+            continue
+
+        message = f"사번이 중복됩니다 (해당 행: {rows})"
+        if _looks_like_period_split(group):
+            message += (
+                ". 줄마다 지급배수가 달라 기간을 나눈 명부로 보입니다 — "
+                "'지급률 기산일' · '지급률 종료일' 열을 추가해 구간을 적어 주세요"
+            )
         for member in group:
             log.error(
-                code,
-                f"사번이 중복됩니다 (해당 행: {rows})",
+                code, message,
                 sheet=sheet,
                 row=member.row,
                 seq=member.seq,
@@ -121,6 +141,44 @@ def _check_duplicate_ids(members, sheet: str, log: IssueLog, code: str) -> None:
                 column=_col(sheet, "employee_id"),
                 value=employee_id,
             )
+
+
+def _looks_like_period_split(group: list) -> bool:
+    """중복 사번이 사실은 기간 분할인지. 배수가 줄마다 다르면 그렇게 본다."""
+    multiples = {getattr(m, "payout_multiple", 1.0) for m in group}
+    return len(multiples) > 1
+
+
+def _check_period_coverage(
+    employee_id: str, group: list, rows: str, sheet: str, log: IssueLog
+) -> None:
+    """기간으로 쪼갠 줄들이 겹치거나 비지 않는지.
+
+    겹치면 그 구간이 두 번 잡히고, 비면 통째로 빠진다. 둘 다 눈에 안 띈다.
+    """
+    ordered = sorted(group, key=lambda m: (m.period_start or _dt.date.min))
+    previous = None
+    for member in ordered:
+        start = member.period_start
+        if previous is not None and start is not None:
+            if start <= previous:
+                log.warning(
+                    "JAE_PERIOD_OVERLAP",
+                    f"지급 구간이 앞 줄과 겹칩니다 (사번 {employee_id}, 해당 행: {rows}). "
+                    "겹친 기간이 두 번 잡힙니다",
+                    sheet=sheet, row=member.row, seq=member.seq,
+                    employee_id=employee_id, value=str(start),
+                )
+            elif (start - previous).days > 1:
+                log.warning(
+                    "JAE_PERIOD_GAP",
+                    f"지급 구간 사이가 비어 있습니다 (사번 {employee_id}, "
+                    f"{previous} ~ {start}). 그 기간의 급여가 빠집니다",
+                    sheet=sheet, row=member.row, seq=member.seq,
+                    employee_id=employee_id, value=str(start),
+                )
+        if member.period_end is not None:
+            previous = member.period_end
 
 
 def _is_longterm_only(members: list[ActiveMember]) -> bool:
@@ -149,7 +207,60 @@ def _is_longterm_only(members: list[ActiveMember]) -> bool:
     return any(text(m.longterm_target).upper() == "Y" for m in members)
 
 
-def validate_active(members: list[ActiveMember], config: CalculationConfig, log: IssueLog) -> None:
+def _check_progressive_split(
+    member: ActiveMember,
+    config: CalculationConfig,
+    sheet: str,
+    log: IssueLog,
+    kw: dict,
+) -> None:
+    """누진 구간 보전(연봉제 전환) 세 칸이 서로 맞는지.
+
+    ``누진적용 근속연수`` 와 ``누진적용 율`` 은 **둘 다 있어야** 구간이 갈린다.
+    한쪽만 채워 오면 조용히 무시되어, 담당자는 반영된 줄 알고 넘어간다.
+    """
+    service = member.progressive_service
+    rate = member.progressive_rate
+    if not service and not rate:
+        return
+
+    if service and not rate:
+        log.warning(
+            "JAE_PROGRESSIVE_RATE_MISSING",
+            f"누진적용 근속연수 {service:g}년이 적혀 있는데 누진적용 율이 "
+            "비어 있어 구간을 나누지 않았습니다",
+            column=_col(sheet, "progressive_service"), value=service, **kw,
+        )
+        return
+    if rate and not service:
+        log.warning(
+            "JAE_PROGRESSIVE_SERVICE_MISSING",
+            f"누진적용 율 {rate:g}배가 적혀 있는데 누진적용 근속연수가 "
+            "비어 있어 구간을 나누지 않았습니다",
+            column=_col(sheet, "progressive_rate"), value=rate, **kw,
+        )
+        return
+
+    if service < 0:
+        log.error(
+            "JAE_PROGRESSIVE_NEGATIVE", "누진적용 근속연수가 음수입니다",
+            column=_col(sheet, "progressive_service"), value=service, **kw,
+        )
+        return
+
+    total = member.raw_service_years(config.base_date)
+    if total and service > total + 1e-9:
+        log.error(
+            "JAE_PROGRESSIVE_TOO_LONG",
+            f"누진적용 근속연수 {service:g}년이 총 근속 {total:.2f}년보다 깁니다. "
+            "중간정산일 기준으로 다시 계산해 주세요",
+            column=_col(sheet, "progressive_service"), value=service, **kw,
+        )
+
+
+def validate_active(
+    members: list[ActiveMember], config: CalculationConfig, log: IssueLog
+) -> None:
     """재직자명부 검증 및 파생값(연령·정년연령) 채우기."""
     sheet = ACTIVE_SHEET
     _check_duplicate_ids(members, sheet, log, "JAE_DUP_ID")
@@ -301,6 +412,8 @@ def validate_active(members: list[ActiveMember], config: CalculationConfig, log:
                 column=_col(sheet, "deducted_service_years"),
                 value=member.deducted_service_years, **kw,
             )
+
+        _check_progressive_split(member, config, sheet, log, kw)
 
         # ── 정년연령 확정 ──────────────────────────────────────────
         if rule is not None and member.birth_date:

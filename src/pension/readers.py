@@ -359,6 +359,23 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
             get("extra_pay_base_date"), config, log, col=_col_of(cols, "extra_pay_base_date"),
             code="JAE_EXTRA_PAY_DATE", required=False, **kw,
         )
+        member.annual_salary_date = _read_date(
+            get("annual_salary_date"), config, log,
+            col=_col_of(cols, "annual_salary_date"),
+            code="JAE_ANNUAL_SALARY_DATE", required=False, **kw,
+        )
+        member.group_hire_date = _read_date(
+            get("group_hire_date"), config, log, col=_col_of(cols, "group_hire_date"),
+            code="JAE_GROUP_HIRE_DATE", required=False, **kw,
+        )
+        member.period_start = _read_date(
+            get("period_start"), config, log, col=_col_of(cols, "period_start"),
+            code="JAE_PERIOD_START", required=False, **kw,
+        )
+        member.period_end = _read_date(
+            get("period_end"), config, log, col=_col_of(cols, "period_end"),
+            code="JAE_PERIOD_END", required=False, **kw,
+        )
 
         # VBA: 중간정산일이 비었거나 입사일보다 이르면 입사일로 맞춘다.
         if member.hire_date is not None and (
@@ -378,6 +395,8 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.transfer_in_amount = _number(get("transfer_in_amount"))
         member.extra_rate = _number(get("extra_rate"))
         member.extra_pay_base_wage = _number(get("extra_pay_base_wage"))
+        member.progressive_service = _number(get("progressive_service"))
+        member.progressive_rate = _number(get("progressive_rate"))
 
         member.plan_raw = text(get("plan"))
         member.plan = normalize_benefit_plan(member.plan_raw)
