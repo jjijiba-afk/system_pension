@@ -58,17 +58,19 @@ __all__ = [
     "EDITOR_GROUPS",
     "EXIT_CAUSE_HEADERS",
     "FORM_SHEETS",
-    "LONGTERM_ITEM_HEADERS",
     "PAYOUT_HEADERS",
     "PAYOUT_SHEET",
     "ROUNDING_UNITS",
     "ROUNDING_VALUES",
     "UNIT_LABELS",
     "check_formula",
+    "default_benefit_rule",
+    "default_longterm_rule",
     "default_payout",
     "empty_state",
     "example_state",
     "formula_preview",
+    "grid_columns",
     "read_state",
     "state_problems",
     "state_to_sheets",
@@ -87,12 +89,6 @@ PAYOUT_HEADERS: Final[tuple[str, ...]] = (
     "Base-up 적용", "승급률 적용", "퇴직률 적용", "사망률 적용",
 )
 
-#: 장기급여 '복합 지급' 탭의 열. 한 규정에 항목이 여럿일 때 쓴다.
-LONGTERM_ITEM_HEADERS: Final[tuple[str, ...]] = (
-    "규정(직군)", "항목(지급률 열)", "지급유형", "현물 상승률",
-    "지급시점", "반복 주기(년)", "누적", "지급일(월-일)", "환산 근거",
-)
-
 #: 퇴직사유 탭의 열. 자유 입력이 아니라 정해진 자리에 넣게 한다.
 EXIT_CAUSE_HEADERS: Final[tuple[str, ...]] = (
     "지급률 규정", "퇴직사유", "대체 지급률 규정", "가산 규정",
@@ -108,7 +104,14 @@ ROUNDING_VALUES: Final = {"없음": 0, "1원": 1, "10원": 10, "100원": 100, "1
 UNIT_LABELS: Final = {v: k for k, v in ROUNDING_VALUES.items()}
 
 #: 표 입력 탭의 서식. 두 화면이 같은 탭 구성을 쓰도록 자료로 둔다.
-#: ``fixed`` 가 비면 직군 이름들이 열이 된다.
+#:
+#: ``fixed`` 가 비면 직군 이름들이 열이 된다. 급여 표는 거기에 **추가 열**
+#: 을 더 만들 수 있다(``extra``) — '사망 시 기본급 3개월분 가산' 처럼 직군이
+#: 아닌 이름의 지급률이 필요한 규정이 있다.
+#:
+#: ``column_panel`` 은 열 머리 아래에 그 열을 **어떻게 읽을지** 를 붙인다.
+#: 표만 떼어 놓고 보면 값이 누적 배수인지 구간 배수인지, 휴가 일수인지 금액인지
+#: 알 수 없어 늘 다른 탭과 번갈아 봐야 했다.
 FORM_SHEETS: Final[tuple[dict[str, Any], ...]] = (
     {
         "sheet": DISCOUNT_SHEET, "tab": "할인율", "key": "연차", "fixed": ("할인율",),
@@ -140,14 +143,19 @@ FORM_SHEETS: Final[tuple[dict[str, Any], ...]] = (
     },
     {
         "sheet": BENEFIT_SHEET, "tab": "지급률", "key": "근속연수", "fixed": (),
-        "note": "30일 평균임금 대비 지급배수입니다. 값의 의미는 '지급률 규정' 탭의 "
-                "방식에 따라 달라집니다.",
-        "key_choices": (),
+        "note": "30일 평균임금 대비 지급배수입니다. 열마다 그 값을 어떻게 읽을지를 "
+                "머리글 아래에서 고릅니다.",
+        "key_choices": (), "column_panel": "benefit", "allow_extra": True,
+        "extra_hint": "직군 말고 따로 이름 붙인 지급률이 필요할 때 만듭니다 "
+                      "(예: 정년배수, 사망가산). [퇴직사유] 에서 그 이름을 고릅니다.",
     },
     {
         "sheet": LONGTERM_SHEET, "tab": "장기급여", "key": "근속연수", "fixed": (),
-        "note": "근속 포상·장기근속휴가의 지급일수입니다(일 기본급 × 일수).",
-        "key_choices": (),
+        "note": "근속 포상·장기근속휴가입니다. 열마다 표 값의 뜻(휴가 일수·배수·금액)과 "
+                "언제 주는지를 머리글 아래에서 고릅니다.",
+        "key_choices": (), "column_panel": "longterm", "allow_extra": True,
+        "extra_hint": "한 근속연수에 성격이 다른 급여가 여럿이면 항목마다 열을 "
+                      "만듭니다 (예: 10년 → 휴가 + 금 + 특별상여).",
     },
 )
 
@@ -184,21 +192,19 @@ EDITOR_GROUPS: Final[tuple[dict[str, Any], ...]] = (
     },
     {
         "name": "퇴직급여",
-        "note": "지급률 표와 그 값을 어떻게 읽을지가 한 화면에 있습니다. "
-                "표만 보고는 누적인지 누진인지 알 수 없으니 함께 보십시오.",
+        "note": "표 한 장에 지급률과 그 값을 읽는 방법이 함께 있습니다. "
+                "열 머리 아래에서 누적·누진·수식을 고르십시오.",
         "sections": (
-            {"sheet": BENEFIT_SHEET, "title": "지급률 표"},
-            {"panel": "rule", "title": "지급률 규정 (누적·누진·수식)"},
+            {"sheet": BENEFIT_SHEET, "title": "지급률"},
             {"panel": "cause", "title": "퇴직사유별 차등 (중도·사망·정년)"},
         ),
     },
     {
         "name": "장기급여",
-        "note": "근속 포상·장기근속휴가입니다. 없으면 통째로 비워 두십시오.",
+        "note": "근속 포상·장기근속휴가입니다. 없으면 통째로 비워 두십시오. "
+                "항목이 여럿이면 [항목 추가] 로 열을 만드십시오.",
         "sections": (
-            {"sheet": LONGTERM_SHEET, "title": "장기급여 지급률 표"},
-            {"panel": "longterm", "title": "지급유형·지급시점"},
-            {"panel": "longterm_items", "title": "복합 지급 (한 근속연수에 항목이 여럿)"},
+            {"sheet": LONGTERM_SHEET, "title": "장기급여"},
         ),
     },
 )
@@ -227,31 +233,57 @@ def empty_state(job_groups: list[str] | None = None) -> dict[str, Any]:
     지급률 표에 값을 넣는 순간 그 값이 대신 쓰인다.
     """
     groups = [text(g) for g in (job_groups or DEFAULT_GROUPS) if text(g)]
-    grids = {spec["sheet"]: {"key": spec["key"], "rows": []} for spec in FORM_SHEETS}
+    grids = {
+        spec["sheet"]: {"key": spec["key"], "rows": [], "extra": []}
+        for spec in FORM_SHEETS
+    }
     grids[SALARY_SHEET]["rows"] = [[f"{years:g}", f"{rate * 100:g}%"]
                                    for years, rate in SALARY_BASE_UP]
     return {
         "job_groups": groups,
         "grids": grids,
         "payout": {group: default_payout() for group in groups},
-        "benefit_rules": {
-            group: {"mode": STATUTORY_MODE, "formula": ""} for group in groups
-        },
-        "longterm_rules": {
-            group: {
-                "kind": LT_VACATION, "escalation": "", "note": "",
-                "timing": LT_AT_MILESTONE, "every": "", "accumulate": False,
-                "anniversary": "",
-            }
-            for group in groups
-        },
-        # 한 규정에 항목이 여럿일 때만 채운다 (10년 → 휴가 + 금 + 특별상여).
-        "longterm_items": [],
+        "benefit_rules": {group: default_benefit_rule() for group in groups},
+        "longterm_rules": {group: default_longterm_rule(group) for group in groups},
         "mapping": [],
         # 중도퇴직·사망·정년퇴직의 지급률이 다를 때만 채운다. 비면 사유를
         # 가리지 않으므로 종전과 같은 산출이 나온다.
         "exit_causes": [],
     }
+
+
+def default_benefit_rule() -> dict[str, Any]:
+    """지급률 열 하나의 기본값."""
+    return {"mode": STATUTORY_MODE, "formula": ""}
+
+
+def default_longterm_rule(rule: str = "") -> dict[str, Any]:
+    """장기급여 열 하나의 기본값.
+
+    :param rule: 이 열이 붙는 규정(직군). 직군 열이면 제 이름과 같다.
+    """
+    return {
+        "rule": rule, "kind": LT_VACATION, "escalation": "", "note": "",
+        "timing": LT_AT_MILESTONE, "every": "", "accumulate": False,
+        "anniversary": "",
+    }
+
+
+def grid_columns(state: dict[str, Any], sheet: str) -> list[str]:
+    """그 표의 열 이름들 — 직군 다음에 따로 만든 열.
+
+    급여 표는 직군 말고도 이름 붙인 열을 가질 수 있다('사망가산', '금').
+    :func:`state_to_sheets` 와 화면이 같은 순서를 봐야 값이 어긋나지 않는다.
+    """
+    spec = next((s for s in FORM_SHEETS if s["sheet"] == sheet), None)
+    if spec is None or spec["fixed"]:
+        return list(spec["fixed"]) if spec else []
+    groups = [text(g) for g in state.get("job_groups", []) if text(g)]
+    extra = [
+        text(name) for name in state.get("grids", {}).get(sheet, {}).get("extra", [])
+        if text(name) and text(name) not in groups
+    ]
+    return groups + list(dict.fromkeys(extra))
 
 
 def example_state(job_groups: list[str] | None = None) -> dict[str, Any]:
@@ -309,25 +341,21 @@ def state_problems(state: dict[str, Any]) -> list[str]:
     if not any(any(text(v) for v in row) for row in discount):
         found.append("할인율은 반드시 입력해야 합니다. 없으면 채무를 산출할 수 없습니다")
 
-    for group, item in state.get("longterm_rules", {}).items():
+    groups = [text(g) for g in state.get("job_groups", []) if text(g)]
+    for column, item in state.get("longterm_rules", {}).items():
         timing = text(item.get("timing")) or LT_AT_MILESTONE
         if timing not in LONGTERM_TIMINGS:
             found.append(
-                f"'{group}' 장기급여의 지급시점 '{timing}' 을(를) 알 수 없습니다 "
+                f"'{column}' 장기급여의 지급시점 '{timing}' 을(를) 알 수 없습니다 "
                 f"({' / '.join(LONGTERM_TIMINGS)} 중 하나)"
             )
-
-    items: set[tuple[str, str]] = set()
-    for row in _longterm_item_rows(state):
-        rule, name, timing = row[0], row[1], row[4] or LT_AT_MILESTONE
-        if timing not in LONGTERM_TIMINGS:
+        # 따로 만든 열은 어느 직군의 급여인지 적혀 있어야 한다. 비면 그 열이
+        # 아무에게도 걸리지 않아 조용히 빠진다.
+        rule = text(item.get("rule")) or column
+        if column not in groups and rule not in groups:
             found.append(
-                f"'{rule} / {name}' 의 지급시점 '{timing}' 을(를) 알 수 없습니다 "
-                f"({' / '.join(LONGTERM_TIMINGS)} 중 하나)"
+                f"장기급여 '{column}' 열이 어느 직군의 급여인지 정해지지 않았습니다"
             )
-        if (rule, name) in items:
-            found.append(f"장기급여 항목 '{rule} / {name}' 이 두 번 적혀 있습니다")
-        items.add((rule, name))
 
     seen: set[tuple[str, str]] = set()
     for row in _cause_rows(state):
@@ -348,18 +376,6 @@ def state_problems(state: dict[str, Any]) -> list[str]:
             found.append(f"'{rule} / {cause}' 이 두 번 적혀 있습니다")
         seen.add((rule, cause))
     return found
-
-
-def _longterm_item_rows(state: dict[str, Any]) -> list[list[str]]:
-    """복합 지급 탭에서 값이 든 줄만. 아홉 칸으로 길이를 맞춘다."""
-    rows: list[list[str]] = []
-    for row in state.get("longterm_items", []):
-        values = [text(v) for v in list(row)[: len(LONGTERM_ITEM_HEADERS)]]
-        values += [""] * (len(LONGTERM_ITEM_HEADERS) - len(values))
-        # 규정과 항목 이름이 둘 다 있어야 지급률 표에서 열을 찾을 수 있다.
-        if values[0] and values[1]:
-            rows.append(values)
-    return rows
 
 
 def _cause_rows(state: dict[str, Any]) -> list[list[str]]:
@@ -416,13 +432,11 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
     dict[str, tuple[str, float, str]],
 ]:
     """state 를 :func:`~pension.assumptions.write_assumptions` 입력으로 바꾼다."""
-    groups = [text(g) for g in state.get("job_groups", []) if text(g)]
-
     sheets: dict[str, tuple[list[str], list[list[Any]]]] = {}
     for spec in FORM_SHEETS:
         item = state.get("grids", {}).get(spec["sheet"], {})
         key = text(item.get("key")) or spec["key"]
-        headers = [key, *(spec["fixed"] or groups)]
+        headers = [key, *grid_columns(state, spec["sheet"])]
         rows = [
             [_parse_cell(text(value)) for value in row[: len(headers)]]
             for row in item.get("rows", [])
@@ -430,12 +444,15 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
         ]
         sheets[spec["sheet"]] = (headers, rows)
 
+    # 지급률 방식은 열마다 하나씩. 열 순서를 따라야 화면과 파일이 같은 것을
+    # 가리킨다.
+    benefit = state.get("benefit_rules", {})
     rules = {
-        group: (
-            text(item.get("mode")) or STATUTORY_MODE,
-            text(item.get("formula")),
+        column: (
+            text(benefit.get(column, {}).get("mode")) or STATUTORY_MODE,
+            text(benefit.get(column, {}).get("formula")),
         )
-        for group, item in state.get("benefit_rules", {}).items()
+        for column in grid_columns(state, BENEFIT_SHEET)
     }
 
     # 지급규정 탭 → 'Input' 시트와 같은 배치로 한 장 더 만든다. 산출 때 그대로
@@ -490,28 +507,25 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
         ],
     )
 
-    # 장기급여규정 시트. 직군마다 한 줄(기본 항목)을 쓰고, '복합 지급' 으로
-    # 더 적은 항목이 있으면 그 뒤에 이어 붙인다.
-    longterm: list[list[Any]] = [
-        [
-            group,
+    # 장기급여규정 시트. 표의 열 하나가 곧 지급 항목 하나다. 직군 이름 그대로인
+    # 열은 그 직군의 기본 항목이고, 따로 이름 붙인 열은 ``rule`` 이 가리키는
+    # 직군에 얹힌다('정규직'에 붙은 '금').
+    entries = state.get("longterm_rules", {})
+    longterm: list[list[Any]] = []
+    for column in grid_columns(state, LONGTERM_SHEET):
+        item = entries.get(column, {})
+        rule = text(item.get("rule")) or column
+        longterm.append([
+            rule,
             text(item.get("kind")) or LT_VACATION,
             _parse_escalation(text(item.get("escalation"))) or None,
             text(item.get("note")),
-            "",                                     # 항목: 규정명과 같다
+            "" if column == rule else column,
             text(item.get("timing")) or LT_AT_MILESTONE,
             _as_float(item.get("every"), 0.0) or None,
             "Y" if item.get("accumulate") else "",
             text(item.get("anniversary")),
-        ]
-        for group, item in state.get("longterm_rules", {}).items()
-    ]
-    longterm += [
-        [row[0], row[2] or LT_VACATION, _parse_escalation(row[3]) or None, row[8],
-         row[1], row[4] or LT_AT_MILESTONE, _as_float(row[5], 0.0) or None,
-         "Y" if row[6] in ("Y", "예", True, "true") else "", row[7]]
-        for row in _longterm_item_rows(state)
-    ]
+        ])
     return sheets, rules, longterm
 
 
@@ -561,18 +575,36 @@ def read_state(path: str | Path) -> dict[str, Any]:
                 header = text(ws.cell(1, 1).value)
                 grid["key"] = "근속" if "근속" in header else "연령"
 
-            width = 1 + len(spec["fixed"] or state["job_groups"])
+            # 급여 표는 직군 말고도 이름 붙인 열을 가질 수 있다. 파일의 열
+            # 순서가 화면 순서와 다를 수 있으므로 **이름으로** 맞춰 읽는다 —
+            # 자리로 읽으면 정규직 배수가 사망가산 칸에 들어간다.
+            file_columns = [
+                text(ws.cell(1, c).value) for c in range(1, ws.max_column + 1)
+            ]
+            if spec["fixed"]:
+                targets = list(spec["fixed"])
+            else:
+                grid["extra"] = [
+                    name for name in file_columns[1:]
+                    if name and name not in state["job_groups"]
+                ]
+                targets = grid_columns(state, spec["sheet"])
+            at = {name: pos for pos, name in enumerate(file_columns) if name}
+
             rows = []
             for row in range(2, ws.max_row + 1):
-                values = [_cell_text(ws.cell(row, c).value) for c in range(1, width + 1)]
-                if not any(values):
-                    continue
+                key_value = _cell_text(ws.cell(row, 1).value)
                 # 표 아래에 적어 둔 설명·경고 줄은 값이 아니다. 첫 칸은 연차·연령·
                 # 근속연수라 반드시 숫자다 — 숫자로 읽히지 않으면 자료가 아니다.
                 # (앞글자만 보고 거르면 '[필수 확인] …' 같은 줄이 표에 섞여 들어온다.)
-                if not _is_number(values[0]):
+                if not _is_number(key_value):
                     continue
-                rows.append(values)
+                values = [key_value]
+                for position, name in enumerate(targets, start=2):
+                    column = at.get(name, position - 1)
+                    values.append(_cell_text(ws.cell(row, column + 1).value))
+                if any(values):
+                    rows.append(values)
             grid["rows"] = rows
 
         if PAYOUT_SHEET in wb.sheetnames:
@@ -608,38 +640,23 @@ def read_state(path: str | Path) -> dict[str, Any]:
 
         if LONGTERM_RULE_SHEET in wb.sheetnames:
             ws = wb[LONGTERM_RULE_SHEET]
-            extra: list[list[str]] = []
-            seen_rules: set[str] = set()
             for row in range(2, ws.max_row + 1):
-                name = text(ws.cell(row, 1).value)
-                if not name or name[:1] in _NOTE_PREFIXES:
+                rule = text(ws.cell(row, 1).value)
+                if not rule or rule[:1] in _NOTE_PREFIXES:
                     continue
-                escalation = _percent(ws.cell(row, 3).value)
-                item = _cell_text(ws.cell(row, 5).value)
-                timing = text(ws.cell(row, 6).value) or LT_AT_MILESTONE
-                every = _cell_text(ws.cell(row, 7).value)
-                accumulate = text(ws.cell(row, 8).value).upper() in ("Y", "예")
-                anniversary = _month_day(ws.cell(row, 9).value)
-
-                # 규정마다 첫 줄이 기본 항목, 그 뒤는 '복합 지급' 으로 간다.
-                if not item and name not in seen_rules:
-                    seen_rules.add(name)
-                    state["longterm_rules"][name] = {
-                        "kind": text(ws.cell(row, 2).value) or LT_VACATION,
-                        "escalation": escalation,
-                        "note": text(ws.cell(row, 4).value),
-                        "timing": timing,
-                        "every": every,
-                        "accumulate": accumulate,
-                        "anniversary": anniversary,
-                    }
-                    continue
-                extra.append([
-                    name, item, text(ws.cell(row, 2).value) or LT_VACATION,
-                    escalation, timing, every, "Y" if accumulate else "",
-                    anniversary, text(ws.cell(row, 4).value),
-                ])
-            state["longterm_items"] = extra
+                # 항목 이름이 있으면 그것이 지급률 표의 열이고, 없으면 규정
+                # 이름이 곧 열이다.
+                column = _cell_text(ws.cell(row, 5).value) or rule
+                state["longterm_rules"][column] = {
+                    "rule": rule,
+                    "kind": text(ws.cell(row, 2).value) or LT_VACATION,
+                    "escalation": _percent(ws.cell(row, 3).value),
+                    "note": text(ws.cell(row, 4).value),
+                    "timing": text(ws.cell(row, 6).value) or LT_AT_MILESTONE,
+                    "every": _cell_text(ws.cell(row, 7).value),
+                    "accumulate": text(ws.cell(row, 8).value).upper() in ("Y", "예"),
+                    "anniversary": _month_day(ws.cell(row, 9).value),
+                }
 
         if EXIT_CAUSE_SHEET in wb.sheetnames:
             ws = wb[EXIT_CAUSE_SHEET]

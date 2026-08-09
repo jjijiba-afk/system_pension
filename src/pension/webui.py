@@ -82,6 +82,9 @@ def _meta(_request: dict) -> dict[str, Any]:
                 "sheet": spec["sheet"], "tab": spec["tab"], "key": spec["key"],
                 "fixed": list(spec["fixed"]), "note": spec["note"],
                 "key_choices": list(spec["key_choices"]),
+                "column_panel": spec.get("column_panel", ""),
+                "allow_extra": bool(spec.get("allow_extra")),
+                "extra_hint": spec.get("extra_hint", ""),
             }
             for spec in form.FORM_SHEETS
         ],
@@ -103,7 +106,6 @@ def _meta(_request: dict) -> dict[str, Any]:
         "attributions": list(ATTRIBUTIONS),
         "exit_cause_headers": list(form.EXIT_CAUSE_HEADERS),
         "longterm_timings": list(LONGTERM_TIMINGS),
-        "longterm_item_headers": list(form.LONGTERM_ITEM_HEADERS),
         "grades": [*INVESTMENT_GRADES, "국고채"],
         "kinds": {"curve": CURVE_KIND, "rates": RATES_KIND,
                   "roster": ROSTER_KIND, "preset": PRESET_KIND},

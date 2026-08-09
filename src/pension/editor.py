@@ -28,7 +28,6 @@ from .assumption_form import (
 from .assumption_form import (
     EXIT_CAUSE_HEADERS,
     FORM_SHEETS,
-    LONGTERM_ITEM_HEADERS,
 )
 from .assumption_form import (
     ROUNDING_UNITS as _ROUNDING_UNITS,
@@ -243,6 +242,7 @@ class _BenefitRuleTab(ttk.Frame):
         super().__init__(parent, padding=_PAD)
         self.job_groups = list(job_groups)
         self._rows: dict[str, dict[str, Any]] = {}
+        self._passthrough: dict[str, dict[str, Any]] = {}
 
         self._build_help()
         self._body = ttk.Frame(self)
@@ -402,12 +402,19 @@ class _BenefitRuleTab(ttk.Frame):
             tree.insert("", "end", values=values)
 
     def get_values(self) -> dict[str, dict[str, str]]:
-        return {
+        # 화면에 없는 열(직군이 아닌 지급률)의 값도 함께 돌려준다. 빠뜨리면
+        # 이 창을 한 번 열었다 닫는 것만으로 그 규정이 사라진다.
+        values: dict[str, dict[str, str]] = dict(self._passthrough)
+        values.update({
             group: {"mode": row["mode"].get(), "formula": row["formula"].get().strip()}
             for group, row in self._rows.items()
-        }
+        })
+        return values
 
     def set_values(self, values: dict[str, dict[str, str]]) -> None:
+        self._passthrough = {
+            name: dict(item) for name, item in values.items() if name not in self._rows
+        }
         for group, item in values.items():
             row = self._rows.get(group)
             if row is None:
@@ -849,6 +856,7 @@ class _LongTermRuleTab(ttk.Frame):
         super().__init__(parent, padding=_PAD)
         self.job_groups = list(job_groups)
         self._rows: dict[str, dict[str, Any]] = {}
+        self._passthrough: dict[str, dict[str, Any]] = {}
 
         box = ttk.LabelFrame(self, text="표 값의 뜻", padding=_PAD)
         box.pack(fill="x")
@@ -950,8 +958,12 @@ class _LongTermRuleTab(ttk.Frame):
             row["anniversary"].set("")
 
     def get_values(self) -> dict[str, dict[str, Any]]:
-        return {
+        # 직군이 아닌 항목 열('금', '특별상여')은 이 탭에 자리가 없다. 값만
+        # 그대로 들고 있다가 돌려준다 — 빠뜨리면 창을 여는 것만으로 사라진다.
+        values: dict[str, dict[str, Any]] = dict(self._passthrough)
+        values.update({
             group: {
+                "rule": group,
                 "kind": row["kind"].get(),
                 "escalation": row["escalation"].get().strip(),
                 "note": row["note"].get().strip(),
@@ -961,9 +973,13 @@ class _LongTermRuleTab(ttk.Frame):
                 "anniversary": row["anniversary"].get().strip(),
             }
             for group, row in self._rows.items()
-        }
+        })
+        return values
 
     def set_values(self, values: dict[str, dict[str, Any]]) -> None:
+        self._passthrough = {
+            name: dict(item) for name, item in values.items() if name not in self._rows
+        }
         for group, item in values.items():
             row = self._rows.get(group)
             if row is None:
@@ -974,110 +990,6 @@ class _LongTermRuleTab(ttk.Frame):
                 if key in item:
                     row[key].set(item[key])
             self._sync(group)
-
-
-class _LongTermItemTab(ttk.Frame):
-    """장기급여 복합 지급 탭.
-
-    '10년 : 휴가 3일 , 금 10돈, 특별상여' 처럼 한 근속연수에 성격이 다른 급여가
-    여럿 걸리는 규정이 흔하다. 직군마다 한 줄인 '장기급여 유형' 탭으로는 담을
-    수 없어, 여기서 항목을 더 적는다.
-    """
-
-    ROWS = 6
-    KEYS = ("rule", "item", "kind", "escalation", "timing", "every",
-            "accumulate", "anniversary", "note")
-
-    def __init__(self, parent, job_groups: list[str]) -> None:
-        super().__init__(parent, padding=_PAD)
-        self.job_groups = list(job_groups)
-        self._rows: list[dict[str, Any]] = []
-
-        box = ttk.LabelFrame(self, text="언제 쓰나", padding=_PAD)
-        box.pack(fill="x")
-        ttk.Label(
-            box,
-            text="한 규정에 항목이 여럿일 때만 채웁니다. 항목마다 '장기급여' 탭에 열을 하나씩 두세요.\n"
-                 "예) 정규직 | 금 | 현물 → '장기급여' 탭에 '금' 열을 만들고 근속별 금액을 적습니다.\n"
-                 "'장기급여 유형' 탭의 직군 줄이 그 규정의 첫 항목이고, 여기 적는 것이 그 위에 더해집니다.",
-            style="Hint.TLabel", justify="left", font=("", 9),
-        ).pack(anchor="w")
-
-        self._body = ttk.Frame(self)
-        self._body.pack(fill="both", expand=True, pady=(8, 0))
-        self.rebuild(self.job_groups)
-
-    def rebuild(self, job_groups: list[str]) -> None:
-        previous = self.get_values()
-        for child in self._body.winfo_children():
-            child.destroy()
-        self._rows.clear()
-        self.job_groups = list(job_groups)
-
-        for col, title in enumerate(LONGTERM_ITEM_HEADERS):
-            ttk.Label(self._body, text=title, style="Col.TLabel").grid(
-                row=0, column=col, sticky="w", padx=3, pady=(0, 6)
-            )
-
-        groups = ["", *self.job_groups]
-        for index in range(1, self.ROWS + 1):
-            saved = previous[index - 1] if index <= len(previous) else [""] * 9
-            row = {
-                key: tk.StringVar(value=saved[position])
-                for position, key in enumerate(self.KEYS)
-            }
-            row["accumulate"] = tk.BooleanVar(value=saved[6] == "Y")
-
-            ttk.Combobox(self._body, textvariable=row["rule"], values=groups,
-                         state="readonly", width=12).grid(row=index, column=0, padx=3)
-            ttk.Entry(self._body, textvariable=row["item"], width=12).grid(
-                row=index, column=1, padx=3, pady=1
-            )
-            ttk.Combobox(self._body, textvariable=row["kind"],
-                         values=["", *LONGTERM_TYPES], state="readonly",
-                         width=9).grid(row=index, column=2, padx=3)
-            ttk.Entry(self._body, textvariable=row["escalation"], width=8,
-                      justify="right").grid(row=index, column=3, padx=3, pady=1)
-            ttk.Combobox(self._body, textvariable=row["timing"],
-                         values=["", *LONGTERM_TIMINGS], state="readonly",
-                         width=9).grid(row=index, column=4, padx=3)
-            ttk.Entry(self._body, textvariable=row["every"], width=8,
-                      justify="right").grid(row=index, column=5, padx=3, pady=1)
-            ttk.Checkbutton(self._body, variable=row["accumulate"]).grid(
-                row=index, column=6, padx=3
-            )
-            ttk.Entry(self._body, textvariable=row["anniversary"], width=9,
-                      justify="center").grid(row=index, column=7, padx=3, pady=1)
-            ttk.Entry(self._body, textvariable=row["note"], width=18).grid(
-                row=index, column=8, sticky="ew", padx=3, pady=1
-            )
-            self._rows.append(row)
-        self._body.columnconfigure(8, weight=1)
-
-    def get_values(self) -> list[list[str]]:
-        """값이 든 줄만. 규정과 항목 이름이 둘 다 있어야 열을 찾을 수 있다."""
-        result: list[list[str]] = []
-        for row in self._rows:
-            values = [
-                "Y" if row["accumulate"].get() else "" if key == "accumulate"
-                else row[key].get().strip()
-                for key in self.KEYS
-            ]
-            if values[0] and values[1]:
-                result.append(values)
-        return result
-
-    def set_values(self, rows: list[list[str]]) -> None:
-        for row in self._rows:
-            for key in self.KEYS:
-                row[key].set(False if key == "accumulate" else "")
-        for index, values in enumerate(rows[: len(self._rows)]):
-            padded = list(values) + [""] * (len(self.KEYS) - len(values))
-            for key, value in zip(self.KEYS, padded, strict=False):
-                if key == "accumulate":
-                    self._rows[index][key].set(value == "Y")
-                else:
-                    self._rows[index][key].set(str(value))
 
 
 class _ExitCauseTab(ttk.Frame):
@@ -1428,7 +1340,6 @@ class AssumptionsEditor(tk.Toplevel):
         self._rule_tab.rebuild(names)
         self._cause_tab.rebuild(names)
         self._longterm_tab.rebuild(names)
-        self._lt_item_tab.rebuild(names)
 
     def _load_from_roster(self) -> None:
         """명부의 ``Input`` 시트에서 변환 직군명을 가져온다. 이름 불일치를 막는다."""
@@ -1484,9 +1395,6 @@ class AssumptionsEditor(tk.Toplevel):
 
         self._longterm_tab = _LongTermRuleTab(book, self.job_groups)
         book.add(self._longterm_tab, text="장기급여 유형")
-
-        self._lt_item_tab = _LongTermItemTab(book, self.job_groups)
-        book.add(self._lt_item_tab, text="장기급여 복합")
 
     # ── 저장·불러오기 ────────────────────────────────────────────
     def _build_actions(self) -> None:
@@ -1558,7 +1466,6 @@ class AssumptionsEditor(tk.Toplevel):
         self._longterm_tab.set_values(state["longterm_rules"])
         self._rule_tab.set_values(state["benefit_rules"])
         self._cause_tab.set_values(state.get("exit_causes", []))
-        self._lt_item_tab.set_values(state.get("longterm_items", []))
 
     def save(self) -> None:
         problems = self._rule_tab.problems()
@@ -1617,7 +1524,6 @@ class AssumptionsEditor(tk.Toplevel):
             "payout": self._payout_tab.get_values(),
             "benefit_rules": self._rule_tab.get_values(),
             "longterm_rules": self._longterm_tab.get_values(),
-            "longterm_items": self._lt_item_tab.get_values(),
             "exit_causes": self._cause_tab.get_values(),
             "mapping": [list(row) for row in self._map_tab.rows()],
         }

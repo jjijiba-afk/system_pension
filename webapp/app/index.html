@@ -54,7 +54,8 @@
   <input type="file" id="assumptions" accept=".xlsx,.xlsm">
   <div class="hint">할인율 · 승급률 · 퇴직률 · 사망률 · 지급률 · 지급규정 시트가 든 워크북</div>
 </fieldset>
-<fieldset><legend>3. 산출 기준일</legend>
+<details class="section" id="sec-dates"><summary>3. 산출 기준일<span class="count"></span></summary>
+<div class="section-body">
   <div class="row">
     <span style="font-weight:600;min-width:92px">산출기준일</span>
     <input type="date" id="base_date">
@@ -68,16 +69,18 @@
   </div>
   <div class="hint">직전 결산일(기초일)입니다. 넣으면 증감분석의 이자원가를 그
   기간으로 환산합니다. 비우면 1년으로 봅니다.</div>
-</fieldset>
-<fieldset><legend>4. 산출 옵션</legend>
+</div></details>
+<details class="section" id="sec-options"><summary>4. 산출 옵션<span class="count"></span></summary>
+<div class="section-body">
   <div class="check"><input type="checkbox" id="force">
     <label for="force" style="margin:0">검증 오류가 있어도 산출 강행 (검토용)</label></div>
   <div class="check"><input type="checkbox" id="sensitivity" checked>
     <label for="sensitivity" style="margin:0">민감도분석 포함</label></div>
   <div class="check"><input type="checkbox" id="longterm" checked>
     <label for="longterm" style="margin:0">기타장기종업원급여 별도 산출</label></div>
-</fieldset>
-<fieldset><legend>5. 전기 산출 결과 (증감분석용 · 최초 평가면 비워 두세요)</legend>
+</div></details>
+<details class="section" id="sec-prior"><summary>5. 전기 산출 결과 (증감분석용)<span class="count"></span></summary>
+<div class="section-body">
   <div class="lib-line">
     <span style="font-weight:600">저장된 산출에서</span>
     <select id="prior-run"><option value="">(직접 입력)</option></select>
@@ -98,8 +101,9 @@
   <input type="text" id="settlement_obligation" inputmode="numeric" placeholder="중간정산·전출자의 전기 채무 합계" style="width:100%">
   <div class="hint">지급액과의 차이를 정산손익으로 인식합니다(당기손익).
   비우면 인식하지 않습니다.</div>
-</fieldset>
-<fieldset><legend>6. 사외적립자산 (신탁 명세서 · 없으면 비워 두세요)</legend>
+</div></details>
+<details class="section" id="sec-assets"><summary>6. 사외적립자산 (신탁 명세서)<span class="count"></span></summary>
+<div class="section-body">
   <label>기초 공정가치 (원)</label>
   <input type="text" id="asset_opening" inputmode="numeric" placeholder="전기말 잔액" style="width:100%">
   <label>부담금 납입액 (원)</label>
@@ -113,8 +117,8 @@
   <div class="hint">이자수익은 <b>채무와 같은 할인율</b>로 계산하고(문단 125),
   기말 잔액에 맞춘 나머지를 자산 재측정손익(기타포괄손익)으로 잡습니다.
   순확정급여부채 = 확정급여채무 − 사외적립자산.</div>
-</fieldset>
-<button type="submit" class="big" id="run" disabled>산출 실행</button>
+</div></details>
+<button type="submit" class="big sticky" id="run" disabled>산출 실행</button>
 </form>
 
 <div id="errors"></div>
