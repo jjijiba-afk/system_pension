@@ -60,6 +60,37 @@ def page(browser, app_url):
     page.close()
 
 
+#: 산출가정 화면의 구획이 어느 묶음 탭 아래에 있는지. 파이썬 쪽
+#: ``EDITOR_GROUPS`` 와 짝이 맞아야 한다(test_webui 가 배치를 따로 검사한다).
+_SECTION_GROUP = {
+    "할인율": "기초율", "승급률": "기초율", "퇴직률": "기초율", "사망률": "기초율",
+    "임금상승률": "직군", "지급률": "퇴직급여", "장기급여지급률": "장기급여",
+}
+
+
+def section(page, sheet: str):
+    """묶음 탭을 열고 그 안의 구획을 펼친다.
+
+    탭이 열세 개일 때는 시트 이름이 곧 탭 이름이었다. 네 묶음으로 접은 뒤로는
+    묶음을 먼저 열고 구획을 골라야 한다 — 사람이 하는 것과 같은 순서다.
+    """
+    page.click(f"#ed-subtabs >> text={_SECTION_GROUP[sheet]}")
+    box = page.locator(f'#ed-subpages .subpage.on details[data-section="{sheet}"]')
+    if not box.evaluate("node => node.open"):
+        box.locator("summary").click()
+    return box
+
+
+def grid(page, sheet: str):
+    """그 구획 안의 표."""
+    return section(page, sheet).locator("tbody")
+
+
+def grid_row(page, sheet: str, row: int = 2):
+    """그 표의 ``row`` 번째 줄 입력칸들(1행은 머리글)."""
+    return grid(page, sheet).locator(f"tr:nth-child({row}) input")
+
+
 def test_upload_run_download(page, tmp_path) -> None:
     """업로드 → 브라우저 안 산출 → 진짜 엑셀 내려받기까지."""
     from pension.samples import write_sample_pack
@@ -132,9 +163,7 @@ def test_library_registers_curve_into_editor(page, tmp_path) -> None:
     assert "할인율에 넣었습니다" in page.inner_text("#ed-status")
 
     # 3월 만기(0.25년)가 살아 있어야 한다 — 내림하면 안 되는 값.
-    page.click("#ed-subtabs >> text=할인율")
-    first_key = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input").first
-    assert first_key.input_value() == "0.25"
+    assert grid_row(page, "할인율").first.input_value() == "0.25"
 
 
 def test_run_history_save_and_restore(page, tmp_path) -> None:
@@ -253,8 +282,7 @@ def test_backup_restores_on_a_clean_device(browser, app_url, shared_dir) -> None
 def test_editor_survives_tab_switching(page) -> None:
     """가정을 입력하다 다른 탭에 다녀와도 값이 남아 있어야 한다."""
     page.click("#tab-edit")
-    page.click("#ed-subtabs >> text=할인율")
-    first = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    first = grid_row(page, "할인율")
     first.nth(0).fill("3")
     first.nth(1).fill("4.44%")
 
@@ -263,8 +291,7 @@ def test_editor_survives_tab_switching(page) -> None:
     page.click("#tab-runs")
     page.click("#tab-edit")
 
-    page.click("#ed-subtabs >> text=할인율")
-    kept = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    kept = grid_row(page, "할인율")
     assert kept.nth(0).input_value() == "3"
     assert kept.nth(1).input_value() == "4.44%"
 
@@ -272,9 +299,14 @@ def test_editor_survives_tab_switching(page) -> None:
     page.reload()
     page.wait_for_selector("#run:not([disabled])", timeout=120_000)
     page.click("#tab-edit")
-    page.click("#ed-subtabs >> text=할인율")
-    after = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
-    assert after.nth(1).input_value() == "4.44%"
+    assert grid_row(page, "할인율").nth(1).input_value() == "4.44%"
+
+    # 접어 둔 구획도 채워졌는지는 제목 옆 숫자로 보여야 한다.
+    page.click("#ed-subtabs >> text=기초율")
+    summary = page.locator(
+        '#ed-subpages .subpage.on details[data-section="사망률"] summary .count'
+    )
+    assert summary.inner_text().strip() in {"비어 있음", "3줄"}
 
 
 def test_generator_tab_makes_and_runs_a_case(page) -> None:
@@ -306,8 +338,7 @@ def test_generator_tab_makes_and_runs_a_case(page) -> None:
 def test_preset_round_trip_in_the_browser(page) -> None:
     """가정세트를 저장하고 다시 불러온다."""
     page.click("#tab-edit")
-    page.click("#ed-subtabs >> text=지급률")
-    cells = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    cells = grid_row(page, "지급률")
     cells.nth(0).fill("10")
     cells.nth(1).fill("13")
 
@@ -320,8 +351,7 @@ def test_preset_round_trip_in_the_browser(page) -> None:
     page.select_option("#ed-preset", "E2E 규정")
     page.click("#ed-preset-load")
     page.wait_for_selector("#ed-status:has-text('불러왔습니다')", timeout=60_000)
-    page.click("#ed-subtabs >> text=지급률")
-    back = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input")
+    back = grid_row(page, "지급률")
     assert back.nth(0).input_value() == "10"
     assert back.nth(1).input_value() == "13"
 
@@ -333,6 +363,4 @@ def test_standard_rates_fill_the_grids(page) -> None:
     page.click("#ed-rates-load")
     assert "불러왔습니다" in page.inner_text("#ed-status")
 
-    page.click("#ed-subtabs >> text=사망률")
-    first_age = page.locator("#ed-subpages .subpage.on tbody tr:nth-child(2) input").first
-    assert first_age.input_value() == "15"
+    assert grid_row(page, "사망률").first.input_value() == "15"

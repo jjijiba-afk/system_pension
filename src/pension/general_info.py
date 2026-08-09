@@ -348,6 +348,25 @@ def _find_row(ws, needle: str, start: int = 1, limit: int = 200) -> int:
     return 0
 
 
+#: '2) 기중 장기근속 지급액' 처럼 번호가 붙은 표 제목.
+_HEADING = re.compile(r"^\s*[0-9①-⑳]+\s*[).]")
+
+
+def _find_item_row(ws, needle: str, start: int = 1, limit: int = 200) -> int:
+    """항목 이름이 ``needle`` 인 행. 표 제목 줄은 건너뛴다.
+
+    표 제목이 항목 이름을 그대로 품는 경우가 있다 — ``2) 기중 장기근속 지급액``
+    과 그 아래 ``장기근속 지급액``. 제목을 먼저 집으면 금액 칸이 비어 있어
+    0 원으로 읽힌다.
+    """
+    for row in range(start, min(ws.max_row, limit) + 1):
+        for col in range(2, min(ws.max_column, 8) + 1):
+            label = text(ws.cell(row, col).value)
+            if needle in label and not _HEADING.match(label):
+                return row
+    return 0
+
+
 def _row_label(ws, row: int) -> str:
     """그 행의 항목 이름. 구분 열(B~D) 중 글자가 있는 마지막 칸을 쓴다."""
     for col in (4, 3, 2):
@@ -536,12 +555,12 @@ def read_general_info(workbook) -> GeneralInfo:
             if info.credit_grade:
                 break
 
-    paid_row = _find_row(ws, "장기근속 지급액")
+    paid_row = _find_item_row(ws, "장기근속 지급액")
     if paid_row:
-        info.longterm_paid = _row_amount(ws, paid_row, (5, 4))
-    received_row = _find_row(ws, "장기근속 받은금액")
+        info.longterm_paid = abs(_row_amount(ws, paid_row, (5, 4)))
+    received_row = _find_item_row(ws, "장기근속 받은금액")
     if received_row:
-        info.longterm_received = _row_amount(ws, received_row, (5, 4))
+        info.longterm_received = abs(_row_amount(ws, received_row, (5, 4)))
 
     for key, row in _ROWS.items():
         value = ""

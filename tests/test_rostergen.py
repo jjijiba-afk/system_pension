@@ -131,6 +131,79 @@ class TestDirtyCase:
         assert parsed > 250
 
 
+class TestGeneralSheet:
+    """명부만 올려도 회계기간·신용등급·사외적립자산이 저절로 들어가야 한다.
+
+    담당자가 채워 보내는 항목을 시험 명부에도 넣어 두지 않으면, '다시 적을
+    필요가 없다' 는 것을 시험할 방법이 없다.
+    """
+
+    @pytest.mark.parametrize("key", [spec.key for spec in CASES])
+    def test_the_period_and_grade_reach_the_run(self, pack, tmp_path, key) -> None:
+        run = _run(pack, key, tmp_path, force=True)
+        info = run.general_info
+        assert info is not None
+        assert info.period_end == run.config.base_date
+        assert info.period_start is not None
+        assert info.period_start < info.period_end
+        assert info.credit_grade
+
+    @pytest.mark.parametrize("key", [spec.key for spec in CASES])
+    def test_the_asset_table_reconciles(self, pack, tmp_path, key) -> None:
+        """시험 자료가 스스로 안 맞으면 시스템을 거짓으로 고발하게 된다."""
+        run = _run(pack, key, tmp_path, force=True)
+        assert round(run.general_info.assets.difference) == 0
+        codes = [i.code for i in run.issues.warnings]
+        assert "GEN_ASSET_NOT_BALANCED" not in codes
+
+    @pytest.mark.parametrize("key", [spec.key for spec in CASES])
+    def test_it_becomes_the_plan_asset_statement(self, pack, tmp_path, key) -> None:
+        run = _run(pack, key, tmp_path, force=True)
+        assets = run.plan_assets
+        assert assets is not None
+        assert assets.opening_fair_value > 0
+        assert assets.closing_fair_value > 0
+        assert assets.contributions > 0
+        # 순확정급여부채 = 채무 − 자산.
+        assert assets.net_liability == pytest.approx(
+            run.valuation.dbo - assets.closing_fair_value, rel=1e-9
+        )
+
+    def test_the_obligation_table_matches_the_retiree_roster(
+        self, pack, tmp_path
+    ) -> None:
+        """지급액을 아무 숫자로 넣으면 증감표가 어긋난다 — 명부에서 뽑아야 한다."""
+        run = _run(pack, "복합제도", tmp_path, force=True)
+        book = run.general_info.obligation
+        from pension.normalize import RetirementReason
+
+        converted = sum(
+            m.total_payment for m in run.roster.retired
+            if m.reason is RetirementReason.DC_CONVERSION
+        )
+        assert book.dc_converted == pytest.approx(converted, abs=1)
+        assert book.benefits_paid > 0
+
+    def test_the_breakdown_is_disclosed(self, pack, tmp_path) -> None:
+        """문단 142 는 자산을 분류별로 공시하라고 한다."""
+        run = _run(pack, "표준", tmp_path, force=True)
+        breakdown = run.general_info.assets.breakdown
+        assert breakdown
+        assert "합계" not in breakdown
+        assert sum(breakdown.values()) == pytest.approx(
+            run.general_info.assets.closing, rel=1e-6
+        )
+
+    def test_the_report_says_what_was_filled_in(self, tmp_path) -> None:
+        from pension.rostergen import write_case_roster
+
+        report = tmp_path / "특이사항.txt"
+        write_case_roster(CASES[0], tmp_path / "명부.xlsx", report_path=report)
+        text = report.read_text(encoding="utf-8")
+        assert "1)일반사항" in text
+        assert "사외적립자산 변동내역" in text
+
+
 def test_same_seed_gives_the_same_file(tmp_path) -> None:
     """산출 결과를 비교하려면 명부가 매번 같아야 한다."""
     first = write_case_pack(tmp_path / "a")[0]

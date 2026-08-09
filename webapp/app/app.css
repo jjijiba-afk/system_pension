@@ -80,6 +80,20 @@ nav.subtabs button.on { background: var(--navy); color: #fff; border-color: var(
 .subpage { display: none; border: 1px solid var(--line); border-radius: 0 10px 10px 10px;
            padding: 12px; }
 .subpage.on { display: block; }
+
+/* 한 묶음 안의 표들. 접어 두면 긴 화면에서도 원하는 표로 바로 간다. */
+details.section { border: 1px solid var(--line); border-radius: 10px; margin: 10px 0; }
+details.section > summary { padding: 11px 14px; font-weight: 600; cursor: pointer;
+  background: var(--bg-soft); border-radius: 9px; list-style: none;
+  display: flex; align-items: center; gap: 8px; }
+details.section[open] > summary { border-radius: 9px 9px 0 0;
+  border-bottom: 1px solid var(--line); }
+details.section > summary::-webkit-details-marker { display: none; }
+details.section > summary::before { content: "▸"; color: var(--hint); font-size: 0.9em; }
+details.section[open] > summary::before { content: "▾"; }
+details.section > summary .count { margin-left: auto; font-weight: 400;
+  font-size: 0.85rem; color: var(--hint); }
+.section-body { padding: 4px 12px 12px; }
 .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 table.grid { border-collapse: collapse; margin: 10px 0; }
