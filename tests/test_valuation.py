@@ -285,6 +285,31 @@ class TestRollForward:
         assert roll.opening_dbo == 0.0
         assert roll.closing_dbo == pytest.approx(500_000)
 
+    def test_initial_period_has_no_actuarial_gain_loss(self) -> None:
+        """최초 평가의 보험수리적손익은 0 — 비교할 전기 채무가 없다.
+
+        잔액을 경험조정에 밀어 넣으면 첫해에 기말채무만 한 가짜 손익이
+        OCI 로 찍힌다. 잔액은 '최초 인식' 줄로 따로 간다.
+        """
+        roll = initial_period(closing_dbo=500_000, service_cost=40_000)
+        assert roll.actuarial_gain_loss == 0.0
+        assert roll.experience_adjustment == 0.0
+        assert roll.assumption_change == 0.0
+        assert roll.initial_recognition == pytest.approx(460_000)
+
+        rows = dict(roll.as_rows())
+        assert rows["최초 인식 (전기 산출 없음)"] == pytest.approx(460_000)
+        assert rows["기말 확정급여채무"] == pytest.approx(500_000)
+
+    def test_linked_period_has_no_initial_recognition_row(self) -> None:
+        """전기를 연결한 증감표에는 최초 인식 줄이 나타나면 안 된다."""
+        roll = build_rollforward(
+            opening_dbo=1_000_000, service_cost=90_000, interest_cost=40_000,
+            benefits_paid=60_000, closing_dbo=1_090_000,
+        )
+        assert roll.initial_recognition == 0.0
+        assert "최초 인식 (전기 산출 없음)" not in dict(roll.as_rows())
+
     def test_rows_are_ordered_for_disclosure(self) -> None:
         roll = initial_period(500_000, 40_000)
         labels = [label for label, _ in roll.as_rows()]

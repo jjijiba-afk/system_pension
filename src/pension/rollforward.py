@@ -74,6 +74,13 @@ class RollForward:
     **당기손익** 으로 즉시 인식하므로(문단 103), 가정변경효과에 섞이면 영업이익이
     달라진다.
     """
+    initial_recognition: float = 0.0
+    """최초 평가에서 한꺼번에 인식한 기말채무(당기근무원가 제외분).
+
+    전기 산출이 없으면 비교할 기초채무가 없으므로 **보험수리적손익은 0** 이다
+    — 손익은 '가정과 실제의 차이'인데 비교 대상 자체가 없다. 잔액을 경험조정에
+    밀어 넣으면 첫해에 거대한 가짜 손익이 찍히므로 별도 줄로 둔다.
+    """
 
     @property
     def expected_closing_dbo(self) -> float:
@@ -98,11 +105,12 @@ class RollForward:
     @property
     def closing_dbo(self) -> float:
         """기말 확정급여채무."""
-        return self.expected_closing_dbo + self.actuarial_gain_loss
+        return (self.expected_closing_dbo + self.actuarial_gain_loss
+                + self.initial_recognition)
 
     def as_rows(self) -> list[tuple[str, float]]:
         """공시 표 순서대로의 (항목, 금액) 목록."""
-        return [
+        rows = [
             ("기초 확정급여채무", self.opening_dbo),
             ("당기근무원가", self.service_cost),
             ("이자원가", self.interest_cost),
@@ -114,8 +122,11 @@ class RollForward:
             ("정산손익", self.settlement_gain),
             ("보험수리적손익 - 경험조정", self.experience_adjustment),
             ("보험수리적손익 - 가정변경", self.assumption_change),
-            ("기말 확정급여채무", self.closing_dbo),
         ]
+        if self.initial_recognition:
+            rows.append(("최초 인식 (전기 산출 없음)", self.initial_recognition))
+        rows.append(("기말 확정급여채무", self.closing_dbo))
+        return rows
 
 
 def build_rollforward(
@@ -180,8 +191,9 @@ def build_rollforward(
 def initial_period(closing_dbo: float, service_cost: float) -> RollForward:
     """최초 평가용 증감표.
 
-    비교 대상인 전기 산출이 없으므로 기초채무·이자원가를 0 으로 두고 기말채무
-    전액을 경험조정 자리에 표시한다(공시 시에는 '최초 인식' 으로 표기).
+    비교 대상인 전기 산출이 없으므로 기초채무·이자원가는 0 이고, **보험수리적
+    손익도 0** 이다 — 손익은 가정과 실제의 차이인데 비교할 전기 채무 자체가
+    없다. 당기근무원가를 뺀 기말채무 잔액은 '최초 인식' 줄로 따로 표시한다.
     """
     roll = RollForward(
         opening_dbo=0.0,
@@ -189,5 +201,5 @@ def initial_period(closing_dbo: float, service_cost: float) -> RollForward:
         interest_cost=0.0,
         benefits_paid=0.0,
     )
-    roll.experience_adjustment = closing_dbo - roll.expected_closing_dbo
+    roll.initial_recognition = closing_dbo - roll.expected_closing_dbo
     return roll
