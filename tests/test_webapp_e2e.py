@@ -579,3 +579,72 @@ def test_dashboard_tab_follows_each_run(page, tmp_path) -> None:
     page.click("#tab-dash")
     assert page.inner_text("#dash-when").strip() == "기준일 2026-06-30"
     assert page.inner_text("#dash-strip") != first
+
+
+def test_new_disclosures_flow_into_the_dashboard(page, tmp_path) -> None:
+    """재측정 분해 · 자산인식상한 · 차년도 예측 · 장기급여 증감표까지 한 바퀴."""
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+
+    # 가정별 분해는 전기 **기초율** 이 있어야 돈다. 한 번 산출해 저장한 뒤
+    # 그것을 전기로 연결한다 — 실제 사용 순서와 같다.
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    page.fill("#run-name", "전기연결시험")
+    page.click("#run-save")
+    page.wait_for_selector("text=저장했습니다", timeout=30_000)
+
+    open_calc(page, "sec-options")
+    page.check("#split_remeasurement")
+    open_calc(page, "sec-prior")
+    page.select_option("#prior-run", "전기연결시험")
+    page.fill("#prior_longterm_dbo", "40000000")
+    open_calc(page, "sec-assets")
+    page.fill("#asset_opening", "200000000")
+    page.fill("#asset_contributions", "50000000")
+    page.fill("#asset_closing", "900000000")     # 초과적립으로 상한을 물린다
+    page.fill("#asset_ceiling", "50000000")
+    page.fill("#expected_contributions", "60000000")
+
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    summary = page.inner_text("#summary")
+    assert "자산인식상한 차감액" in summary
+    assert "장기급여 재측정(당기손익)" in summary
+
+    page.click("#tab-dash")
+    page.wait_for_selector("#dash-body", state="visible", timeout=60_000)
+
+    open_section(page, "#sec-dash-roll")
+    roll = page.inner_text("#dash-roll")
+    assert "가정변경효과 분해" in roll
+    for name in ("사망률", "퇴직률", "임금상승률", "할인율"):
+        assert name in roll
+    assert "자산인식상한" in roll
+
+    open_section(page, "#sec-dash-next")
+    nxt = page.inner_text("#dash-next")
+    assert "차년도 예상 퇴직급여 비용" in nxt
+    assert "차년도 확정급여채무 예측" in nxt
+    assert "예상 부담금 납입액" in nxt
+
+    open_section(page, "#sec-dash-lt")
+    assert "재측정요소 (당기손익)" in page.inner_text("#dash-lt")
+
+    # 인쇄를 누르면 접힌 구획이 모두 펼쳐진다(인쇄 대화상자는 막아 둔다).
+    page.evaluate("window.print = () => { window.__printed = true; }")
+    page.click("#dash-print")
+    page.wait_for_timeout(400)
+    assert page.evaluate("window.__printed") is True
+    assert page.evaluate(
+        "[...document.querySelectorAll('#page-dash details.section')]"
+        ".every((d) => d.open)")
+    assert "기준일" in page.inner_text("#dash-print-title")

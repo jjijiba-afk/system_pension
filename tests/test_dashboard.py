@@ -101,3 +101,121 @@ class TestBuild:
         assert set(d["curves"]) == {"중도퇴직률", "승급률", "사망률"}
         assert d["curves"]["사망률"]["남자"]
         assert d["curve_axis"]["사망률"] == "연령"
+
+
+@pytest.fixture
+def rich_run(roster_path, assumptions_path, tmp_path):
+    """전기 기초율·장기급여 전기채무·자산인식상한까지 준 산출."""
+    return run_valuation(RunOptions(
+        roster_path=roster_path, assumptions_path=assumptions_path,
+        output_path=tmp_path / "r.xlsx", allow_errors=True,
+        include_sensitivity=False, include_longterm=True,
+        split_remeasurement=True,
+        prior=PriorPeriod(dbo=300_000_000, service_cost=30_000_000,
+                          discount_rate=0.04, longterm_dbo=40_000_000,
+                          assumptions_path=str(assumptions_path)),
+        plan_assets=PlanAssetInput(
+            opening_fair_value=200_000_000, closing_fair_value=230_000_000,
+            contributions=50_000_000, benefits_paid=20_000_000,
+            expected_contributions=60_000_000),
+    ))
+
+
+class TestRemeasurementSplit:
+    def test_steps_add_up_to_the_assumption_change(self, rich_run) -> None:
+        """가정별 몫의 합은 가정변경효과와 정확히 같아야 한다."""
+        roll = rich_run.rollforward
+        assert [k for k, _ in roll.assumption_steps] == [
+            "사망률", "퇴직률", "임금상승률", "할인율"]
+        assert sum(v for _, v in roll.assumption_steps) == pytest.approx(
+            roll.assumption_change, abs=1e-6)
+
+    def test_same_assumptions_move_nothing(self, rich_run) -> None:
+        """전기 기초율이 당기와 같으면 가정변경은 전부 0 이다."""
+        for _, amount in rich_run.rollforward.assumption_steps:
+            assert amount == pytest.approx(0.0, abs=1e-6)
+
+    def test_off_by_default(self, full_run) -> None:
+        assert full_run.rollforward.assumption_steps == []
+
+    def test_reaches_the_dashboard(self, rich_run) -> None:
+        d = dashboard.build(rich_run)
+        assert len(d["assumption_steps"]) == 4
+
+
+class TestAssetCeiling:
+    def _assets(self, **kw):
+        from pension.planassets import build_plan_assets
+        base = dict(opening_fair_value=0.0, closing_fair_value=500_000_000,
+                    closing_dbo=300_000_000, discount_rate=0.04)
+        return build_plan_assets(**{**base, **kw})
+
+    def test_caps_the_recognised_asset(self) -> None:
+        """초과적립 2억, 상한 5천만 → 자산은 5천만까지만 (문단 64)."""
+        assets = self._assets(asset_ceiling=50_000_000)
+        assert assets.surplus == pytest.approx(200_000_000)
+        assert assets.ceiling_effect == pytest.approx(150_000_000)
+        assert assets.net_liability == pytest.approx(-50_000_000)
+        labels = [k for k, _ in assets.net_rows()]
+        assert "자산인식상한 적용에 따른 자산차감액" in labels
+
+    def test_ceiling_above_surplus_changes_nothing(self) -> None:
+        assets = self._assets(asset_ceiling=900_000_000)
+        assert assets.ceiling_effect == 0.0
+        assert assets.net_liability == pytest.approx(-200_000_000)
+
+    def test_underfunded_plan_is_untouched(self) -> None:
+        """미달적립이면 상한을 넣어도 순부채가 그대로여야 한다."""
+        assets = self._assets(closing_fair_value=100_000_000,
+                              asset_ceiling=10_000_000)
+        assert assets.surplus == 0.0
+        assert assets.ceiling_effect == 0.0
+        assert assets.net_liability == pytest.approx(200_000_000)
+
+    def test_no_ceiling_keeps_the_old_table(self) -> None:
+        assets = self._assets()
+        assert assets.ceiling_effect == 0.0
+        assert "자산인식상한 적용에 따른 자산차감액" not in [k for k, _ in assets.net_rows()]
+
+
+class TestProjection:
+    def test_dbo_projection_balances(self, rich_run) -> None:
+        p = rich_run.projection
+        assert p.opening_dbo == pytest.approx(rich_run.valuation.dbo)
+        assert p.closing_dbo == pytest.approx(
+            p.opening_dbo + p.service_cost + p.interest_cost - p.benefits_paid)
+
+    def test_assets_projection_uses_expected_contributions(self, rich_run) -> None:
+        p = rich_run.projection
+        assert p.has_assets
+        assert p.contributions == pytest.approx(60_000_000)
+        assert p.closing_assets == pytest.approx(
+            p.opening_assets + p.expected_return + p.contributions - p.assets_paid)
+
+    def test_contributions_default_to_this_period(self, full_run) -> None:
+        assert full_run.projection.contributions == pytest.approx(50_000_000)
+
+    def test_reaches_the_dashboard(self, rich_run) -> None:
+        d = dashboard.build(rich_run)
+        assert d["projection"]["dbo"] and d["projection"]["assets"]
+        assert d["projection"]["expense"][-1][0] == "합계"
+
+
+class TestLongtermRollforward:
+    def test_balances_and_recognises_in_profit_or_loss(self, rich_run) -> None:
+        roll = rich_run.longterm_rollforward
+        assert roll is not None
+        assert roll.opening_dbo == pytest.approx(40_000_000)
+        assert roll.closing_dbo == pytest.approx(rich_run.longterm.dbo)
+        # 표가 닫혀야 한다: 기초 + 근무 + 이자 − 지급 + 재측정 = 기말
+        assert roll.expected_closing_dbo + roll.remeasurement == pytest.approx(
+            roll.closing_dbo)
+        assert roll.profit_or_loss == pytest.approx(
+            roll.service_cost + roll.interest_cost + roll.remeasurement)
+
+    def test_absent_without_prior_longterm(self, full_run) -> None:
+        assert full_run.longterm_rollforward is None
+
+    def test_reaches_the_dashboard(self, rich_run) -> None:
+        d = dashboard.build(rich_run)
+        assert [k for k, _ in d["longterm_roll"]][0] == "기초 확정급여채무"

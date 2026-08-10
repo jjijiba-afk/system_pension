@@ -32,7 +32,7 @@ K-IFRS 1019호 문단 141 은 기초 채무에서 기말 채무에 이르는 변
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 __all__ = ["RollForward", "build_rollforward", "initial_period"]
 
@@ -80,6 +80,14 @@ class RollForward:
     전기 산출이 없으면 비교할 기초채무가 없으므로 **보험수리적손익은 0** 이다
     — 손익은 '가정과 실제의 차이'인데 비교 대상 자체가 없다. 잔액을 경험조정에
     밀어 넣으면 첫해에 거대한 가짜 손익이 찍히므로 별도 줄로 둔다.
+    """
+    assumption_steps: list[tuple[str, float]] = field(default_factory=list)
+    """가정변경효과를 가정별로 쪼갠 목록. ``[(가정명, 금액), …]``
+
+    전기 가정에서 당기 가정으로 **하나씩 갈아 끼우며** 잰 값이라 합계는
+    :attr:`assumption_change` 와 정확히 같다. 순서를 바꾸면 각 몫이 조금씩
+    달라진다(교차효과가 뒤 항목에 붙는다) — 공시 관행대로 인구통계적 가정을
+    먼저, 재무적 가정을 나중에 잰다.
     """
 
     @property
@@ -186,6 +194,69 @@ def build_rollforward(
     roll.experience_adjustment = reference - expected
     roll.assumption_change = closing_dbo - reference
     return roll
+
+
+@dataclass(slots=True)
+class LongTermRollForward:
+    """기초 → 기말 장기종업원급여채무 증감표.
+
+    퇴직급여와 달리 재측정요소를 **당기손익** 으로 인식하므로(문단 154) 경험조정과
+    가정변경을 나눌 실익이 없다. 한 줄로 두고 전액 손익에 넣는다.
+    """
+
+    opening_dbo: float
+    service_cost: float
+    interest_cost: float
+    benefits_paid: float
+    """당기 장기급여 지급액."""
+    closing_dbo: float
+
+    @property
+    def expected_closing_dbo(self) -> float:
+        return (self.opening_dbo + self.service_cost + self.interest_cost
+                - self.benefits_paid)
+
+    @property
+    def remeasurement(self) -> float:
+        """재측정요소. 전액 당기손익으로 인식한다(문단 154)."""
+        return self.closing_dbo - self.expected_closing_dbo
+
+    @property
+    def profit_or_loss(self) -> float:
+        """당기손익으로 인식할 금액."""
+        return self.service_cost + self.interest_cost + self.remeasurement
+
+    def as_rows(self) -> list[tuple[str, float]]:
+        return [
+            ("기초 확정급여채무", self.opening_dbo),
+            ("당기근무원가", self.service_cost),
+            ("이자원가", self.interest_cost),
+            ("장기급여 지급액", -self.benefits_paid),
+            ("재측정요소 (당기손익)", self.remeasurement),
+            ("기말 확정급여채무", self.closing_dbo),
+        ]
+
+
+def build_longterm_rollforward(
+    *,
+    opening_dbo: float,
+    service_cost: float,
+    discount_rate: float,
+    benefits_paid: float,
+    closing_dbo: float,
+    period_years: float = 1.0,
+) -> LongTermRollForward:
+    """장기급여 증감표. 이자원가는 퇴직급여와 같은 방식으로 근사한다."""
+    interest = discount_rate * period_years * (
+        opening_dbo + (service_cost - benefits_paid) * 0.5
+    )
+    return LongTermRollForward(
+        opening_dbo=opening_dbo,
+        service_cost=service_cost,
+        interest_cost=interest,
+        benefits_paid=benefits_paid,
+        closing_dbo=closing_dbo,
+    )
 
 
 def initial_period(closing_dbo: float, service_cost: float) -> RollForward:

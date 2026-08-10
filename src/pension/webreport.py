@@ -251,9 +251,18 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
             net_rows.append(("3. 국민연금 전환금", _won(-national)))
         if assets.unpaid_benefits:
             net_rows.append(("4. 미지급 퇴직급여", _won(assets.unpaid_benefits)))
-        net_rows.append(("5. 순확정급여부채(자산)",
-                         _won(val.dbo + assets.unpaid_benefits
-                              - assets.closing_fair_value - national)))
+        before = (val.dbo + assets.unpaid_benefits
+                  - assets.closing_fair_value - national)
+        if assets.asset_ceiling is not None:
+            # 문단 64 — 초과적립일 때만 자산을 깎는다.
+            net_rows += [
+                ("5. 자산인식상한기준 적용 전 순확정급여부채(자산)", _won(before)),
+                ("6. 자산인식상한 적용에 따른 자산차감액", _won(assets.ceiling_effect)),
+                ("7. 자산인식상한기준 적용 후 순확정급여부채(자산)",
+                 _won(before + assets.ceiling_effect)),
+            ]
+        else:
+            net_rows.append(("5. 순확정급여부채(자산)", _won(before)))
     summary = _kv_table(net_rows)
 
     pl_rows: list[tuple[str, Any]] = [("1. 당기근무원가", _won(
@@ -330,8 +339,11 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
         re_rows = [
             ("1. 확정급여채무의 재측정요소 손실(이익)", _won(roll.actuarial_gain_loss)),
             ("&nbsp;&nbsp;1) 가정변경에 의한 손실(이익)", _won(roll.assumption_change)),
-            ("&nbsp;&nbsp;2) 경험조정 손실(이익)", _won(roll.experience_adjustment)),
         ]
+        for label, amount in roll.assumption_steps:
+            re_rows.append((f"&nbsp;&nbsp;&nbsp;&nbsp;· {label}", _won(amount)))
+        re_rows.append(
+            ("&nbsp;&nbsp;2) 경험조정 손실(이익)", _won(roll.experience_adjustment)))
         if assets is not None:
             re_rows.append(("2. 사외적립자산의 재측정 손실(이익)",
                             _won(-assets.remeasurement)))
@@ -339,22 +351,33 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
                         _won(roll.actuarial_gain_loss
                              - (assets.remeasurement if assets is not None else 0.0))))
         parts.append(_kv_table(re_rows))
-        parts.append('<p class="note">가정변경 효과는 전기 기초율을 당기 명부에 '
-                     '적용해 재평가한 차이로 산출했습니다. 인구통계적/재무적 가정별 '
-                     '세부 분해가 필요하면 가정을 하나씩 바꿔 재산출하십시오.</p>')
+        if roll.assumption_steps:
+            parts.append('<p class="note">가정별 몫은 전기 가정에서 당기 가정으로 '
+                         '사망률 → 퇴직률 → 임금상승률 → 할인율 차례로 하나씩 갈아 '
+                         '끼우며 잰 값이며, 합계는 가정변경효과와 일치합니다. '
+                         '차례를 바꾸면 교차효과가 붙는 자리가 달라집니다.</p>')
+        else:
+            parts.append('<p class="note">가정변경 효과는 전기 기초율을 당기 명부에 '
+                         '적용해 재평가한 차이로 산출했습니다. 가정별 세부 분해는 '
+                         '산출 옵션에서 [재측정요소 가정별 분해] 를 켜면 나옵니다.</p>')
     else:
         parts.append('<p class="note">전기 연결이 없어 재측정요소가 산출되지 '
                      '않았습니다.</p>')
 
-    expected_return = (assets.closing_fair_value * single
-                       if assets is not None else 0.0)
+    projection = run.projection
     parts.append("<h3>3.5 차년도 예상 퇴직급여 비용</h3>")
-    parts.append(_kv_table([
-        ("1. 당기근무원가", _won(val.service_cost)),
-        ("2. 확정급여채무의 이자비용", _won(val.interest_cost)),
-        ("3. 사외적립자산의 기대수익", _won(-expected_return)),
-        ("4. 합계", _won(val.service_cost + val.interest_cost - expected_return)),
-    ]))
+    if projection is not None:
+        parts.append(_kv_table([(label, _won(amount))
+                                for label, amount in projection.expense_rows()]))
+        parts.append("<h3>3.6 차년도 확정급여채무 예측</h3>")
+        parts.append(_kv_table([(label, _won(amount))
+                                for label, amount in projection.dbo_rows()]))
+        if projection.has_assets:
+            parts.append("<h3>3.7 차년도 사외적립자산 예측</h3>")
+            parts.append(_kv_table([(label, _won(amount))
+                                    for label, amount in projection.asset_rows()]))
+        parts.append('<p class="note">예측이므로 보험수리적손익은 0 으로 두었습니다 '
+                     '— 가정이 그대로 실현된다고 본 값입니다.</p>')
     sections.append(("공시사항", "".join(parts)))
 
     # 4. 민감도 분석
@@ -559,24 +582,38 @@ def _longterm_sections(run: Any, sections: list, period: str) -> None:
             ("3. 재무상태표에 인식된 순부채", _won(lt.dbo))])}
 <h3>2.2 손익계산서</h3>
 {_kv_table([("1. 당기근무원가", _won(lt.service_cost)),
-            ("2. 확정급여채무의 이자비용", _won(lt.interest_cost)),
-            ("3. 재측정요소 손실(이익)", "—"),
-            ("4. 당기손익으로 인식할 금액", _won(lt.service_cost + lt.interest_cost))])}
+            ("2. 확정급여채무의 이자비용",
+             _won(run.longterm_rollforward.interest_cost
+                  if run.longterm_rollforward else lt.interest_cost)),
+            ("3. 재측정요소 손실(이익)",
+             _won(run.longterm_rollforward.remeasurement)
+             if run.longterm_rollforward else "—"),
+            ("4. 당기손익으로 인식할 금액",
+             _won(run.longterm_rollforward.profit_or_loss)
+             if run.longterm_rollforward
+             else _won(lt.service_cost + lt.interest_cost))])}
 <p class="note">* 재측정요소는 {_STANDARD} 문단 154에 의거 당기손익으로
 처리합니다. 전기 장기급여채무를 연결하면 재측정 금액이 산출됩니다.</p>"""))
 
-    move_rows: list[tuple[str, Any]] = [
-        ("1. 기시 확정급여채무의 현재가치", "—"),
-        ("2. 당기근무원가", _won(lt.service_cost)),
-        ("3. 확정급여채무의 이자비용", _won(lt.interest_cost)),
-        ("4. 확정급여채무 장기급여 지급액", _won(-paid) if paid else "—"),
-        ("5. 기말 확정급여채무의 현재가치", _won(lt.dbo)),
-    ]
+    roll = run.longterm_rollforward
+    if roll is not None:
+        move_rows = [(label, _won(amount)) for label, amount in roll.as_rows()]
+        move_note = ("재측정요소는 문단 154 에 따라 전액 당기손익으로 인식합니다. "
+                     f"당기손익 인식액은 {_won(roll.profit_or_loss)}원입니다.")
+    else:
+        move_rows = [
+            ("1. 기시 확정급여채무의 현재가치", "—"),
+            ("2. 당기근무원가", _won(lt.service_cost)),
+            ("3. 확정급여채무의 이자비용", _won(lt.interest_cost)),
+            ("4. 확정급여채무 장기급여 지급액", _won(-paid) if paid else "—"),
+            ("5. 기말 확정급여채무의 현재가치", _won(lt.dbo)),
+        ]
+        move_note = ("기시 채무는 산출 화면에 전기 장기급여채무를 넣으면 채워집니다. "
+                     "장기급여 지급액은 명부의 1)일반사항에서 읽었습니다.")
     sections.append(("공시사항", f"""
 <h3>3.1 확정급여채무의 변동내역</h3>
 {_kv_table(move_rows)}
-<p class="note">기시 채무는 전기 산출 결과가 있어야 채워집니다. 장기급여
-지급액은 명부의 1)일반사항에서 읽었습니다.</p>
+<p class="note">{move_note}</p>
 <h3>3.2 차년도 예상 장기급여 비용</h3>
 {_kv_table([("1. 당기근무원가", _won(lt.service_cost)),
             ("2. 확정급여채무의 이자비용", _won(lt.interest_cost)),

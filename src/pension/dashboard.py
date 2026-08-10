@@ -129,6 +129,8 @@ def build(run: Any, employee_id: str = "") -> dict[str, Any]:
             "lt_ic": lt.interest_cost if lt else 0.0,
             "lt_head": lt.headcount if lt else 0,
         },
+        # 껐는지, 켰는데 대상자가 없는지는 화면에서 다르게 말해야 한다.
+        "has_longterm": lt is not None,
         "groups": [{"name": n, "n": c, "dbo": d, "sc": s}
                    for n, (c, d, s) in val.by_job_group().items()],
         "excluded": val.exclusion_summary(),
@@ -137,6 +139,17 @@ def build(run: Any, employee_id: str = "") -> dict[str, Any]:
         "net": [[k, a] for k, a in assets.net_rows()] if assets else [],
         "funded": assets.funded_ratio if assets else 0.0,
         "asset_breakdown": dict(info.assets.breakdown) if info else {},
+        "assumption_steps": [[k, v] for k, v in (roll.assumption_steps if roll else [])],
+        "ceiling": ({"limit": assets.asset_ceiling, "surplus": assets.surplus,
+                     "effect": assets.ceiling_effect}
+                    if assets is not None and assets.asset_ceiling is not None else None),
+        "longterm_roll": ([[k, v] for k, v in run.longterm_rollforward.as_rows()]
+                          if run.longterm_rollforward else []),
+        "projection": ({"expense": [[k, v] for k, v in run.projection.expense_rows()],
+                        "dbo": [[k, v] for k, v in run.projection.dbo_rows()],
+                        "assets": ([[k, v] for k, v in run.projection.asset_rows()]
+                                   if run.projection.has_assets else [])}
+                       if run.projection is not None else None),
         "sensitivity": ([[c.name, c.dbo, c.change, c.change_ratio]
                          for c in run.sensitivity.cases] if run.sensitivity else []),
         "maturity": [[k, a, paid.get(k, 0.0)]

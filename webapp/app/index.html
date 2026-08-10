@@ -89,6 +89,11 @@
     <label for="sensitivity" style="margin:0">민감도분석 포함</label></div>
   <div class="check"><input type="checkbox" id="longterm" checked>
     <label for="longterm" style="margin:0">기타장기종업원급여 별도 산출</label></div>
+  <div class="check"><input type="checkbox" id="split_remeasurement">
+    <label for="split_remeasurement" style="margin:0">재측정요소 가정별 분해
+      (사망률·퇴직률·임금상승률·할인율)</label></div>
+  <div class="hint">가정을 하나씩 갈아 끼우며 재는 것이라 <b>명부 전체 산출이
+  네 번 더</b> 돕니다. 전기 기초율을 연결한 회차에서만 값이 나옵니다.</div>
 </div></details>
 <details class="section" id="sec-prior"><summary>5. 전기 산출 결과 (증감분석용)<span class="count"></span></summary>
 <div class="section-body">
@@ -113,6 +118,10 @@
   <input type="text" id="settlement_obligation" inputmode="numeric" placeholder="중간정산·전출자의 전기 채무 합계" style="width:100%">
   <div class="hint">지급액과의 차이를 정산손익으로 인식합니다(당기손익).
   비우면 인식하지 않습니다.</div>
+  <label>전기말 장기급여채무 (원)</label>
+  <input type="text" id="prior_longterm_dbo" inputmode="numeric" placeholder="넣으면 장기급여 증감표가 만들어집니다" style="width:100%">
+  <div class="hint">기타장기종업원급여의 재측정요소는 문단 154 에 따라
+  <b>전액 당기손익</b>으로 인식합니다.</div>
 </div></details>
 <details class="section" id="sec-assets"><summary>6. 사외적립자산 (신탁 명세서)<span class="count"></span></summary>
 <div class="section-body">
@@ -126,6 +135,13 @@
   <input type="text" id="asset_closing" inputmode="numeric" placeholder="결산일 잔액" style="width:100%">
   <label>미지급 퇴직급여 (원)</label>
   <input type="text" id="unpaid_benefits" inputmode="numeric" placeholder="퇴직했으나 결산일까지 미지급한 금액" style="width:100%">
+  <label>차년도 예상 부담금 (원)</label>
+  <input type="text" id="expected_contributions" inputmode="numeric" placeholder="비우면 당기 납입액을 그대로 씀 (문단 147(b))" style="width:100%">
+  <label>자산인식상한 (원)</label>
+  <input type="text" id="asset_ceiling" inputmode="numeric" placeholder="초과적립일 때만 씀. 비우면 상한 미적용 (문단 64)" style="width:100%">
+  <div class="hint">자산이 채무를 넘는 제도에서, 환급이나 미래 부담금 절감으로
+  얻을 수 있는 효익의 현재가치입니다. 초과적립액이 이 값을 넘으면 넘는 만큼을
+  자산에서 깎습니다.</div>
   <div class="hint">이자수익은 <b>채무와 같은 할인율</b>로 계산하고(문단 125),
   기말 잔액에 맞춘 나머지를 자산 재측정손익(기타포괄손익)으로 잡습니다.
   순확정급여부채 = 확정급여채무 − 사외적립자산.</div>
@@ -244,12 +260,14 @@
 아래 그림과 표가 함께 바뀝니다.</p>
 
 <div id="dash-body" style="display:none">
-  <div class="toolbar">
+  <div class="toolbar no-print">
     <span class="badge" id="dash-when"></span>
     <span class="hint" id="dash-scope"></span>
     <span class="spacer"></span>
+    <button class="small" type="button" id="dash-print">인쇄 / PDF 저장</button>
     <button class="small" type="button" id="dash-refresh">새로고침</button>
   </div>
+  <h2 class="print-only" id="dash-print-title"></h2>
   <dl class="strip" id="dash-strip"></dl>
 
   <details class="section" id="sec-dash-member" open>
@@ -296,6 +314,15 @@
   <details class="section" id="sec-dash-roll">
     <summary>증감분석 · 사외적립자산<span class="count"></span></summary>
     <div class="section-body" id="dash-roll"></div>
+  </details>
+
+  <details class="section" id="sec-dash-next">
+    <summary>차년도 예측<span class="count"></span></summary>
+    <div class="section-body">
+      <p class="hint">가정이 그대로 실현된다고 보고 한 해를 더 굴린 값입니다.
+      보험수리적손익은 0 으로 두었습니다 (문단 147(b) 예상 기여금 포함).</p>
+      <div id="dash-next"></div>
+    </div>
   </details>
 
   <details class="section" id="sec-dash-sens">
