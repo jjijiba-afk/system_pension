@@ -1109,13 +1109,17 @@ def write_case_assumptions(spec: CaseSpec, path: str | Path) -> Path:
     """
     from . import assumption_form as form
     from .samples import write_standard_assumptions
+    from .standard_rates import size_for
 
     mapping = _case_mapping(spec)
     groups = list(dict.fromkeys(row[2] for row in mapping))
 
     path = Path(path)
-    # 표준률(15~70세)로 한 벌 채운 뒤, 이 사례의 직군 매핑을 얹는다.
-    write_standard_assumptions(path, job_groups=tuple(groups))
+    # 표준률로 한 벌 채운 뒤, 이 사례의 직군 매핑을 얹는다. 승급률·퇴직률은
+    # 사업장 규모로 갈리므로 이 사례의 재직 인원으로 열을 고른다.
+    write_standard_assumptions(
+        path, job_groups=tuple(groups), size=size_for(spec.active)
+    )
     state = form.read_state(path)
     state["mapping"] = mapping
     for group in groups:

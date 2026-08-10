@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import __version__
 from .errors import PensionDataError, Severity
+from .standard_rates import DEFAULT_SIZE, SIZES, STANDARD_YEAR
 
 __all__ = ["main"]
 
@@ -109,6 +110,10 @@ def _build_parser() -> argparse.ArgumentParser:
     samples.add_argument(
         "--grade", default="",
         help="금리표에서 고를 등급 (기본: AA0 → AA+ → AA- 순으로 찾음)",
+    )
+    samples.add_argument(
+        "--size", default=DEFAULT_SIZE, choices=list(SIZES),
+        help="표준률 원표의 사업장 규모. 승급률·중도퇴직률이 이 축으로 갈립니다",
     )
     samples.add_argument(
         "--cases", action="store_true",
@@ -362,6 +367,7 @@ def _cmd_samples(args: argparse.Namespace) -> int:
         job_groups=groups or DEFAULT_GROUPS,
         yield_curve_path=args.yield_curve,
         grade=args.grade,
+        size=args.size,
     )
 
     print(f"기본 파일을 만들었습니다: {args.directory}")
@@ -393,8 +399,9 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     else:
         print("할인율은 자리값(4.5%)입니다. --yield-curve 로 결산일 금리표를 주세요.")
     print(
-        "퇴직률·승급률은 표준률입니다. 회사 경험률이 있으면 그쪽이 우선입니다.\n"
-        "사망률은 남녀 구분 없는 표준사망률이라 그대로 쓸 수 있습니다."
+        f"퇴직률·승급률은 표준률 {STANDARD_YEAR} 의 '{args.size}' 열입니다. "
+        "회사 경험률이 있으면 그쪽이 우선입니다.\n"
+        "사망률은 재직자 기준 표준사망률(남녀 구분)이라 그대로 쓸 수 있습니다."
     )
     return 0
 

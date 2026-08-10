@@ -431,6 +431,30 @@ class TestApi:
         assert len(withdrawal[0]) == 3  # 연령 + 직군 2
         assert state["grids"][DISCOUNT_SHEET]["rows"]  # 기본 할인율 한 줄
 
+    def test_standard_state_follows_the_workplace_size(self) -> None:
+        """승급률·퇴직률은 300인 미만/이상으로 갈린 원표를 그대로 가져온다."""
+        small = call("standard_state", groups=["정규직"], size="300인 미만")
+        large = call("standard_state", groups=["정규직"], size="300인 이상")
+        assert small["size"] == "300인 미만" and large["size"] == "300인 이상"
+        for sheet in ("퇴직률", "승급률"):
+            assert (small["state"]["grids"][sheet]["rows"]
+                    != large["state"]["grids"][sheet]["rows"])
+        # 사망률은 규모로 갈리지 않는다.
+        assert (small["state"]["grids"]["사망률"]["rows"]
+                == large["state"]["grids"]["사망률"]["rows"])
+
+    def test_unknown_size_falls_back_instead_of_failing(self) -> None:
+        """화면이 빈 값을 보내도 산출 출발점은 나와야 한다."""
+        blank = call("standard_state", groups=["정규직"], size="")
+        assert blank["size"] == "300인 미만"
+        assert blank["state"]["grids"]["퇴직률"]["rows"]
+
+    def test_meta_offers_the_sizes(self) -> None:
+        meta = call("meta")
+        assert meta["standard_sizes"] == ["300인 미만", "300인 이상"]
+        assert meta["standard_size_threshold"] == 300
+        assert meta["standard_year"]
+
     def test_formula_ops(self) -> None:
         assert call("formula_check", source="=MIN(t, 30)")["error"] == ""
         assert call("formula_check", source="=WRONG(")["error"]

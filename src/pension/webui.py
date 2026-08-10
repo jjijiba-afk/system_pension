@@ -52,6 +52,7 @@ from .library import (
 )
 from .normalize import text
 from .rostergen import CASES
+from .standard_rates import SIZE_THRESHOLD, SIZES, STANDARD_YEAR
 from .yieldcurve import INVESTMENT_GRADES, pick_curve, read_yield_curves
 
 __all__ = ["api"]
@@ -108,6 +109,9 @@ def _meta(_request: dict) -> dict[str, Any]:
         "exit_cause_headers": list(form.EXIT_CAUSE_HEADERS),
         "longterm_timings": list(LONGTERM_TIMINGS),
         "grades": [*INVESTMENT_GRADES, "국고채"],
+        "standard_sizes": list(SIZES),
+        "standard_year": STANDARD_YEAR,
+        "standard_size_threshold": SIZE_THRESHOLD,
         "kinds": {"curve": CURVE_KIND, "rates": RATES_KIND,
                   "roster": ROSTER_KIND, "preset": PRESET_KIND},
         "cases": [
@@ -148,15 +152,22 @@ def _state_read(request: dict) -> dict[str, Any]:
 
 
 def _standard_state(request: dict) -> dict[str, Any]:
-    """내장 표준률로 채운 state. 등록해 둔 표준률이 없어도 출발점은 있어야 한다."""
+    """내장 표준률로 채운 state. 등록해 둔 표준률이 없어도 출발점은 있어야 한다.
+
+    ``size`` 로 사업장 규모(300인 미만/이상)를 고른다. 승급률·중도퇴직률 원표가
+    그 축으로 갈려 있어 아무 쪽이나 쓰면 채무가 어긋난다.
+    """
     from .samples import write_standard_assumptions
+    from .standard_rates import normalize_size
 
     groups = [text(g) for g in request.get("groups", []) if text(g)]
+    size = normalize_size(request.get("size", ""))
     with tempfile.TemporaryDirectory() as tmp:
         path = write_standard_assumptions(
-            Path(tmp) / "표준.xlsx", job_groups=tuple(groups or DEFAULT_GROUPS)
+            Path(tmp) / "표준.xlsx", job_groups=tuple(groups or DEFAULT_GROUPS),
+            size=size,
         )
-        return {"state": form.read_state(path)}
+        return {"state": form.read_state(path), "size": size}
 
 
 # ── 수식 ─────────────────────────────────────────────────────────
