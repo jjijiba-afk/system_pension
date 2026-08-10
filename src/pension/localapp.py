@@ -1,26 +1,22 @@
-"""PC 에서 **전체 기능 화면** 을 띄운다.
+"""프로그램의 본 화면.
 
-이 프로그램에는 화면이 둘이다.
+``연금계리산출.exe`` 를 켜면 바로 이 화면이 뜬다. 산출 · 산출가정 입력 ·
+분석 그래프 · 계리평가 보고서 · 산출 내역 · 단체 관리 · 사번 조회가 **한 창
+안에** 다 있다. 창을 닫으면 프로그램이 끝난다.
 
-``연금계리산출.exe`` (tkinter)
-    파일 세 칸을 채우고 [산출 실행] 을 누르는 창. 결산 실무의 본 작업이라
-    한 번에 보이는 것이 낫다.
+화면은 웹 기술로 그리고, 계산은 그 안의 파이썬 엔진(Pyodide/WebAssembly)이
+한다. 그래서 이 모듈이 하는 일은 **파일을 내어 주는 로컬 서버 하나를 띄우고
+주소창 없는 창으로 여는 것** 뿐이다. 바깥으로 나가는 통신은 없고, 명부가 이
+PC 를 떠나지 않는다.
 
-전체 기능 화면 (웹앱)
-    분석 그래프·계리평가 보고서·산출 내역·단체 관리·사번 조회까지 다 있는
-    화면. 원래 아이패드용으로 만들었지만 **브라우저면 어디서든 같다.**
+tkinter 로 다시 만들지 않은 이유는 분명하다. 그림이 필요한 화면이고(연차별
+채무 곡선 · 직군별 막대 · 민감도), tkinter 로는 그걸 그릴 수단이 캔버스에 선을
+긋는 것뿐이다. 인쇄→PDF 도 브라우저가 이미 해 준다. 무엇보다 **같은 것을 두 번
+만들면 두 화면의 숫자가 언젠가 갈린다** — 이 프로젝트가 계속 경계해 온 일이다.
 
-두 번째를 tkinter 로 다시 만들지 않는 이유는 분명하다. 그림이 필요한 화면이고
-(연차별 채무 곡선·직군별 막대·민감도), tkinter 로는 그걸 그릴 수단이 캔버스에
-선을 긋는 것뿐이다. 인쇄→PDF 도 브라우저가 이미 해 준다. 같은 것을 두 번
-만들면 **두 화면의 숫자가 언젠가 갈린다** — 이 프로젝트가 계속 경계해 온 일이다.
-
-그래서 PC 에서는 배포 꾸러미에 이미 들어 있는 그 웹앱을 **로컬 서버로 띄워
-기본 브라우저로 연다.** 계산은 브라우저 안 엔진(Pyodide)이 하므로 이 서버는
-파일을 내어 줄 뿐이고, 바깥으로 나가는 통신은 없다.
-
-주소는 ``127.0.0.1`` 에만 연다. 사내망에 열려면 :func:`pension.web.serve` 쪽
-(``pension-cli web --host 0.0.0.0``)을 쓰되, 인증이 없다는 점을 알고 써야 한다.
+주소는 ``127.0.0.1`` 에만 연다. 다른 기기에서 붙어 쓰려면
+:func:`pension.web.serve` 쪽(``pension-cli web --host 0.0.0.0``)을 쓰되,
+인증이 없다는 점을 알고 써야 한다.
 """
 
 from __future__ import annotations
@@ -35,7 +31,7 @@ import sys
 import threading
 from pathlib import Path
 
-__all__ = ["MissingAppError", "app_root", "open_in_browser", "serve"]
+__all__ = ["MissingAppError", "app_root", "open_in_browser", "run_app", "serve"]
 
 #: 배포 꾸러미에서 웹앱이 놓이는 이름들. 사람이 폴더 이름을 바꿔도 웬만하면 찾는다.
 _FOLDER_NAMES = ("아이패드웹앱", "웹앱", "dist", "webapp")
@@ -246,6 +242,85 @@ def _app_browser() -> str:
             if path.is_file():
                 return str(path)
     return ""
+
+
+def run_app(directory: str | Path | None = None, port: int | None = None) -> int:
+    """**이 프로그램의 본 화면.** 창을 띄우고, 그 창이 닫힐 때까지 기다린다.
+
+    프로그램을 켜면 곧바로 이 화면이 뜬다. 산출·산출가정 입력·분석 그래프·
+    계리평가 보고서·산출 내역·단체 관리가 **한 창 안에** 다 있다.
+
+    전에는 별도의 작은 창을 띄우고 거기서 [전체 기능 화면 열기] 를 눌러야
+    했다. 같은 프로그램인데 창이 둘로 나뉘고, 무엇이 어디 있는지 외워야 했다.
+
+    창을 닫으면 프로그램이 끝난다 — 서버도 같이 내린다. 브라우저를 못 찾아
+    앱 창을 못 띄우면 기본 브라우저로 열고, 그때는 사람이 끝낼 때까지 기다린다.
+    """
+    server = serve(directory, port)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+
+    try:
+        browser = _app_browser()
+        if browser:
+            import subprocess
+
+            try:
+                # 창이 닫힐 때까지 기다린다. 이 기다림이 곧 프로그램의 수명이다.
+                subprocess.run(
+                    [browser, f"--app={url}", "--window-size=1280,900"], check=False)
+                return 0
+            except OSError:
+                pass
+
+        return _wait_in_a_plain_window(url)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _wait_in_a_plain_window(url: str) -> int:
+    """앱 창을 못 띄웠을 때. 기본 브라우저로 열고 작은 창 하나로 버틴다.
+
+    브라우저 탭은 언제 닫혔는지 알 수 없다. 그래서 "닫으면 끝난다" 고 적힌
+    창을 하나 띄워 둔다 — 이것이 없으면 프로그램이 언제 끝나는지 알 수 없고,
+    작업 관리자로 죽여야 한다.
+    """
+    import webbrowser
+
+    webbrowser.open(url)
+
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+
+        from . import hidpi
+
+        hidpi.declare_dpi_aware()
+        root = tk.Tk()
+        hidpi.apply(root)
+        root.title("연금계리 산출 시스템")
+        root.geometry(hidpi.scale_geometry(root, "460x180"))
+        frame = ttk.Frame(root, padding=20)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(
+            frame,
+            text="브라우저에서 화면이 열렸습니다.\n\n"
+                 f"{url}\n\n이 창을 닫으면 프로그램이 끝납니다.",
+            justify="left", wraplength=hidpi.px(root, 400),
+        ).pack(anchor="w")
+        ttk.Button(frame, text="다시 열기",
+                   command=lambda: webbrowser.open(url)).pack(anchor="w", pady=(12, 0))
+        root.mainloop()
+        return 0
+    except Exception:
+        # 화면조차 못 띄우는 환경이면 Ctrl+C 로 끝낼 수 있게 그냥 버틴다.
+        print(f"화면: {url}\n끝내려면 Ctrl+C")
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        return 0
 
 
 def open_in_browser(directory: str | Path | None = None,

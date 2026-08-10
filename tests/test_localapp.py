@@ -255,3 +255,69 @@ class TestAppWindow:
         finally:
             server.shutdown()
             server.server_close()
+
+
+class TestTheMainScreen:
+    """프로그램을 켜면 **바로** 본 화면이 떠야 한다.
+
+    전에는 작은 입력 창이 먼저 뜨고 거기서 [전체 기능 화면 열기] 를 눌러야
+    했다. 같은 프로그램인데 창이 둘로 나뉘고, 무엇이 어디 있는지 외워야 했다.
+    """
+
+    def test_running_with_no_arguments_opens_the_full_screen(self, monkeypatch) -> None:
+        from pension import cli
+
+        called = {}
+
+        def note(key):
+            def record(*_args, **_kw):
+                called[key] = True
+                return 0
+            return record
+
+        monkeypatch.setattr(localapp, "run_app", note("run"))
+        monkeypatch.setattr(cli, "_cmd_gui", note("old_window"))
+
+        assert cli.main([]) == 0
+        assert called.get("run") is True
+        assert "old_window" not in called      # 예전 창은 뜨지 않는다
+
+    def test_it_falls_back_to_the_old_window_without_the_webapp(
+        self, monkeypatch
+    ) -> None:
+        """웹앱이 없는 설치본이라도 아무것도 안 뜨는 것보다는 낫다."""
+        from pension import cli
+
+        called = {}
+
+        def missing():
+            raise localapp.MissingAppError("없다")
+
+        def old_window(*_args, **_kw):
+            called["old_window"] = True
+            return 0
+
+        monkeypatch.setattr(localapp, "run_app", missing)
+        monkeypatch.setattr(cli, "_cmd_gui", old_window)
+        assert cli.main([]) == 0
+        assert called.get("old_window") is True
+
+    def test_the_program_ends_when_the_window_closes(self, fake_app, monkeypatch) -> None:
+        """창을 닫으면 서버도 내려가야 한다. 남아 있으면 포트를 계속 잡는다."""
+        import subprocess
+
+        closed = {}
+        monkeypatch.setattr(localapp, "_app_browser", lambda: "msedge.exe")
+        monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: None)
+
+        real_serve = localapp.serve
+
+        def watched(directory=None, port=None):
+            server = real_serve(directory, port=0)
+            original = server.server_close
+            server.server_close = lambda: (closed.setdefault("yes", True), original())
+            return server
+
+        monkeypatch.setattr(localapp, "serve", watched)
+        assert localapp.run_app(fake_app) == 0
+        assert closed.get("yes") is True

@@ -183,9 +183,8 @@ class PensionApp(tk.Tk):
         ).pack(side="left", padx=(6, 0))
         ttk.Label(
             box,
-            text="※ [전체 기능 화면] 은 분석 그래프 · 계리평가 보고서 · 산출 내역 · "
-                 "단체 관리까지 있는 화면입니다. 이 PC 의 기본 브라우저로 열리고, "
-                 "계산도 브라우저 안에서 돌아 명부가 밖으로 나가지 않습니다.",
+            text="※ 이 창은 예전 입력 화면입니다. 그냥 프로그램을 실행하면 "
+                 "분석 그래프 · 보고서 · 산출 내역까지 있는 본 화면이 바로 뜹니다.",
             style="Hint.TLabel", wraplength=hidpi.px(self, 620), justify="left",
         ).grid(row=7, column=1, sticky="w", padx=(10, 0), pady=(4, 0))
 

@@ -614,11 +614,22 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """진입점. 인자가 없으면 GUI 를 띄운다."""
+    """진입점. 인자가 없으면 본 화면을 띄운다.
+
+    본 화면은 **전체 기능 화면 하나** 다. 산출·산출가정 입력·분석·보고서·
+    산출 내역이 한 창 안에 다 있다. 예전의 작은 입력 창은 `gui` 하위 명령으로
+    남겨 두었다 — 그 창에만 익숙한 사람이 있을 수 있어서다.
+    """
     force_utf8_output()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        return _cmd_gui(argparse.Namespace())
+        from .localapp import MissingAppError, run_app
+
+        try:
+            return run_app()
+        except MissingAppError:
+            # 웹앱이 없는 설치본이면 옛 입력 창이라도 띄운다.
+            return _cmd_gui(argparse.Namespace())
 
     parser = _build_parser()
     args = parser.parse_args(argv)
