@@ -160,8 +160,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "app",
         help="전체 기능 화면 열기 (분석 그래프·보고서·산출 내역·단체 관리)",
     )
-    app.add_argument("--port", type=int, default=0,
-                     help="포트 (기본: 비어 있는 포트를 알아서 고름)")
+    app.add_argument("--port", type=int, default=None,
+                     help="포트 (기본 8036). 저장해 둔 산출 내역은 주소마다 "
+                          "따로 보관되므로 늘 같은 포트로 여는 편이 좋습니다")
     app.add_argument("--path", type=Path, help="웹앱 폴더를 직접 지정")
     app.add_argument("--no-browser", action="store_true",
                      help="브라우저를 열지 않고 주소만 알려 줍니다")
