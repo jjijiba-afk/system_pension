@@ -221,3 +221,92 @@ def test_same_seed_gives_the_same_file(tmp_path) -> None:
 
     assert rows(first) == rows(second)
     assert rows(first) != rows(third)
+
+
+class TestPracticeCases:
+    """자료불량 명부에 심어 둔 '규정을 읽어야 풀리는' 사례들.
+
+    자료 오류와 성격이 다르다. 검증이 잡아 주는 것이 아니라, 담당자가 비고를
+    읽고 산출에 반영해야 하는 것들이라 **실제로 산출 경로를 지나가는지** 를
+    본다. 안내문이 짚어 준 사번이 명부에 없으면 시험 자료가 거짓말을 한다.
+    """
+
+    def _actives(self, pack):
+        import openpyxl
+
+        roster, _ = pack["자료불량"]
+        wb = openpyxl.load_workbook(roster, data_only=True)
+        ws = wb["재직자명부"]
+        head = {c.value: c.column for c in ws[24] if c.value}
+        rows = [
+            {name: ws.cell(r, col).value for name, col in head.items()}
+            for r in range(26, ws.max_row + 1)
+            if ws.cell(r, head["사번"]).value
+        ]
+        wb.close()
+        return rows, head
+
+    def test_every_case_is_named_in_the_report(self, pack) -> None:
+        """안내문이 사례마다 사번을 짚어 주고, 그 사번이 명부에 있어야 한다."""
+        import re
+
+        from pension.rostergen import PRACTICE_CASES
+
+        roster, _ = pack["자료불량"]
+        report = (roster.parent / "시험명부3_자료불량_특이사항.txt").read_text(
+            encoding="utf-8")
+        rows, _ = self._actives(pack)
+        ids = {str(r["사번"]) for r in rows}
+
+        for title, _detail in PRACTICE_CASES:
+            assert title in report, f"안내문에 '{title}' 이(가) 없다"
+        cited = set(re.findall(r"\(사번 ([AT]\d{4})\)", report))
+        assert len(cited) >= 8, f"짚어 준 사번이 너무 적다: {cited}"
+        # 재직자 사번은 실제로 명부에 있어야 한다(T… 는 퇴직자명부).
+        assert {c for c in cited if c.startswith("A")} <= ids
+
+    def test_extra_columns_are_written_and_read(self, pack, tmp_path) -> None:
+        """누진·지급구간 열은 고정 서식 밖이라 머리글로 찾아 읽는 경로를 탄다."""
+        rows, head = self._actives(pack)
+        for label in ("지급률기산일", "지급률종료일", "누진적용근속연수", "누진적용율"):
+            assert label in head, f"'{label}' 열이 만들어지지 않았다"
+
+        run = _run(pack, "자료불량", tmp_path, force=True)
+        progressive = [m for m in run.valuation.members if m.progressive_service]
+        assert progressive, "누진 보전이 산출까지 닿지 않았다"
+        assert progressive[0].progressive_rate > 1.0
+
+    def test_period_split_is_not_a_duplicate_error(self, pack, tmp_path) -> None:
+        """세법한도 프로즌은 같은 사번 두 줄이지만 오류가 아니라 기간 분할이다."""
+        run = _run(pack, "자료불량", tmp_path, force=True)
+        by_id: dict[str, int] = {}
+        for m in run.valuation.members:
+            by_id[m.employee_id] = by_id.get(m.employee_id, 0) + 1
+        split = [emp for emp, n in by_id.items() if n == 2]
+        assert split, "지급구간으로 나뉜 사번이 없다"
+
+        flagged = {
+            str(issue).split("사번=")[1].split(":")[0]
+            for issue in run.issues.errors if issue.code == "JAE_DUP_ID"
+        }
+        assert not (set(split) & flagged), "기간 분할을 사번 중복 오류로 잡았다"
+
+    def test_the_dc_leaver_appears_on_both_sheets(self, pack, tmp_path) -> None:
+        """DC 전환 후 퇴직자는 재직·퇴직 양쪽에 같은 사번으로 있다."""
+        run = _run(pack, "자료불량", tmp_path, force=True)
+        active_ids = {m.employee_id for m in run.roster.active}
+        retired_ids = {m.employee_id for m in run.roster.retired}
+        assert active_ids & retired_ids, "양쪽에 걸친 사번이 없다"
+
+    def test_practice_cases_reach_the_valuation(self, pack, tmp_path) -> None:
+        """가산근속·추가지급·개별배수가 실제 산출 결과에 나타나야 한다."""
+        run = _run(pack, "자료불량", tmp_path, force=True)
+        members = run.valuation.members
+        assert any(m.extra_payment for m in members), "추가지급 기본급이 안 잡혔다"
+        assert any(m.rounding_unit >= 0 for m in members)
+        assert run.valuation.dbo > 0
+
+    def test_standard_case_stays_clean(self, pack, tmp_path) -> None:
+        """특이사항은 3번 명부에만 심는다 — 1번은 여전히 오류 0 이어야 한다."""
+        run = _run(pack, "표준", tmp_path)
+        assert not run.issues.errors

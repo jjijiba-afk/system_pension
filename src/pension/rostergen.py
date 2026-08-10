@@ -14,9 +14,18 @@
     특수 경로가 제대로 도는지 보는 용도다.
 
 ``자료불량``
-    실무에서 실제로 받는, 손봐야 하는 명부. 날짜 서식이 뒤섞이고 제도구분이
-    비고 임금이 0 이며 사번이 중복된다. 검증 리포트가 무엇을 어떻게 잡아내는지
-    보여 주는 용도라 **[검증 오류가 있어도 산출 강행]** 을 켜야 끝까지 돈다.
+    실무에서 실제로 받는 명부. 두 가지가 섞여 있다.
+
+    하나는 **틀린 자료** — 날짜 서식이 뒤섞이고 제도구분이 비고 임금이 0 이며
+    사번이 중복된다. 검증 리포트가 무엇을 어떻게 잡아내는지 보여 준다.
+
+    다른 하나는 **자료는 옳은데 산출이 까다로운 경우** (:data:`PRACTICE_CASES`).
+    임원 세법한도 프로즌, 연봉제 전환 누진 보전, 프로즌 DC전환자, DC전환 후
+    퇴직, 명예퇴직, 사망 정액 가산금 같은 것들이며 비고란에 무엇인지 적어 둔다.
+    검증이 잡아 주지 않고 담당자가 규정을 읽어 반영해야 하는 것들이라, 시험
+    자료에 있어야 연습이 된다.
+
+    **[검증 오류가 있어도 산출 강행]** 을 켜야 끝까지 돈다.
 
 난수는 씨앗을 고정하므로 같은 인자로 부르면 같은 파일이 나온다. 산출 결과를
 비교할 때 명부가 매번 바뀌면 비교 자체가 되지 않기 때문이다.
@@ -115,21 +124,27 @@ CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         key="자료불량",
         title="시험명부3_자료불량",
-        summary="실무에서 받는 손봐야 하는 명부입니다. 검증 리포트를 보려면 "
-                "[검증 오류가 있어도 산출 강행] 을 켜세요.",
+        summary="실무에서 받는 명부 그대로입니다. 손봐야 하는 자료와 규정을 읽어야 "
+                "풀리는 특이사항이 함께 들어 있습니다. [검증 오류가 있어도 산출 강행] 을 켜세요.",
         active=290, retired=35,
         groups=(("정규직", 0.70), ("계약직", 0.14), ("임원", 0.06),
                 ("촉탁", 0.06), ("", 0.04)),
         wage_check=1_000_000,
         notes=(
-            "· 일부러 틀린 자료를 섞었습니다. 검증 리포트 시트에서 무엇을 잡아내는지 보세요.",
-            "· 날짜 서식 혼재 · 제도구분 누락 · 임금 0 · 사번 중복 · 생년월일과 입사일 역전 ·",
-            "  Input 에 없는 직군 · 퇴사일이 입사일보다 이른 퇴직자 · 지급액 0 등이 들어 있습니다.",
+            "· 두 가지가 섞여 있습니다. 하나는 **틀린 자료** — 검증 리포트가 잡아냅니다.",
+            "  날짜 서식 혼재 · 제도구분 누락 · 임금 0 · 사번 중복 · 생년월일과 입사일 역전 ·",
+            "  Input 에 없는 직군 · 퇴사일이 입사일보다 이른 퇴직자 · 지급액 0 등입니다.",
+            "· 다른 하나는 **자료는 옳은데 산출이 까다로운 경우** 입니다. 비고란을 보세요.",
+            "  임원 세법한도 프로즌(같은 사번 두 줄) · 연봉제 전환 누진 보전 ·",
+            "  프로즌 DC전환자 · DC전환 후 퇴직(재직·퇴직 사번 중복) · 퇴직예정자 ·",
+            "  명예퇴직 예정자 · 정년 시 기본급 추가지급 · 가산근속 · 사망 정액 가산금 ·",
+            "  명예퇴직 위로금 · 임금 단위 혼재 · 장기급여 대상 표기 혼재.",
             "· 평균임금 체크금액을 1,000,000원으로 두어 그 미만인 사람도 걸립니다.",
         ),
         flags={
-            "dirty": True, "dc_share": 0.06, "settlement_share": 0.05,
-            "longterm_share": 0.35,
+            "dirty": True, "practice": True, "dc_share": 0.06,
+            "settlement_share": 0.05, "longterm_share": 0.35,
+            "added_service_share": 0.04, "multiple_share": 0.03,
         },
     ),
 )
@@ -393,6 +408,157 @@ def _dirty_date(rng: random.Random, value: str) -> Any:
     return f"{year}년 {int(month)}월 {int(day)}일"
 
 
+#: 실무 스터디에서 실제로 마주친 산출 특이사항. 확률로 흩뿌리지 않고 **반드시
+#: 한 건씩** 심는다 — 안내문이 있다고 적어 둔 것은 명부에 있어야 한다.
+PRACTICE_CASES: Final[tuple[tuple[str, str], ...]] = (
+    ("임원 세법한도 프로즌",
+     "같은 사번이 두 줄. 2019년 이전은 3배수·이후는 2배수로 지급구간이 갈린다."),
+    ("연봉제 전환 누진 보전",
+     "호봉제 시절 근속분의 누진 배수를 보전한다. 근속은 이어지고 배수만 갈린다."),
+    ("프로즌 DC전환자",
+     "DC 로 전환했지만 전환 전 과거분은 퇴직금으로 남아 있다."),
+    ("DC전환 후 퇴직 — 사번 중복",
+     "같은 사번이 재직자명부와 퇴직자명부에 함께 있다."),
+    ("퇴직예정자",
+     "기준일 뒤 퇴사가 확정돼 비고에 적혀 왔다. 기준일 현재는 재직자다."),
+    ("명예퇴직 예정자",
+     "명예퇴직 산정용 임금이 따로 적혀 있다."),
+    ("정년퇴직 시 기본급 추가지급",
+     "정년으로 나가는 사람에게 기본급을 얹어 준다(전장직원 예우)."),
+    ("가산근속(법정제)",
+     "군경력·휴직 보전으로 근속을 더해 준다."),
+    ("사망 추가지급",
+     "재직 중 사망하면 정액 가산금 5,000만원을 얹는다."),
+    ("명예퇴직 위로금",
+     "희망퇴직자에게 퇴직금과 별도로 위로금을 준다."),
+    ("임금 단위 혼재",
+     "월평균임금을 천원 단위로 적어 보낸 줄이 섞여 있다."),
+    ("장기급여 대상 표기 혼재",
+     "Y/N 대신 ○·×·1·0 으로 적어 왔다."),
+)
+
+
+def _add_practice_cases(
+    rng: random.Random, actives: list[dict[str, Any]], retirees: list[dict[str, Any]],
+    base: _dt.date,
+) -> dict[str, str]:
+    """실무에서 마주치는 산출 특이사항을 한 건씩 심는다.
+
+    ``_spoil_active`` 가 '자료가 틀린' 경우를 만든다면 여기는 '자료는 옳은데
+    산출이 까다로운' 경우를 만든다. 둘은 성격이 달라 따로 둔다 — 틀린 자료는
+    고쳐 달라고 돌려보내지만, 이쪽은 규정을 읽고 산출에 반영해야 하는 것들이다.
+
+    :returns: ``{특이사항 이름: 사번}``. 안내문이 "어느 사번을 보라" 고 짚어
+        주려면 심은 자리를 기억해야 한다 — 비고 글자를 되짚어 찾으면 비슷한
+        문구끼리 엉킨다.
+    """
+    planted: dict[str, str] = {}
+
+    def take(pool: list[dict[str, Any]], **want: Any) -> dict[str, Any]:
+        """조건에 맞는 아직 안 쓴 줄 하나. 없으면 아무거나."""
+        fit = [r for r in pool if not r.get("note")
+               and all(r.get(k) == v for k, v in want.items())]
+        return rng.choice(fit or pool)
+
+    def date_of(row: dict[str, Any], key: str) -> _dt.date:
+        return _dt.date.fromisoformat(str(row[key])[:10])
+
+    # ── 임원 세법한도 프로즌 — 같은 사번을 두 줄로 나눈다 ──────────
+    exec_row = take(actives, employee_type=_TYPE_EXEC)
+    hire = date_of(exec_row, "hire_date")
+    split = _dt.date(2019, 12, 31)
+    if hire < split < base:
+        wage = float(exec_row["monthly_wage"])
+        exec_row["period_end"] = split.isoformat()
+        exec_row["payout_multiple"] = 3.0
+        exec_row["note"] = "19.12.31 이전 기간만 3배수 (세법한도 프로즌)"
+        later = dict(exec_row)
+        later["period_start"] = (split + _dt.timedelta(days=1)).isoformat()
+        later.pop("period_end", None)
+        later["payout_multiple"] = 2.0
+        later["monthly_wage"] = int(wage * 1.35 / 1_000) * 1_000
+        later["note"] = "20.1.1 이후 기간만 2배수"
+        actives.insert(actives.index(exec_row) + 1, later)
+        planted["임원 세법한도 프로즌"] = exec_row["employee_id"]
+
+    # ── 연봉제 전환 누진 보전 ────────────────────────────────────
+    row = take(actives, employee_type=_TYPE_STAFF)
+    served = (base - date_of(row, "hire_date")).days / 365.25
+    if served > 8:
+        row["progressive_service"] = round(served * 0.45, 1)
+        row["progressive_rate"] = rng.choice((1.2, 1.3, 1.5))
+        row["note"] = "연봉제 전환 이전 누진 보전 + 이후 법정제"
+        planted["연봉제 전환 누진 보전"] = row["employee_id"]
+
+    # ── 프로즌 DC전환자 (과거분은 퇴직금으로 남음) ───────────────
+    frozen = take(actives, employee_type=_TYPE_STAFF)
+    frozen["plan"] = "DC"
+    moved = base - _dt.timedelta(days=rng.randint(400, 2_000))
+    if moved > date_of(frozen, "hire_date"):
+        frozen["settlement_date"] = moved.isoformat()
+        frozen["settlement_amount"] = int(
+            float(frozen["monthly_wage"]) * rng.uniform(2, 7) / 1_000) * 1_000
+    frozen["note"] = "DC 전환(프로즌). 전환 전 과거분은 퇴직금 지급"
+    planted["프로즌 DC전환자"] = frozen["employee_id"]
+
+    # ── DC전환 후 퇴직 — 재직·퇴직 양쪽에 같은 사번 ──────────────
+    if retirees:
+        leaver = rng.choice(retirees)
+        leaver["employee_id"] = frozen["employee_id"]
+        leaver["name"] = frozen["name"]
+        leaver["reason"] = "3"
+        leaver["plan"] = "DC"
+        leaver["note"] = "DC 전환 후 퇴직 — 재직자명부와 사번 중복"
+        planted["DC전환 후 퇴직 — 사번 중복"] = leaver["employee_id"]
+
+    # ── 퇴직예정자 · 명예퇴직 예정자 ─────────────────────────────
+    leaving = take(actives)
+    leaving["note"] = (
+        f"{(base + _dt.timedelta(days=rng.randint(20, 90))).isoformat()} 퇴사 예정")
+    planted["퇴직예정자"] = leaving["employee_id"]
+    honorary = take(actives, employee_type=_TYPE_STAFF)
+    honorary["honorary_wage"] = int(
+        float(honorary["monthly_wage"]) * 1.15 / 1_000) * 1_000
+    honorary["note"] = "명예퇴직 신청 — 명예퇴직 산정용 임금 별도"
+    planted["명예퇴직 예정자"] = honorary["employee_id"]
+
+    # ── 정년퇴직 시 기본급 추가지급 ──────────────────────────────
+    extra = take(actives, employee_type=_TYPE_STAFF)
+    extra["extra_pay_base_wage"] = int(
+        float(extra["monthly_wage"]) * 0.8 / 1_000) * 1_000
+    extra["note"] = "정년퇴직 시 기본급 추가지급 대상"
+    planted["정년퇴직 시 기본급 추가지급"] = extra["employee_id"]
+
+    # ── 가산근속(법정제) ─────────────────────────────────────────
+    added = take(actives)
+    added["added_service_years"] = rng.choice((1, 1.5, 2))
+    added["note"] = "군경력 가산근속"
+    planted["가산근속(법정제)"] = added["employee_id"]
+
+    # ── 사망 추가지급 · 명예퇴직 위로금 ──────────────────────────
+    if len(retirees) >= 2:
+        dead, honor = rng.sample(retirees, 2)
+        dead["reason"] = "2"
+        dead["other_payment"] = 50_000_000
+        dead["note"] = "재직 중 사망 — 정액 가산금 5,000만원 별도"
+        honor["other_payment"] = int(
+            float(honor.get("total_payment") or 0) * 0.4 / 1_000) * 1_000
+        honor["note"] = "명예퇴직 위로금"
+        planted["사망 추가지급"] = dead["employee_id"]
+        planted["명예퇴직 위로금"] = honor["employee_id"]
+
+    # ── 임금 단위 혼재 · 장기급여 표기 혼재 ──────────────────────
+    scaled = take(actives)
+    scaled["monthly_wage"] = int(float(scaled["monthly_wage"]) / 1_000)
+    scaled["note"] = "임금을 천원 단위로 기재 (단위 확인 필요)"
+    planted["임금 단위 혼재"] = scaled["employee_id"]
+    mixed = rng.sample(actives, min(8, len(actives)))
+    for row in mixed:
+        row["longterm_target"] = rng.choice(("○", "×", "1", "0", "Y", "N"))
+    planted["장기급여 대상 표기 혼재"] = mixed[0]["employee_id"]
+    return planted
+
+
 def _spoil_active(
     rng: random.Random, rows: list[dict[str, Any]], base: _dt.date
 ) -> None:
@@ -462,7 +628,7 @@ def _spoil_retired(rng: random.Random, rows: list[dict[str, Any]]) -> None:
 
 def _case_report(
     spec: CaseSpec, actives: list[dict[str, Any]], retirees: list[dict[str, Any]],
-    base: _dt.date,
+    base: _dt.date, planted: dict[str, str] | None = None,
 ) -> str:
     """이 명부에 무엇이 들어 있는지 적은 안내문.
 
@@ -470,6 +636,8 @@ def _case_report(
     DC 이고 어떤 오류를 몇 건 심었는지 세어 함께 내보낸다 — 산출 결과가 이상해
     보일 때 명부 탓인지 프로그램 탓인지 가리는 근거가 된다.
     """
+    planted = planted or {}
+
     def count(rows, key) -> int:
         return sum(1 for row in rows if row.get(key) not in (None, "", 0))
 
@@ -532,6 +700,21 @@ def _case_report(
     lines += ["", "[퇴직 사유]"]
     for code, number in sorted(tally.items()):
         lines.append(f"  {reasons.get(code, code):<12} {number:>3,}명")
+
+    if spec.flags.get("practice"):
+        lines += [
+            "",
+            "[규정을 읽어야 풀리는 특이사항 — 자료는 옳습니다]",
+            "  비고란에 무엇인지 적어 두었습니다. 해당 사번을 찾아보세요.",
+        ]
+        for title, detail in PRACTICE_CASES:
+            emp = planted.get(title)
+            lines.append(f"  · {title} (사번 {emp}) — {detail}" if emp
+                         else f"  · {title} — {detail}")
+        lines += [
+            "  ※ '명예퇴직 산정용 임금' 과 '추가지급 기본급' 은 값이 있으면 늘 경고가",
+            "    붙습니다. 산출에 어떻게 반영할지는 규정을 보고 정해야 하기 때문입니다.",
+        ]
 
     if spec.flags.get("dirty"):
         lines += [
@@ -781,6 +964,11 @@ def write_case_roster(
     actives = [_make_active(rng, spec, i + 1, base) for i in range(spec.active)]
     retirees = [_make_retired(rng, spec, i + 1, base) for i in range(spec.retired)]
     _ensure_special_cases(rng, spec, actives, base)
+    # 특이사항을 먼저 심고 그 위에 자료 오류를 뿌린다. 순서를 바꾸면 오류가
+    # 특이사항 줄을 덮어써 무엇을 보려던 자료인지 알 수 없게 된다.
+    planted: dict[str, str] = {}
+    if spec.flags.get("practice"):
+        planted = _add_practice_cases(rng, actives, retirees, base)
     if spec.flags.get("dirty"):
         _spoil_active(rng, actives, base)
         _spoil_retired(rng, retirees)
@@ -794,6 +982,18 @@ def write_case_roster(
         header_row = first_row - 2
         ws.cell(header_row, 2, "순번").font = st["head_font"]
         ws.cell(header_row, 2).fill = st["head_fill"]
+
+        # 고정 서식에 없는 항목(누진 보전·지급구간 등)은 회사가 오른쪽에 열을
+        # 덧붙여 보낸다. 그 모양 그대로 만들어야 머리글로 열을 찾아내는
+        # 경로까지 시험 자료가 짚고 간다.
+        placed = dict(columns)
+        used = [key for record in rows for key in record]
+        extras = [key for key in dict.fromkeys(used) if key not in placed]
+        next_index = max(col.index for col in columns.values()) + 1
+        extra_index = {}
+        for offset, key in enumerate(extras):
+            extra_index[key] = next_index + offset
+
         for key, col in columns.items():
             label = aliases.get(key, (col.label,))[0]
             cell = ws.cell(header_row, col.index, label)
@@ -801,15 +1001,23 @@ def write_case_roster(
             cell.fill = st["head_fill"]
             cell.alignment = st["center"]
             ws.column_dimensions[cell.column_letter].width = max(10, min(22, len(label) + 4))
+        for key, index in extra_index.items():
+            label = aliases.get(key, (key,))[0]
+            cell = ws.cell(header_row, index, label)
+            cell.font = st["head_font"]
+            cell.fill = st["head_fill"]
+            cell.alignment = st["center"]
+            ws.column_dimensions[cell.column_letter].width = max(12, min(22, len(label) + 4))
 
         for offset, record in enumerate(rows):
             row = first_row + offset
             ws.cell(row, 2, offset + 1)
             for key, value in record.items():
                 column = columns.get(key)
-                if column is None or value == "":
+                index = column.index if column is not None else extra_index.get(key)
+                if index is None or value == "":
                     continue
-                ws.cell(row, column.index, value)
+                ws.cell(row, index, value)
         ws.freeze_panes = ws.cell(first_row, 3)
 
     sheet(ACTIVE_SHEET, ACTIVE_COLUMNS, ACTIVE_HEADER_ALIASES, ACTIVE_FIRST_ROW, actives)
@@ -867,7 +1075,7 @@ def write_case_roster(
 
     if report_path is not None:
         Path(report_path).write_text(
-            _case_report(spec, actives, retirees, base), encoding="utf-8"
+            _case_report(spec, actives, retirees, base, planted), encoding="utf-8"
         )
     return path
 
