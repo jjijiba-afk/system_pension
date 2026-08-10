@@ -52,6 +52,18 @@ _BUILT = ("pyodide", "wheels")
 #: 환경변수로 직접 지정하는 길. 개발 중이거나 폴더를 딴 곳에 둔 경우.
 _ENV = "PENSION_WEBAPP"
 
+#: 늘 이 포트로 연다. ``pension web`` 의 8035 와 겹치지 않게 한 칸 띄웠다.
+#:
+#: **비어 있는 포트를 그때그때 고르면 안 된다.** 브라우저 저장소는 주소로
+#: 갈리는데 포트도 주소의 일부다. 열 때마다 포트가 달라지면 어제 저장한
+#: 산출 내역·단체·자료실이 오늘은 통째로 안 보인다 — 자료가 지워진 것이
+#: 아니라 다른 주소를 열고 있는 것인데, 쓰는 사람에게는 사라진 것과 같다.
+DEFAULT_PORT = 8036
+
+#: 기본 포트가 이미 쓰이고 있을 때 차례로 시도할 포트. 좁게 두는 이유는
+#: 위와 같다 — 흩어질수록 저장소가 갈린다.
+PORT_LADDER = tuple(range(DEFAULT_PORT, DEFAULT_PORT + 10))
+
 
 class MissingAppError(RuntimeError):
     """전체 기능 화면 폴더를 찾지 못했다."""
@@ -133,6 +145,18 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
 
+class _Server(socketserver.ThreadingTCPServer):
+    """고정 포트로 다시 열 수 있는 서버.
+
+    ``allow_reuse_address`` 를 켜 두지 않으면, 창을 닫고 곧바로 다시 열 때
+    직전 연결이 ``TIME_WAIT`` 로 남아 있어 "포트가 사용 중" 으로 거절된다.
+    같은 포트를 계속 쓰는 것이 요점이므로 이것이 켜져 있어야 한다.
+    """
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def _register_types() -> None:
     """브라우저가 알아들을 MIME 을 못 박는다.
 
@@ -147,26 +171,39 @@ def _register_types() -> None:
     mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
-def serve(directory: str | Path | None = None, port: int = 0):
+def serve(directory: str | Path | None = None, port: int | None = None):
     """웹앱을 로컬 서버로 띄운다. 서버 객체를 돌려준다(아직 돌지 않는다).
 
     :param directory: 웹앱 폴더. 생략하면 :func:`app_root` 로 찾는다.
-    :param port: 0 이면 비어 있는 포트를 운영체제가 골라 준다. 고정 포트를
-        쓰면 이미 그 포트를 쓰는 프로그램이 있을 때 뜨지 않는다.
+    :param port: 생략하면 :data:`DEFAULT_PORT` 부터 :data:`PORT_LADDER` 를
+        차례로 시도한다. **늘 같은 포트로 여는 것이 중요하다** — 브라우저
+        저장소가 주소로 갈려서, 포트가 달라지면 저장해 둔 산출 내역이 안
+        보인다. 0 을 주면 운영체제가 빈 포트를 고른다(시험용).
     """
     root = Path(directory) if directory is not None else app_root()
     _register_types()
 
     handler = functools.partial(_Quiet, directory=str(root))
-    # 브라우저가 여러 파일을 동시에 받아 간다. 한 번에 하나만 처리하면
-    # 14MB 짜리 런타임을 받는 동안 화면이 멈춘 것처럼 보인다.
-    server = socketserver.ThreadingTCPServer(("127.0.0.1", port), handler)
-    server.daemon_threads = True
-    server.allow_reuse_address = True
-    return server
+    candidates = (port,) if port is not None else PORT_LADDER
+
+    last: OSError | None = None
+    for candidate in candidates:
+        try:
+            # 브라우저가 여러 파일을 동시에 받아 간다. 한 번에 하나만 처리하면
+            # 14MB 짜리 런타임을 받는 동안 화면이 멈춘 것처럼 보인다.
+            return _Server(("127.0.0.1", candidate), handler)
+        except OSError as exc:
+            last = exc
+            continue
+
+    raise OSError(
+        f"{PORT_LADDER[0]}~{PORT_LADDER[-1]} 포트가 모두 사용 중이라 화면을 "
+        f"열지 못했습니다. 이미 열어 둔 창이 있는지 확인해 보세요.\n\n{last}"
+    )
 
 
-def open_in_browser(directory: str | Path | None = None, port: int = 0) -> tuple:
+def open_in_browser(directory: str | Path | None = None,
+                    port: int | None = None) -> tuple:
     """서버를 백그라운드로 띄우고 기본 브라우저로 연다.
 
     :returns: ``(서버, 주소)``. 서버는 데몬 스레드에서 돌고 있으므로,

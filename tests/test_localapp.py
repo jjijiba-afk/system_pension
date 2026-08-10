@@ -32,7 +32,7 @@ def running(fake_app):
     """실제로 도는 로컬 서버."""
     import threading
 
-    server = localapp.serve(fake_app)
+    server = localapp.serve(fake_app, port=0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
@@ -105,11 +105,67 @@ class TestServing:
 
     def test_listens_only_on_this_pc(self, fake_app) -> None:
         """인증이 없는 화면이다. 사내망에도 저절로 열리면 안 된다."""
-        server = localapp.serve(fake_app)
+        server = localapp.serve(fake_app, port=0)
         try:
             assert server.server_address[0] == "127.0.0.1"
         finally:
             server.server_close()
+
+
+class TestStablePort:
+    """늘 같은 포트로 열어야 한다.
+
+    브라우저 저장소는 **주소마다 따로** 다. 포트도 주소의 일부라, 열 때마다
+    빈 포트를 새로 고르면 어제 저장한 산출 내역이 오늘 안 보인다 — 자료가
+    지워진 것이 아니라 다른 주소를 열고 있는 것인데, 쓰는 사람에게는 사라진
+    것과 같다.
+    """
+
+    def test_uses_the_fixed_port(self, fake_app) -> None:
+        server = localapp.serve(fake_app)
+        try:
+            assert server.server_address[1] == localapp.DEFAULT_PORT
+        finally:
+            server.server_close()
+
+    def test_the_same_port_comes_back_next_time(self, fake_app) -> None:
+        """창을 닫았다 다시 열어도 같은 주소여야 저장소가 이어진다."""
+        first = localapp.serve(fake_app)
+        port = first.server_address[1]
+        first.server_close()
+
+        second = localapp.serve(fake_app)
+        try:
+            assert second.server_address[1] == port
+        finally:
+            second.server_close()
+
+    def test_steps_aside_when_the_port_is_taken(self, fake_app) -> None:
+        """이미 쓰이고 있으면 다음 칸으로. 아예 못 여는 것보다 낫다."""
+        held = localapp.serve(fake_app)
+        try:
+            other = localapp.serve(fake_app)
+            try:
+                assert other.server_address[1] in localapp.PORT_LADDER
+                assert other.server_address[1] != held.server_address[1]
+            finally:
+                other.server_close()
+        finally:
+            held.server_close()
+
+    def test_the_ladder_stays_narrow(self) -> None:
+        """넓게 흩어질수록 저장소가 갈린다. 사다리는 짧아야 한다."""
+        assert localapp.PORT_LADDER[0] == localapp.DEFAULT_PORT
+        assert len(localapp.PORT_LADDER) <= 10
+
+    def test_it_does_not_collide_with_the_intranet_server(self) -> None:
+        """`pension web` 은 8035 를 쓴다. 둘을 같이 띄우는 사람이 있다."""
+        from pension.web import serve as web_serve
+
+        import inspect
+
+        default = inspect.signature(web_serve).parameters["port"].default
+        assert default not in localapp.PORT_LADDER
 
     def test_files_outside_the_folder_are_not_served(self, running, tmp_path) -> None:
         (tmp_path / "secret.txt").write_text("명부", encoding="utf-8")
