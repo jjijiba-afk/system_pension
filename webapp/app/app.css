@@ -132,6 +132,11 @@ table.grid { border-collapse: collapse; margin: 10px 0; }
   color: var(--hint); font-size: 0.95rem; line-height: 1; cursor: pointer; }
 .grid th button.link:hover { color: #B91C1C; }
 
+/* 정년·중도·사망으로 가른 지급률 열. 머리글이 '정규직·정년' 이라 길어지므로,
+   무엇의 어느 사유인지가 표를 훑는 동안 계속 보이게 사유만 따로 띄운다. */
+.grid th .cause-tag { display: block; margin-top: 3px; font-size: 0.78rem;
+  font-weight: 700; color: var(--plum); letter-spacing: 0.04em; }
+
 /* 산출 실행은 늘 손 닿는 곳에. 접힌 구획을 펼치면 폼이 길어진다. */
 button.big.sticky { position: sticky; bottom: 8px; z-index: 5;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18); }

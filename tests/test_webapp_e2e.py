@@ -449,6 +449,32 @@ def test_workplace_size_switches_the_standard_table(page) -> None:
     assert grid_row(page, "사망률").first.input_value() == "15"
 
 
+def test_benefit_column_splits_into_three_causes(page) -> None:
+    """[사유별 차등] 한 번으로 정년·중도·사망 열이 생기고 연결까지 끝나야 한다."""
+    def split_box():
+        return section(page, "지급률").locator(
+            'tr.panel:has(td.name:text-is("사유별 차등")) input[type=checkbox]'
+        ).first
+
+    def headers():
+        return section(page, "지급률").locator("tbody tr").first.inner_text()
+
+    split_box().check()
+    assert "정규직·정년" in headers()
+
+    # 퇴직사유 표까지 자동으로 채워져야 손댈 곳이 없다.
+    causes = page.locator('#ed-subpages .subpage.on details[data-section="cause"]')
+    if not causes.evaluate("node => node.open"):
+        causes.locator("summary").click()
+    assert "정규직·정년" in causes.inner_text()
+
+    # 도로 접으면 열도 연결도 사라진다.
+    page.once("dialog", lambda dialog: dialog.accept())
+    split_box().uncheck()
+    assert "정규직·정년" not in headers()
+    assert "정규직·정년" not in causes.inner_text()
+
+
 def test_client_bar_keeps_run_history_apart(page, tmp_path) -> None:
     """단체를 갈아 끼우면 산출 내역과 전기 산출 목록이 그 단체 것만 남는다."""
     from pension.samples import write_sample_pack

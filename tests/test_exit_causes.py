@@ -417,3 +417,123 @@ class TestSheetRoundTrip:
         wb.save(path)
 
         assert load_assumptions(path).exit_causes.is_empty()
+
+
+class TestSplitBenefitColumn:
+    """지급률 열 하나를 정년·중도·사망 세 열로 가르기.
+
+    엔진은 처음부터 사유별 차등을 받았지만 넣는 길이 2단 우회였다 — 열을
+    손으로 만들고, [퇴직사유] 탭에서 그 이름을 지목해야 했다. 여기서는
+    **한 번에 갈라 주는 조작이 종전과 똑같은 파일을 낳는지** 를 본다.
+    """
+
+    def base(self):
+        from pension import assumption_form as form
+
+        state = form.example_state(["정규직", "임원"])
+        state["grids"]["지급률"]["rows"] = [["0", "1.0", "1.5"], ["10", "2.0", "3.0"]]
+        return state
+
+    def test_makes_three_columns_and_wires_them(self) -> None:
+        from pension import assumption_form as form
+
+        state = form.split_benefit_by_cause(self.base(), "정규직")
+        columns = form.grid_columns(state, "지급률")
+        for cause in ("중도", "사망", "정년"):
+            assert f"정규직·{cause}" in columns
+        assert form.cause_split_rules(state) == ["정규직"]
+        # 퇴직사유 줄이 그 열을 가리켜야 엔진이 집는다.
+        linked = {(r[0], r[1]): r[2] for r in state["exit_causes"]}
+        assert linked[("정규직", "정년")] == "정규직·정년"
+
+    def test_new_columns_inherit_the_original_rule(self) -> None:
+        """가르는 목적은 '셋이 다르다' 를 적는 것이지 처음부터 짜는 게 아니다."""
+        from pension import assumption_form as form
+
+        state = self.base()
+        state["benefit_rules"]["정규직"] = {"mode": "누진", "formula": ""}
+        state = form.split_benefit_by_cause(state, "정규직")
+        for cause in ("중도", "사망", "정년"):
+            assert state["benefit_rules"][f"정규직·{cause}"]["mode"] == "누진"
+
+    def test_untouched_groups_stay_put(self) -> None:
+        from pension import assumption_form as form
+
+        state = form.split_benefit_by_cause(self.base(), "정규직")
+        assert form.cause_split_rules(state) == ["정규직"]
+        assert "임원·정년" not in form.grid_columns(state, "지급률")
+
+    def test_existing_cause_row_keeps_its_other_values(self) -> None:
+        """가산액을 먼저 적어 둔 회사가 있다. 줄을 새로 만들면 그게 사라진다."""
+        from pension import assumption_form as form
+
+        state = self.base()
+        state["exit_causes"] = [["정규직", "사망", "", "", "50000000", "1", ""]]
+        state = form.split_benefit_by_cause(state, "정규직")
+        death = next(r for r in state["exit_causes"] if r[1] == "사망")
+        assert death[2] == "정규직·사망"
+        assert death[4] == "50000000" and death[5] == "1"
+
+    def test_merge_removes_the_columns_and_their_values(self) -> None:
+        from pension import assumption_form as form
+
+        state = form.split_benefit_by_cause(self.base(), "정규직")
+        state["grids"]["지급률"]["rows"] = [
+            ["0", "1.0", "1.5", "1.0", "1.0", "2.0"],
+            ["10", "2.0", "3.0", "2.0", "2.0", "4.0"],
+        ]
+        merged = form.merge_benefit_causes(state, "정규직")
+        assert form.grid_columns(merged, "지급률") == ["정규직", "임원"]
+        # 값 칸까지 같이 들어내야 남은 값이 옆 열로 밀리지 않는다.
+        assert merged["grids"]["지급률"]["rows"] == [["0", "1.0", "1.5"],
+                                                  ["10", "2.0", "3.0"]]
+        assert merged["exit_causes"] == []
+        assert "정규직·정년" not in merged["benefit_rules"]
+
+    def test_merge_keeps_a_cause_row_that_still_has_content(self) -> None:
+        from pension import assumption_form as form
+
+        state = self.base()
+        state["exit_causes"] = [["정규직", "사망", "", "", "50000000", "", ""]]
+        state = form.split_benefit_by_cause(state, "정규직")
+        merged = form.merge_benefit_causes(state, "정규직")
+        assert merged["exit_causes"] == [["정규직", "사망", "", "", "50000000", "", ""]]
+
+    def test_splitting_twice_is_refused(self) -> None:
+        from pension import assumption_form as form
+
+        state = form.split_benefit_by_cause(self.base(), "정규직")
+        with pytest.raises(ValueError, match="이미"):
+            form.split_benefit_by_cause(state, "정규직·정년")
+
+    def test_unknown_column_is_a_clear_error(self) -> None:
+        from pension import assumption_form as form
+
+        with pytest.raises(ValueError, match="없습니다"):
+            form.split_benefit_by_cause(self.base(), "없는직군")
+
+    def test_the_split_survives_a_workbook_round_trip(self, tmp_path) -> None:
+        """파일에서 되읽었을 때도 갈라 놓은 상태로 떠야 한다."""
+        from pension import assumption_form as form
+
+        state = form.split_benefit_by_cause(self.base(), "정규직")
+        assert form.state_problems(state) == []
+        form.write_state(state, tmp_path / "기초율.xlsx")
+        back = form.read_state(tmp_path / "기초율.xlsx")
+        assert form.cause_split_rules(back) == ["정규직"]
+
+    def test_the_engine_reads_the_split_column(self, tmp_path) -> None:
+        """화면이 만든 파일을 엔진이 사유별 규정으로 집어야 의미가 있다."""
+        from pension import assumption_form as form
+        from pension.assumptions import load_assumptions
+
+        state = form.split_benefit_by_cause(self.base(), "정규직")
+        columns = form.grid_columns(state, "지급률")
+        row = ["0"] + [""] * len(columns)
+        row[columns.index("정규직·정년") + 1] = "2.0"
+        state["grids"]["지급률"]["rows"] = [row]
+
+        form.write_state(state, tmp_path / "기초율.xlsx")
+        causes = load_assumptions(tmp_path / "기초율.xlsx").exit_causes
+        assert causes.get("정규직", CAUSE_NORMAL).benefit_rule == "정규직·정년"
+        assert causes.get("정규직", CAUSE_DEATH).benefit_rule == "정규직·사망"
