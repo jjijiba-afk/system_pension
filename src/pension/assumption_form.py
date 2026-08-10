@@ -680,13 +680,81 @@ def write_state(state: dict[str, Any], path: str | Path) -> Path:
 
 # ── 워크북 → state ───────────────────────────────────────────────
 
-def read_state(path: str | Path) -> dict[str, Any]:
+def raw_table_state(path: str | Path, *, size: object = "",
+                    job_groups: list[str] | None = None) -> dict[str, Any]:
+    """고시된 **표준률 원표** 워크북을 state 로.
+
+    원표는 이 프로그램의 기초율 서식과 모양이 다르다 — 중도퇴직률·승급률·
+    사망률이 각각 한 시트이고, 열이 ``No · 연령 · 300인↓ · 300인↑`` 다.
+    표준률이 새로 고시될 때 오는 파일이 그 모양이므로, 사람이 288개 숫자를
+    옮겨 적게 하는 대신 그대로 읽는다.
+
+    :param size: 승급률·중도퇴직률에 쓸 사업장 규모. 원표는 두 규모를 한 표에
+        담고 있어 어느 열을 쓸지 여기서 정한다.
+    """
+    from .standard_rates import (
+        MORTALITY_HINT,
+        PROMOTION_HINT,
+        WITHDRAWAL_HINT,
+        normalize_size,
+        read_raw_workbook,
+    )
+
+    tables = read_raw_workbook(path)
+    chosen = normalize_size(size)
+    state = empty_state(job_groups)
+    count = len(state["job_groups"])
+
+    def spread(rows: list[list[float]]) -> list[list[str]]:
+        """한 열짜리 표를 직군 수만큼 벌린다 — 표준률은 직군을 가리지 않는다."""
+        return [[f"{age:g}", *[f"{rate:.6f}"] * count] for age, rate in rows]
+
+    for hint, sheet in ((WITHDRAWAL_HINT, WITHDRAWAL_SHEET),
+                        (PROMOTION_HINT, PROMOTION_SHEET)):
+        found = tables.get(hint)
+        if not found:
+            continue
+        # 규모 열이 하나뿐인 파일(한쪽만 떼어 온 것)이면 그것을 쓴다.
+        rows = found.get(chosen) or next(iter(found.values()))
+        state["grids"][sheet]["rows"] = spread(rows)
+
+    mortality = tables.get(MORTALITY_HINT)
+    if mortality:
+        male = dict(mortality.get("남자", []))
+        female = dict(mortality.get("여자", []))
+        state["grids"][MORTALITY_SHEET]["rows"] = [
+            [f"{age:g}", f"{male.get(age, 0.0):.6f}", f"{female.get(age, 0.0):.6f}"]
+            for age in sorted(set(male) | set(female))
+        ]
+    state["size"] = chosen
+    return state
+
+
+def looks_like_raw_table(path: str | Path) -> bool:
+    """표준률 원표 서식인지. 기초율 시트가 하나도 없을 때만 참이다."""
+    from .workbook import open_workbook
+
+    wb = open_workbook(path)
+    try:
+        names = set(wb.sheetnames)
+    finally:
+        wb.close()
+    if any(spec["sheet"] in names for spec in FORM_SHEETS):
+        return False
+    return any(hint in name for name in names
+               for hint in ("퇴직률", "승급률", "사망률"))
+
+
+def read_state(path: str | Path, *, size: object = "") -> dict[str, Any]:
     """기초율 워크북을 state 로 되읽는다.
 
     엑셀에서 고친 파일을 화면으로 다시 불러오는 통로이므로, 시트가 빠져 있어도
-    죽지 않고 빈 표로 둔다.
+    죽지 않고 빈 표로 둔다. 고시된 표준률 원표 서식이면 그쪽으로 읽는다.
     """
     from .workbook import open_workbook
+
+    if looks_like_raw_table(path):
+        return raw_table_state(path, size=size)
 
     wb = open_workbook(path)
     try:

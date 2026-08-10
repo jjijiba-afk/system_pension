@@ -185,7 +185,7 @@ class TestReleaseCheckScript:
         """원자료를 다시 실어 나르면 실행 파일 안에 파일명이 남는다."""
         module = self._check()
         (tmp_path / "연금계리산출.exe").write_bytes(
-            b"MZ" + b"\0" * 50 + module.ROSTER_MARK + "재직자.csv".encode("utf-8"))
+            b"MZ" + b"\0" * 50 + module.ROSTER_MARK + "재직자.csv".encode())
         found = module.problems(tmp_path)
         assert len(found) == 1 and "명부 원자료" in found[0]
 

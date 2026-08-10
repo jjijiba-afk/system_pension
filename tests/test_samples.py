@@ -123,7 +123,10 @@ class TestStandardTable:
 
     def test_size_picks_the_column(self) -> None:
         from pension.standard_rates import (
-            SIZE_LARGE, SIZE_SMALL, promotion_table, withdrawal_table,
+            SIZE_LARGE,
+            SIZE_SMALL,
+            promotion_table,
+            withdrawal_table,
         )
 
         assert [[r[0], r[1]] for r in STANDARD_TABLE] == withdrawal_table(SIZE_SMALL)
@@ -134,7 +137,10 @@ class TestStandardTable:
     def test_the_two_sizes_really_differ(self) -> None:
         """한 열을 두 번 넣은 것이 아님을 못 박는다."""
         from pension.standard_rates import (
-            SIZE_LARGE, SIZE_SMALL, promotion_table, withdrawal_table,
+            SIZE_LARGE,
+            SIZE_SMALL,
+            promotion_table,
+            withdrawal_table,
         )
 
         assert withdrawal_table(SIZE_SMALL) != withdrawal_table(SIZE_LARGE)
@@ -142,7 +148,9 @@ class TestStandardTable:
 
     def test_unknown_size_falls_back_to_the_default(self) -> None:
         from pension.standard_rates import (
-            DEFAULT_SIZE, normalize_size, withdrawal_table,
+            DEFAULT_SIZE,
+            normalize_size,
+            withdrawal_table,
         )
 
         assert normalize_size("아무거나") == DEFAULT_SIZE
@@ -384,3 +392,167 @@ class TestYieldCurve:
         assert discount.flat is None            # 곡선이므로 단일 할인율이 아니다
         assert discount.rate(1) == pytest.approx(0.03122)
         assert discount.rate(20) == pytest.approx(0.0526)
+
+
+class TestStandardTableWorkbook:
+    """고시된 표준률 원표를 그 서식 그대로 내고, 그 서식 그대로 읽는다.
+
+    표준률은 몇 해에 한 번 새로 고시되고, 그때 오는 파일이 원표 서식이다 —
+    중도퇴직률·승급률·사망률이 각각 한 시트, 열은 ``No · 연령 · 300인↓ ·
+    300인↑``. 사람이 288개 숫자를 이 프로그램 서식으로 옮겨 적으면 어딘가
+    한 자리는 틀리고, 틀린 자리는 채무 숫자만 보고는 찾을 수 없다.
+    """
+
+    def test_it_writes_the_original_column_shape(self, tmp_path) -> None:
+        import openpyxl
+
+        from pension.samples import write_standard_table
+        from pension.standard_rates import STANDARD_YEAR
+
+        path = write_standard_table(tmp_path / "원표.xlsx")
+        wb = openpyxl.load_workbook(path)
+        assert [name for name in wb.sheetnames] == [
+            f"Sheet_{STANDARD_YEAR}_표준중도퇴직률",
+            f"Sheet_{STANDARD_YEAR}_bu제외_표준승급률",
+            f"Sheet_{STANDARD_YEAR}_표준사망률",
+        ]
+        ws = wb[wb.sheetnames[0]]
+        assert [ws.cell(1, c).value for c in range(1, 5)] == ["No", "연령", "300인↓", "300인↑"]
+        assert ws.cell(2, 1).value == "001"
+        assert ws.cell(2, 2).value == "15"
+
+        mortality = wb[wb.sheetnames[2]]
+        assert [mortality.cell(1, c).value for c in range(1, 5)] == [
+            "No", "연령", "남자", "여자"]
+
+    def test_the_written_values_are_the_built_in_table(self, tmp_path) -> None:
+        from pension.samples import write_standard_table
+        from pension.standard_rates import (
+            STANDARD_TABLE,
+            mortality_table,
+            read_raw_workbook,
+            withdrawal_table,
+        )
+
+        found = read_raw_workbook(write_standard_table(tmp_path / "원표.xlsx"))
+        assert found["퇴직률"]["300인 미만"] == withdrawal_table("300인 미만")
+        assert found["퇴직률"]["300인 이상"] == withdrawal_table("300인 이상")
+        assert len(found["사망률"]["남자"]) == len(STANDARD_TABLE)
+        assert [[age, male] for age, male, _f in mortality_table()] == \
+            found["사망률"]["남자"]
+
+    def test_a_raw_workbook_loads_as_a_screen_state(self, tmp_path) -> None:
+        """등록해서 바로 쓸 수 있어야 한다 — 옮겨 적게 하지 않는 것이 요점이다."""
+        from pension import assumption_form as form
+        from pension.samples import write_standard_table
+
+        path = write_standard_table(tmp_path / "원표.xlsx")
+        assert form.looks_like_raw_table(path)
+
+        small = form.read_state(path, size="300인 미만")
+        large = form.read_state(path, size="300인 이상")
+        assert small["grids"]["퇴직률"]["rows"][0][1] == "0.394440"
+        assert large["grids"]["퇴직률"]["rows"][0][1] == "0.172360"
+        # 사망률은 규모로 갈리지 않는다.
+        assert small["grids"]["사망률"]["rows"] == large["grids"]["사망률"]["rows"]
+
+    def test_one_table_on_its_own_still_reads(self, tmp_path) -> None:
+        """원표는 표마다 파일이 따로 오는 일이 흔하다."""
+        import openpyxl
+
+        from pension import assumption_form as form
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet_202312_표준사망률"
+        ws.append(["No", "연령", "남자", "여자"])
+        ws.append(["001", "20", "0.000050", "0.000030"])
+        ws.append(["002", "21", "0.000050", "0.000030"])
+        path = tmp_path / "사망률만.xlsx"
+        wb.save(path)
+
+        state = form.read_state(path)
+        assert state["grids"]["사망률"]["rows"] == [
+            ["20", "0.000050", "0.000030"], ["21", "0.000050", "0.000030"]]
+        assert state["grids"]["퇴직률"]["rows"] == []
+
+    def test_the_ordinary_workbook_is_not_mistaken_for_a_raw_table(self, tmp_path) -> None:
+        """기초율 파일에도 '퇴직률' 시트가 있다. 그쪽을 원표로 읽으면 안 된다."""
+        from pension import assumption_form as form
+        from pension.samples import write_standard_assumptions
+
+        path = write_standard_assumptions(tmp_path / "기초율.xlsx")
+        assert not form.looks_like_raw_table(path)
+        # 원표로 잘못 읽으면 지급률 규정이 통째로 사라진다 — 원표에는 없는 것이다.
+        assert form.read_state(path)["benefit_rules"]
+
+    def test_a_workbook_with_no_table_says_so(self, tmp_path) -> None:
+        import openpyxl
+        import pytest
+
+        from pension.standard_rates import read_raw_workbook
+
+        wb = openpyxl.Workbook()
+        wb.active.title = "아무것도아님"
+        path = tmp_path / "빈것.xlsx"
+        wb.save(path)
+        with pytest.raises(ValueError, match="표준률 원표"):
+            read_raw_workbook(path)
+
+
+class TestCurveTemplate:
+    """금리표(채권) 등록 양식. **이율 칸은 비워 둔다.**"""
+
+    def test_the_rate_cells_are_empty(self, tmp_path) -> None:
+        """할인율은 결산일의 시장 자료다. 지어낸 값을 넣어 두면 안 된다."""
+        import openpyxl
+
+        from pension.samples import write_curve_template
+
+        path = write_curve_template(tmp_path / "금리표.xlsx")
+        ws = openpyxl.load_workbook(path)["KIS_NET금리"]
+        for row in range(2, 6):
+            for column in range(5, ws.max_column + 1):
+                assert ws.cell(row, column).value is None
+
+    def test_it_has_the_grades_and_tenors_ready(self, tmp_path) -> None:
+        import openpyxl
+
+        from pension.samples import CURVE_TENORS, write_curve_template
+        from pension.yieldcurve import INVESTMENT_GRADES
+
+        path = write_curve_template(tmp_path / "금리표.xlsx")
+        ws = openpyxl.load_workbook(path)["KIS_NET금리"]
+        headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+        assert headers[:4] == ["No", "기준일자", "구분", "등급"]
+        assert tuple(headers[4:]) == CURVE_TENORS
+
+        grades = [ws.cell(r, 4).value for r in range(2, 2 + len(INVESTMENT_GRADES))]
+        assert set(grades) == set(INVESTMENT_GRADES)
+
+    def test_a_filled_template_is_read_back(self, tmp_path) -> None:
+        """채워 넣으면 실제로 읽혀야 양식이라 할 수 있다."""
+        import openpyxl
+
+        from pension.samples import write_curve_template
+        from pension.yieldcurve import pick_curve, read_yield_curves
+
+        path = write_curve_template(tmp_path / "금리표.xlsx")
+        wb = openpyxl.load_workbook(path)
+        ws = wb["KIS_NET금리"]
+        row = next(r for r in range(2, 8) if ws.cell(r, 4).value == "AA0")
+        ws.cell(row, 5, 3.404)        # 3월
+        ws.cell(row, 8, 3.512)        # 1년
+        ws.cell(row, 18, 5.260)       # 20년
+        wb.save(path)
+
+        curve = pick_curve(read_yield_curves(path), "AA0")
+        assert curve is not None
+        assert curve.rate_at(0.25) == pytest.approx(0.03404)
+        assert curve.rate_at(20) == pytest.approx(0.0526)
+
+    def test_it_ships_with_the_sample_pack(self, tmp_path) -> None:
+        from pension.samples import CURVE_TEMPLATE, write_sample_pack
+
+        made = {path.name for path in write_sample_pack(tmp_path)}
+        assert CURVE_TEMPLATE in made

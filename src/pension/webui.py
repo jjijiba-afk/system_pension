@@ -320,9 +320,13 @@ def _preset_state(request: dict) -> dict[str, Any]:
 
 
 def _rates_state(request: dict) -> dict[str, Any]:
-    """등록된 표준률 워크북을 편집 화면 state 로 불러온다."""
+    """등록된 표준률 워크북을 편집 화면 state 로 불러온다.
+
+    고시된 원표 서식(``No · 연령 · 300인↓ · 300인↑``)이면 그대로 읽는다.
+    그때는 규모를 골라야 승급률·중도퇴직률이 정해진다.
+    """
     path = _registered_path(RATES_KIND, text(request.get("name")))
-    return {"state": form.read_state(path)}
+    return {"state": form.read_state(path, size=request.get("size", ""))}
 
 
 # ── 명부 연동 ────────────────────────────────────────────────────

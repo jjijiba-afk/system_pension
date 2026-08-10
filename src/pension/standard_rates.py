@@ -233,3 +233,139 @@ DISCOUNT_RATE: Final[list[list[float]]] = [[1, 0.045]]
 #: 전 기간 2%. 한 줄만 두면 마지막 줄 값이 이후 전 구간에 적용되므로 이것이
 #: 곧 '전 기간 2%' 다. 회사의 임금협상 이력이 있으면 그쪽이 우선한다.
 SALARY_BASE_UP: Final[list[list[float]]] = [[1, 0.020]]
+
+
+# ── 원표 워크북 읽고 쓰기 ─────────────────────────────────────────
+# 표준률은 몇 해에 한 번 새로 고시된다. 그때 오는 파일이 이 모양이다 —
+# 중도퇴직률·승급률·사망률이 각각 한 시트이고, 열은 ``No · 연령 · 300인↓ ·
+# 300인↑`` (사망률만 ``남자 · 여자``) 이며 연령이 110세까지 이어진다.
+#
+# 그 파일을 이 프로그램의 기초율 서식으로 옮겨 적는 것은 사람이 할 일이 아니다.
+# 96행 × 3표 = 288개 숫자를 손으로 옮기면 어딘가 한 자리는 틀리고, 틀린 자리는
+# 채무 숫자만 보고는 찾을 수 없다. 그래서 **원표를 그대로 읽는다.**
+
+WITHDRAWAL_HINT: Final = "퇴직률"
+PROMOTION_HINT: Final = "승급률"
+MORTALITY_HINT: Final = "사망률"
+
+#: 원표 머리글. ``300인↓`` 처럼 화살표로 오는 것이 원본 표기다.
+RAW_SIZE_HEADERS: Final[dict[str, tuple[str, ...]]] = {
+    SIZE_SMALL: ("300인↓", "300인 미만", "300인미만", "300인↓(미만)"),
+    SIZE_LARGE: ("300인↑", "300인 이상", "300인이상", "300인↑(이상)"),
+}
+RAW_SEX_HEADERS: Final[dict[str, tuple[str, ...]]] = {
+    "남자": ("남자", "남", "male"),
+    "여자": ("여자", "여", "female"),
+}
+
+
+def _as_number(value: object) -> float | None:
+    """원표의 값은 ``'0.394440'`` 처럼 **문자열로** 오는 일이 잦다."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    token = str(value or "").strip().replace(",", "")
+    if not token:
+        return None
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def _raw_sheet(workbook, hint: str):
+    for name in workbook.sheetnames:
+        if hint in name:
+            return workbook[name]
+    return None
+
+
+def _raw_columns(sheet, wanted: dict[str, tuple[str, ...]]) -> tuple[int, int, dict[str, int]]:
+    """(머리글 행, 연령 열, {이름: 열}). 머리글을 못 찾으면 연령 열이 0."""
+    from .normalize import text
+
+    for row in range(1, min(sheet.max_row, 12) + 1):
+        labels = {
+            text(sheet.cell(row, col).value).replace(" ", ""): col
+            for col in range(1, sheet.max_column + 1)
+        }
+        age_col = labels.get("연령") or labels.get("나이")
+        if not age_col:
+            continue
+        found = {
+            name: labels[alias.replace(" ", "")]
+            for name, aliases in wanted.items()
+            for alias in aliases
+            if alias.replace(" ", "") in labels
+        }
+        if found:
+            return row, age_col, found
+    return 0, 0, {}
+
+
+def _raw_rows(sheet, wanted: dict[str, tuple[str, ...]]) -> dict[str, list[list[float]]]:
+    header, age_col, columns = _raw_columns(sheet, wanted)
+    if not age_col:
+        return {}
+    tables: dict[str, list[list[float]]] = {name: [] for name in columns}
+    for row in range(header + 1, sheet.max_row + 1):
+        age = _as_number(sheet.cell(row, age_col).value)
+        if age is None:
+            continue
+        for name, col in columns.items():
+            rate = _as_number(sheet.cell(row, col).value)
+            if rate is not None:
+                tables[name].append([age, rate])
+    return {name: rows for name, rows in tables.items() if rows}
+
+
+def read_raw_workbook(path) -> dict[str, dict[str, list[list[float]]]]:
+    """표준률 원표 워크북을 읽는다.
+
+    :returns: ``{"퇴직률": {규모: 행들}, "승급률": {...}, "사망률": {"남자": …}}``.
+        시트가 없으면 그 열쇠 자체가 없다 — 세 표가 파일 셋으로 따로 오는
+        일이 흔해서, 하나만 있어도 읽어야 한다.
+    :raises ValueError: 표준률 원표로 보이는 시트가 하나도 없을 때.
+    """
+    from .workbook import open_workbook
+
+    workbook = open_workbook(path)
+    try:
+        found: dict[str, dict[str, list[list[float]]]] = {}
+        for hint, wanted in ((WITHDRAWAL_HINT, RAW_SIZE_HEADERS),
+                             (PROMOTION_HINT, RAW_SIZE_HEADERS),
+                             (MORTALITY_HINT, RAW_SEX_HEADERS)):
+            sheet = _raw_sheet(workbook, hint)
+            if sheet is None:
+                continue
+            rows = _raw_rows(sheet, wanted)
+            if rows:
+                found[hint] = rows
+    finally:
+        workbook.close()
+
+    if not found:
+        raise ValueError(
+            "표준률 원표를 찾지 못했습니다. 시트 이름에 '중도퇴직률'·'승급률'·"
+            "'사망률' 이 들어 있고, 머리글에 '연령' 과 '300인↓/300인↑'"
+            "(사망률은 '남자/여자')이 있어야 합니다"
+        )
+    return found
+
+
+def raw_rows(size: object = DEFAULT_SIZE) -> dict[str, list[list[str]]]:
+    """내장 표준률을 **원표 서식** 의 줄로. 규모 두 열을 모두 낸다.
+
+    값을 문자열로 내는 것은 원표가 그렇기 때문이다. 소수점 여섯 자리를 그대로
+    보여야 원표와 눈으로 맞대어 볼 수 있다.
+    """
+    del size   # 원표는 두 규모를 한 표에 담는다
+    return {
+        WITHDRAWAL_HINT: [[f"{row[0]:.0f}", f"{row[1]:.6f}", f"{row[2]:.6f}"]
+                          for row in STANDARD_TABLE],
+        PROMOTION_HINT: [[f"{row[0]:.0f}", f"{row[3]:.6f}", f"{row[4]:.6f}"]
+                         for row in STANDARD_TABLE],
+        MORTALITY_HINT: [[f"{row[0]:.0f}", f"{row[5]:.6f}", f"{row[6]:.6f}"]
+                         for row in STANDARD_TABLE],
+    }

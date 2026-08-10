@@ -176,9 +176,9 @@ class TestStablePort:
 
     def test_it_does_not_collide_with_the_intranet_server(self) -> None:
         """`pension web` 은 8035 를 쓴다. 둘을 같이 띄우는 사람이 있다."""
-        from pension.web import serve as web_serve
-
         import inspect
+
+        from pension.web import serve as web_serve
 
         default = inspect.signature(web_serve).parameters["port"].default
         assert default not in localapp.PORT_LADDER

@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 from pathlib import Path
 from typing import Any, Final
 
@@ -65,22 +66,31 @@ from .standard_rates import (
     promotion_table,
     withdrawal_table,
 )
+from .yieldcurve import INVESTMENT_GRADES
 
 __all__ = [
+    "CURVE_TEMPLATE",
+    "CURVE_TENORS",
+    "RAW_SHEETS",
     "ROSTER_DEFAULT",
     "ROSTER_TEMPLATE",
     "STANDARD_ASSUMPTIONS",
+    "STANDARD_TABLE_FILE",
     "TEMPLATE_ASSUMPTIONS",
+    "write_curve_template",
     "write_default_roster",
     "write_roster_template",
     "write_sample_pack",
     "write_standard_assumptions",
+    "write_standard_table",
 ]
 
 ROSTER_TEMPLATE: Final = "명부_양식.xlsx"
 ROSTER_DEFAULT: Final = "명부_기본.xlsx"
 STANDARD_ASSUMPTIONS: Final = "기초율_기본값.xlsx"
 TEMPLATE_ASSUMPTIONS: Final = "기초율_빈양식.xlsx"
+CURVE_TEMPLATE: Final = "금리표_양식.xlsx"
+STANDARD_TABLE_FILE: Final = "표준률_원표.xlsx"
 
 
 
@@ -386,6 +396,129 @@ def write_standard_assumptions(
     return path
 
 
+#: 금리표 양식의 만기 칸. KIS-Net 금리표가 내려 주는 순서 그대로다.
+CURVE_TENORS: Final[tuple[str, ...]] = (
+    "3월", "6월", "9월", "1년", "1년6월", "2년", "2년6월", "3년", "4년", "5년",
+    "7년", "10년", "15년", "20년", "30년", "50년",
+)
+
+
+#: 원표 시트 이름. 원본이 ``Sheet_202312_표준중도퇴직률`` 꼴이라 그 결을 따른다.
+RAW_SHEETS: Final[tuple[tuple[str, str, tuple[str, str]], ...]] = (
+    ("퇴직률", "표준중도퇴직률", ("300인↓", "300인↑")),
+    ("승급률", "bu제외_표준승급률", ("300인↓", "300인↑")),
+    ("사망률", "표준사망률", ("남자", "여자")),
+)
+
+
+def write_standard_table(path: str | Path) -> Path:
+    """표준률을 **원표 서식 그대로** 낸다 — 등록·대조용.
+
+    :func:`write_standard_assumptions` 가 내는 것은 이 프로그램의 기초율 서식이고,
+    이 함수가 내는 것은 고시된 원표와 같은 모양이다. 열이 ``No · 연령 ·
+    300인↓ · 300인↑`` 로 서 있어 받은 원본과 눈으로 맞대어 볼 수 있고, 규모
+    두 열이 한 표에 있어 어느 쪽을 쓸지 나중에 골라도 된다.
+
+    이 파일은 [표준률] 로 등록해 그대로 쓸 수 있다 — 프로그램이 원표 서식을
+    읽는다(:func:`pension.standard_rates.read_raw_workbook`).
+    """
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    from .standard_rates import raw_rows
+
+    path = Path(path)
+    tables = raw_rows()
+    wb = openpyxl.Workbook()
+    head_font = Font(bold=True, color="FFFFFF")
+    head_fill = PatternFill("solid", fgColor="44546A")
+    note_font = Font(italic=True, color="808080")
+
+    for key, title, columns in RAW_SHEETS:
+        ws = wb.create_sheet(f"Sheet_{STANDARD_YEAR}_{title}")
+        for index, label in enumerate(("No", "연령", *columns), start=1):
+            cell = ws.cell(1, index, label)
+            cell.font = head_font
+            cell.fill = head_fill
+            cell.alignment = Alignment(horizontal="center")
+            ws.column_dimensions[cell.column_letter].width = 12
+        for offset, row in enumerate(tables[key]):
+            ws.cell(offset + 2, 1, f"{offset + 1:03d}")
+            for index, value in enumerate(row, start=2):
+                ws.cell(offset + 2, index, value)
+
+        last = len(tables[key]) + 3
+        ws.cell(last, 1, f"· {STANDARD_YEAR} {title}. 값은 원표 표기(소수점 6자리) 그대로입니다.")
+        ws.cell(last, 1).font = note_font
+        ws.cell(last + 1, 1,
+                "· 마지막 줄(70세) 값이 그 이후 전 연령에 적용됩니다 — 표를 계단식으로 "
+                "읽으므로 110세까지 적어 둔 원표와 결과가 같습니다.")
+        ws.cell(last + 1, 1).font = note_font
+        ws.freeze_panes = "C2"
+
+    del wb["Sheet"]
+    wb.save(path)
+    return path
+
+
+def write_curve_template(path: str | Path, *,
+                         base_date: _dt.date | None = None) -> Path:
+    """금리표(채권) 등록 양식을 만든다. **이율 칸은 비워 둔다.**
+
+    할인율은 결산일의 시장 자료다 — 채권평가사가 그날 내려 주는 값이라
+    프로그램이 지어낼 수 있는 성질의 것이 아니고, 지어낸 값으로 확정급여채무를
+    산출하면 그대로 공시 숫자가 틀린다. 그래서 **칸의 모양만** 만들어 준다.
+    받은 금리표에서 해당 등급 줄을 그대로 붙여 넣으면 된다.
+
+    퍼센트(``3.404``)로 넣든 소수(``0.03404``)로 넣든 읽는 쪽이 알아서 본다.
+    """
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    path = Path(path)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "KIS_NET금리"
+
+    headers = ["No", "기준일자", "구분", "등급", *CURVE_TENORS]
+    head_font = Font(bold=True, color="FFFFFF")
+    head_fill = PatternFill("solid", fgColor="44546A")
+    for column, title in enumerate(headers, start=1):
+        cell = ws.cell(1, column, title)
+        cell.font = head_font
+        cell.fill = head_fill
+        cell.alignment = Alignment(horizontal="center")
+        ws.column_dimensions[cell.column_letter].width = max(9, len(str(title)) + 3)
+
+    stamp = base_date or _dt.date.today()
+    for offset, grade in enumerate(INVESTMENT_GRADES + ("국고채",)):
+        row = offset + 2
+        ws.cell(row, 1, offset + 1)
+        ws.cell(row, 2, stamp).number_format = "yyyy-mm-dd"
+        ws.cell(row, 3, "국고채권" if grade == "국고채" else "공모 무보증회사채")
+        ws.cell(row, 4, grade)
+
+    note_row = len(INVESTMENT_GRADES) + 4
+    note_font = Font(italic=True, color="808080")
+    warn = Font(bold=True, color="C00000")
+    ws.cell(note_row, 1, "이 파일을 채우는 법").font = warn
+    for offset, line in enumerate((
+        "· 이율 칸이 비어 있습니다. 채권평가사(KIS채권평가·한국자산평가 등)에서 받은 "
+        "결산일 금리표의 해당 등급 줄을 그대로 옮겨 넣으세요.",
+        "· 프로그램이 값을 채워 두지 않는 이유는, 할인율이 그날의 시장 자료이기 "
+        "때문입니다. 지어낸 값으로 산출하면 공시 숫자가 그대로 틀립니다.",
+        "· 3.404 처럼 퍼센트로 넣어도 되고 0.03404 처럼 소수로 넣어도 됩니다.",
+        "· 쓰지 않는 등급 줄은 지워도 되고 비워 두어도 됩니다 — 빈 줄은 읽지 않습니다.",
+        "· 기준일자를 결산일로 고치세요. 등급은 회사가 정한 회계정책을 따릅니다 "
+        "(국내 실무는 AA- 이상을 우량회사채로 보고, 그중 AA0 를 가장 많이 씁니다).",
+    ), start=1):
+        ws.cell(note_row + offset, 1, line).font = note_font
+
+    ws.freeze_panes = "E2"
+    wb.save(path)
+    return path
+
+
 def write_sample_pack(
     directory: str | Path,
     *,
@@ -405,4 +538,5 @@ def write_sample_pack(
         ),
         write_roster_template(directory / ROSTER_TEMPLATE),
         write_template(directory / TEMPLATE_ASSUMPTIONS, job_groups=job_groups),
+        write_curve_template(directory / CURVE_TEMPLATE),
     ]

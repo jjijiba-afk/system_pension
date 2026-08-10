@@ -1621,8 +1621,8 @@ class AssumptionsEditor(ttk.Frame):
         self.path = Path(path)
         self.status.configure(text=f"불러왔습니다: {Path(path).name}")
 
-    def load_workbook(self, path: Path) -> None:
-        self.apply_state(_read_state(path))
+    def load_workbook(self, path: Path, *, size: object = "") -> None:
+        self.apply_state(_read_state(path, size=size))
 
     def apply_state(self, state: dict[str, Any]) -> None:
         """state 한 벌을 화면 전체에 앉힌다. 파일에서 읽든 화면에서 만들든 같다."""
