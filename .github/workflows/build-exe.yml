@@ -24,10 +24,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      # PC 편집기(tkinter) 시험은 화면이 있어야 돈다. 없으면 조용히 건너뛰므로
-      # 가상 화면을 붙여 리눅스에서도 실제로 창을 띄워 확인한다.
+      # 본 화면 시험은 tkinter 와 화면이 있어야 돈다. 둘 중 하나라도 없으면
+      # 조용히 건너뛰는데, 그러면 PC 화면 전체가 시험되지 않은 채로 지나간다.
+      # 그래서 가상 화면을 붙이고, tkinter 가 없으면 여기서 멈추게 한다.
       - name: 가상 화면
         run: sudo apt-get install -y --no-install-recommends xvfb
+      - name: tkinter 확인
+        run: python -c "import tkinter; print(tkinter.TkVersion)"
       - name: pytest
         run: xvfb-run -a python -m pytest -q
 

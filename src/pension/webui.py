@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import re
 import shutil
 import tempfile
 import zipfile
@@ -25,7 +24,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import assumption_form as form
-from . import clients
+from . import clients, runs
 from .actuarial import FRACTION_MODES, SERVICE_BASES
 from .assumptions import (
     ATTRIBUTIONS,
@@ -583,96 +582,34 @@ def _run(request: dict) -> dict[str, Any]:
 # 이름을 지어도 단체가 갈라져 있어 헷갈리지 않고, 전기 산출 목록에 다른 단체가
 # 섞이지 않는다.
 
-_RUN_ROSTER_SUFFIXES = (".xlsx", ".xlsm", ".xls")
-
-
 def _runs_dir(request: dict | None = None) -> Path:
     """산출을 넣을 폴더 — 요청이 가리키는 단체, 없으면 지금 고른 단체."""
     return clients.folder((request or {}).get("client", ""))
 
 
-def _safe_run_name(name: str) -> str:
-    """산출명을 폴더 이름으로. 경로 문자만 걷어내고 나머지는 그대로 둔다."""
-    cleaned = re.sub(r'[\\/:*?"<>|]', " ", text(name)).strip()
-    if not cleaned:
-        raise ValueError("산출명을 입력하세요 (예: 2412 1번단체)")
-    return cleaned
-
-
-def _run_meta(folder: Path) -> dict[str, Any] | None:
-    try:
-        return json.loads((folder / "meta.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-
-
 def _saved_roster(folder: Path) -> Path | None:
-    for suffix in _RUN_ROSTER_SUFFIXES:
-        candidate = folder / f"명부{suffix}"
-        if candidate.exists():
-            return candidate
-    return None
+    return runs.roster_of(folder)
 
 
 def _run_save(request: dict) -> dict[str, Any]:
     """방금 마친 산출을 이름 붙여 보관한다. 같은 이름이 있으면 덮어쓴다."""
-    name = _safe_run_name(request.get("name", ""))
-    roster = Path(request["roster"])
-    assumptions = Path(request["assumptions"])
-    if not roster.exists() or not assumptions.exists():
-        raise ValueError("저장할 명부·기초율이 없습니다. 먼저 산출을 실행하세요")
-
-    folder = _runs_dir(request) / name
-    if folder.exists():
-        shutil.rmtree(folder)
-    folder.mkdir(parents=True)
-
-    shutil.copy2(roster, folder / f"명부{roster.suffix.lower()}")
-    shutil.copy2(assumptions, folder / "기초율.xlsx")
     work = Path(request.get("work", "/work"))
-    for result_name in ("산출결과.xlsx", "개인별결과.xlsx"):
-        source = work / result_name
-        if source.exists():
-            shutil.copy2(source, folder / result_name)
-
-    meta = {
-        "name": name,
-        "saved": text(request.get("saved"))
-                 or _dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "roster_name": text(request.get("roster_name")) or roster.name,
-        "report": request.get("report") or {},
-        "options": request.get("options") or {},
-    }
-    (folder / "meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
+    runs.save(
+        request.get("name", ""),
+        Path(request["roster"]), Path(request["assumptions"]),
+        results={name: work / name for name in ("산출결과.xlsx", "개인별결과.xlsx")},
+        report=request.get("report") or {},
+        options=request.get("options") or {},
+        roster_name=text(request.get("roster_name")),
+        saved=text(request.get("saved")),
+        client=(request or {}).get("client", ""),
     )
     return _run_list(request)
 
 
 def run_summaries(client: str = "") -> list[dict[str, Any]]:
-    """한 단체의 산출 목록. 최근 저장한 것이 앞에 온다.
-
-    :mod:`pension.clients` 가 단체별 건수를 셀 때도 이 함수를 쓴다.
-    """
-    runs = []
-    for folder in clients.folder(client).iterdir():
-        if not folder.is_dir():
-            continue
-        meta = _run_meta(folder)
-        if meta is None:
-            continue
-        summary = dict(meta.get("report", {}).get("summary", []))
-        runs.append({
-            "name": meta.get("name", folder.name),
-            "saved": meta.get("saved", ""),
-            "roster_name": meta.get("roster_name", ""),
-            "base_date": summary.get("산출기준일", ""),
-            "headcount": summary.get("산출대상 인원", ""),
-            "dbo": summary.get("확정급여채무 (DBO)", ""),
-            "has_results": (folder / "산출결과.xlsx").exists(),
-        })
-    runs.sort(key=lambda r: r["saved"], reverse=True)
-    return runs
+    """한 단체의 산출 목록. :mod:`pension.clients` 가 건수를 셀 때도 이것을 쓴다."""
+    return runs.summaries(client)
 
 
 def _run_list(request: dict) -> dict[str, Any]:
@@ -681,11 +618,11 @@ def _run_list(request: dict) -> dict[str, Any]:
 
 
 def _run_folder(request: dict) -> Path:
-    name = _safe_run_name(request.get("name", ""))
-    folder = _runs_dir(request) / name
-    if not folder.is_dir() or _run_meta(folder) is None:
-        raise ValueError(f"저장된 산출 '{name}' 이(가) 없습니다")
-    return folder
+    return runs.folder_of(request.get("name", ""), (request or {}).get("client", ""))
+
+
+def _run_meta(folder: Path) -> dict[str, Any] | None:
+    return runs.read_meta(folder)
 
 
 def _run_restore(request: dict) -> dict[str, Any]:
@@ -740,16 +677,7 @@ def _prior_check(request: dict) -> dict[str, Any]:
 
 def _read_roster_only(path: Path):
     """명부만 읽는다. 검증은 하지 않는다 — 여기서는 두 명부를 맞대어 볼 뿐이다."""
-    from .config import read_config
-    from .errors import IssueLog
-    from .readers import read_roster
-    from .workbook import open_workbook
-
-    book = open_workbook(path)
-    try:
-        return read_roster(book, read_config(book), IssueLog())
-    finally:
-        book.close()
+    return runs.read_roster_only(path)
 
 
 def _run_results(request: dict) -> dict[str, Any]:
@@ -969,38 +897,13 @@ def _gen_case_register(request: dict) -> dict[str, Any]:
     return {"registered": made, **_library_list({})}
 
 
-def _as_number(token: object) -> float:
-    """'20,143,311,276 원' · '4.170% (수익률곡선기법…)' 처럼 서식이 붙은 값에서 숫자만."""
-    match = re.search(r"-?[\d,]+(?:\.\d+)?", str(token))
-    if match is None:
-        return 0.0
-    value = float(match.group().replace(",", ""))
-    return value / 100.0 if "%" in str(token) else value
-
-
 def _run_prior(request: dict) -> dict[str, Any]:
-    """저장된 산출을 **전기** 로 끌어온다 — 증감분석의 출발점.
-
-    저장할 때 남긴 원래 숫자를 쓰고, 그 이전 판으로 저장돼 숫자가 없으면
-    화면 요약 문자열에서 되짚는다. 전기 기초율 경로도 함께 주므로 경험조정과
-    가정변경효과를 나눠 계산할 수 있다.
-    """
-    folder = _run_folder(request)
-    meta = _run_meta(folder) or {}
-    report = meta.get("report", {})
-    values = report.get("values") or {}
-    if not values:
-        summary = dict(report.get("summary", []))
-        values = {
-            "base_date": summary.get("산출기준일", ""),
-            "dbo": _as_number(summary.get("확정급여채무 (DBO)", 0)),
-            "service_cost": _as_number(summary.get("당기근무원가", 0)),
-            "discount_rate": _as_number(summary.get("적용 할인율", 0)),
-        }
+    """저장된 산출을 **전기** 로 끌어온다 — 증감분석의 출발점."""
+    link = runs.prior_link(request.get("name", ""), (request or {}).get("client", ""))
     return {
-        "name": meta.get("name", folder.name),
-        "values": values,
-        "assumptions": str(folder / "기초율.xlsx"),
+        "name": link["name"],
+        "values": link["values"],
+        "assumptions": str(link["assumptions"] or ""),
     }
 
 

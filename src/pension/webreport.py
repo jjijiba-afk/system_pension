@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import html
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
-__all__ = ["render_html", "maturity_buckets", "REPORT_KINDS"]
+__all__ = ["REPORT_KINDS", "maturity_buckets", "render_html"]
 
 REPORT_KINDS = ("severance", "longterm")
 

@@ -166,7 +166,10 @@ src/pension/
   rollforward.py   증감분석·보험수리적손익 분해
   pipeline.py      전 과정 실행
   report.py        엑셀 리포트
-  gui.py / cli.py  사용자 인터페이스
+  runs.py          저장된 산출 내역 (PC·웹앱 공용)
+  desk/            PC 본 화면 — 산출·분석·보고서·조회·내역·자료실 탭
+  webui.py / web.py  아이패드 화면(브라우저에서 도는 같은 엔진)
+  cli.py           명령행
 ```
 
 ---

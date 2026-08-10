@@ -29,9 +29,10 @@ def editor():
     from pension.editor import AssumptionsEditor
 
     window = AssumptionsEditor(root, job_groups=["정규직", "임원"])
-    window.withdraw()
+    assert window.window is not None, "단독으로 부르면 제 창을 가져야 한다"
+    window.window.withdraw()
     yield window
-    window.destroy()
+    window.window.destroy()
     root.destroy()
 
 
