@@ -32,8 +32,9 @@ analysis = Analysis(
     ["src/pension/__main__.py"],
     pathex=["src"],
     binaries=[],
-    # 기본 명부의 원자료. 없으면 `samples` 명령이 실패한다.
-    datas=[("src/pension/data", "pension/data")],
+    # 실을 자료가 없다. 기본 명부는 난수로 만들므로 원자료 파일이 필요 없고,
+    # **실제 개인정보를 실행 파일에 넣지 않는다** 는 뜻이기도 하다.
+    datas=[],
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],
@@ -43,6 +44,9 @@ analysis = Analysis(
         "PIL", "pytest", "setuptools", "pip",
     ],
     noarchive=False,
+    # 독스트링과 주석을 뺀 바이트코드로 묶는다. 실행 파일을 풀어 보아도
+    # 설계 메모가 그대로 읽히지 않는다.
+    optimize=2,
 )
 
 pyz = PYZ(analysis.pure)

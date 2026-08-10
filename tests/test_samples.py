@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pension.samples import (
@@ -170,10 +172,14 @@ class TestStandardTable:
 
 
 class TestDefaultRoster:
-    """기본 명부는 실제 평가 사례의 명부를 그대로 옮긴 것이다.
+    """기본 명부는 **난수로 만든 가상 명부** 다.
 
-    작성 예시 두 줄짜리 양식으로는 DC 혼재·근속 1년 미만 퇴직자·임원의 직군
-    표기 같은 실제 형태를 볼 수 없다.
+    전에는 실제 평가 사례의 명부를 그대로 넣었다. 성명은 없었지만 생년월일·
+    입사일·30일 평균임금이 사람마다 한 줄씩이라, 같은 회사 안에서는 특정될 수
+    있는 자료였다 — 프로그램을 남에게 건네면 그 자료도 같이 건네진다.
+
+    난수로 바꾸되 **형태는 지킨다.** 작성 예시 두 줄짜리 양식으로는 DC 혼재·
+    근속 1년 미만 퇴직자·임원의 직군 표기 같은 것을 볼 수 없다.
     """
 
     def _roster(self, pack):
@@ -209,8 +215,8 @@ class TestDefaultRoster:
         # 근속 1년 미만 퇴직자 — 법정 지급 대상이 아니라 금액이 비어 있다.
         assert any(0 < m.service_years() < 1.0 for m in roster.retired)
 
-    def test_calculates(self, pack, tmp_path) -> None:
-        """원본 명부이므로 검증 오류가 남아 있다. 그래도 산출은 끝까지 돌아야 한다."""
+    def test_calculates_without_forcing(self, pack, tmp_path) -> None:
+        """처음 돌려 보는 명부다. [강행] 을 켜야 도는 자료면 첫인상이 나쁘다."""
         from pension.pipeline import RunOptions, run_valuation
         from pension.samples import ROSTER_DEFAULT
 
@@ -218,21 +224,48 @@ class TestDefaultRoster:
             roster_path=pack / ROSTER_DEFAULT,
             assumptions_path=pack / STANDARD_ASSUMPTIONS,
             output_path=tmp_path / "결과.xlsx",
-            allow_errors=True,
         ))
+        assert not run.issues.errors
         assert run.valuation.dbo > 0
+        # DC 가입자가 빠지므로 산출대상이 재직자보다 적어야 한다.
         assert 0 < run.valuation.headcount < len(run.roster.active)
 
-    def test_validation_report_has_something_to_show(self, pack) -> None:
-        """실제 명부라 제도구분 누락 등이 그대로 있다. 검증 화면을 보여 주기에 좋다."""
-        from pension.pipeline import load_inputs
+    def test_the_same_seed_gives_the_same_roster(self, tmp_path) -> None:
+        """받는 사람마다 다른 명부가 나오면 '같은 값이 나오나' 를 못 맞춰 본다."""
+        from pension.samples import write_default_roster
+
+        one = write_default_roster(tmp_path / "가.xlsx").read_bytes()
+        two = write_default_roster(tmp_path / "나.xlsx").read_bytes()
+        assert one == two
+
+
+class TestNoPersonalDataShips:
+    """배포물 어디에도 실제 개인정보가 없어야 한다.
+
+    프로그램을 동료에게 건네는 순간 같이 들어 있는 자료도 건네진다. 웹앱 쪽은
+    빌드에서 걸러 내고 있었지만, 파이썬 꾸러미와 EXE 에는 그 방어가 없어
+    **실제 명부가 그대로 실려 나갔다.**
+    """
+
+    def test_the_package_carries_no_data_files(self) -> None:
+        import pension
+
+        data = Path(pension.__file__).parent / "data"
+        assert not data.exists(), f"꾸러미에 자료 파일이 남아 있다: {list(data.iterdir())}"
+
+    def test_the_exe_spec_bundles_nothing(self) -> None:
+        """PyInstaller 가 실어 나르는 자료가 없어야 한다."""
+        spec = (Path(__file__).resolve().parent.parent / "pension.spec").read_text(
+            encoding="utf-8")
+        assert "datas=[]" in spec
+
+    def test_the_default_roster_is_generated_not_stored(self, pack) -> None:
+        """씨앗에서 만들어 낸 것이라 파일로 들고 다닐 원자료가 없다."""
+        from pension.rostergen import DEFAULT_CASE
         from pension.samples import ROSTER_DEFAULT
 
-        _cfg, _roster, _a, log, _g = load_inputs(
-            pack / ROSTER_DEFAULT, pack / STANDARD_ASSUMPTIONS
-        )
-        assert log.has_errors()
-        assert log.warnings
+        assert (pack / ROSTER_DEFAULT).is_file()
+        assert DEFAULT_CASE.active == 275 and DEFAULT_CASE.retired == 247
 
 
 class TestSingleDiscountRate:

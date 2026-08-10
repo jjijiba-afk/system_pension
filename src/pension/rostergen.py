@@ -41,7 +41,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-__all__ = ["CASES", "CaseSpec", "write_case_roster", "write_case_rosters"]
+__all__ = [
+    "CASES", "DEFAULT_CASE", "CaseSpec", "write_case_roster", "write_case_rosters",
+]
 
 BASE_DATE: Final = _dt.date(2025, 12, 31)
 """기본 산출기준일. 생성 함수에 ``base_date`` 를 주면 그 날짜로 만든다."""
@@ -148,6 +150,37 @@ CASES: Final[tuple[CaseSpec, ...]] = (
         },
     ),
 )
+
+
+DEFAULT_CASE: Final = CaseSpec(
+    key="기본",
+    title="명부_기본",
+    summary="처음 한 번 돌려 보는 기본 명부입니다. 실제 결산에서 마주치는 "
+            "형태를 담되 자료는 옳으므로 강행 없이 산출됩니다.",
+    active=275, retired=247,
+    # 기초율_기본값.xlsx 의 지급규정과 같은 이름이어야 짝이 맞는다.
+    groups=(("정규직", 0.82), ("계약직", 0.12), ("임원", 0.06)),
+    notes=(
+        "· 재직 275명 / 퇴직 247명. 난수로 만든 가상 명부이며 실존 인물이 아닙니다.",
+        "· DC 가입자가 섞여 있어 확정급여채무 산출대상에서 빠집니다.",
+        "· 임원인데 직군 칸이 '정규직' 인 사람이 있습니다 — 직군만으로는 갈라낼 수 "
+        "없어 임직원구분까지 봅니다.",
+        "· 중간정산자는 정산일부터 근속을 다시 셉니다.",
+    ),
+    flags={
+        "dc_share": 0.10, "settlement_share": 0.07, "longterm_share": 0.45,
+        "exec_in_regular_share": 0.04,
+    },
+)
+"""배포본에 같이 넣는 기본 명부.
+
+전에는 **실제 평가 사례의 명부를 그대로** 넣었다. 성명은 없었지만 생년월일·
+입사일·30일 평균임금이 사람마다 한 줄씩이라, 같은 회사 안에서는 특정될 수 있는
+자료였다. 프로그램을 남에게 건네는 순간 그 자료도 같이 건네진다.
+
+그래서 같은 성격을 **난수로** 만든다. 처음 한 번 돌려 보는 것이 목적이므로
+실제 값일 필요가 전혀 없고, 형태만 같으면 된다.
+"""
 
 
 # ── 사람 만들기 ──────────────────────────────────────────────────
@@ -279,6 +312,17 @@ def _make_active(
 
     if rng.random() < flags.get("multiple_share", 0):
         row["payout_multiple"] = rng.choice((1.5, 2.0, 2.5))
+
+    # 임원인데 직군 칸에는 '정규직' 이라고 적혀 오는 명부가 있다. 직군만으로는
+    # 임원을 갈라낼 수 없어 :meth:`CalculationConfig.find_job_group` 이 임직원
+    # 구분까지 보는 것인데, 시험 자료에 그 형태가 없으면 그 길이 한 번도 밟히지
+    # 않는다.
+    #
+    # 비중을 **먼저** 본다. 뒤에 두면 이 사례에 없는 항목인데도 ``rng.random()``
+    # 이 불려 난수 흐름이 한 칸씩 밀리고, 다른 사례의 명부가 통째로 달라진다.
+    exec_in_regular = flags.get("exec_in_regular_share", 0)
+    if exec_in_regular and not executive and age >= 50 and rng.random() < exec_in_regular:
+        row["employee_type"] = _TYPE_EXEC
 
     return row
 

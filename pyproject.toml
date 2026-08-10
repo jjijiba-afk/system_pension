@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pension-actuarial"
 version = "1.0.0"
-description = "K-IFRS 1019 확정급여채무 산출 시스템 (엑셀 VBA 명부 매크로 이식 + PUC 계리 엔진)"
-readme = "README.md"
+description = "K-IFRS 1019 확정급여채무 산출 시스템"
 requires-python = ">=3.10"
 dependencies = ["openpyxl>=3.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-build = ["pyinstaller>=6.3"]
+build = ["pyinstaller>=6.11"]
 
 [project.scripts]
 pension = "pension.cli:main"
@@ -23,9 +22,8 @@ pension-gui = "pension.gui:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# 기본 명부의 원자료 CSV. 휠·설치본에 함께 들어가야 `pension samples` 가 돈다.
-[tool.setuptools.package-data]
-pension = ["data/*.csv"]
+# 실을 자료 파일이 없다. 기본 명부는 난수로 만들므로, 배포물 어디에도
+# 실제 개인정보가 담기지 않는다.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

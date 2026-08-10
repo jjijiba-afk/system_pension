@@ -66,7 +66,10 @@ jobs:
 
           Move-Item dist/연금계리산출.exe "$pack/"
           Move-Item dist/pension-cli.exe "$pack/"
-          Copy-Item docs/*.md "$pack/설명서/"
+          # 담당자용 문서만 넣는다. 개발 메모(vba-mapping)는 원본 매크로의
+          # 파일명과 구조가 적힌 것이라 배포물에 실을 것이 아니다.
+          Copy-Item docs/사용설명서.md, docs/계리방법론.md, `
+                    docs/지급률규정-작성법.md "$pack/설명서/"
 
           # 방금 만든 EXE 로 기본 파일을 뽑는다. 빌드된 실행 파일이 실제로
           # 도는지까지 한 번에 확인된다.
@@ -79,15 +82,37 @@ jobs:
           }
           & "$pack/pension-cli.exe" samples "$pack/기본자료"
 
-          # 기본 파일만으로 산출이 끝까지 도는지 확인한다. 기본 명부는 실제
-          # 사례라 검증 오류가 남아 있으므로 --force 로 돌린다.
+          # 기본 파일만으로 산출이 끝까지 도는지 확인한다. 기본 명부는 난수로
+          # 만든 것이라 검증 오류가 없어야 하므로 --force 없이 돌린다.
           & "$pack/pension-cli.exe" calc `
               "$pack/기본자료/명부_기본.xlsx" `
               "$pack/기본자료/기초율_기본값.xlsx" `
-              -o "$env:RUNNER_TEMP/연습산출.xlsx" --force
+              -o "$env:RUNNER_TEMP/연습산출.xlsx"
 
           Compress-Archive -Path "$pack/*" -DestinationPath dist/연금계리산출.zip -Force
           Get-ChildItem -Recurse $pack | Select-Object FullName, Length
+
+      # 프로그램을 남에게 건네면 같이 들어 있는 자료도 건네진다. 웹앱 쪽은
+      # 원래 걸러 내고 있었는데 윈도우 꾸러미에는 그 방어가 없어, 실제 명부가
+      # 그대로 실려 나간 적이 있다. 이제 양쪽 다 여기서 막는다.
+      - name: 개인정보 미포함 확인
+        shell: pwsh
+        run: |
+          $pack = "dist/연금계리산출"
+          $csv = Get-ChildItem -Recurse -Filter *.csv $pack
+          if ($csv) { throw "꾸러미에 CSV 가 실렸다: $($csv.FullName -join ', ')" }
+
+          # 난수 명부는 씨앗에서 만들어 낸다. 원자료가 실행 파일 안에 있으면
+          # 실제 명부를 되살릴 수 있다는 뜻이다.
+          python - <<'CHECK'
+          import pathlib, sys
+          for exe in pathlib.Path("dist/연금계리산출").glob("*.exe"):
+              blob = exe.read_bytes()
+              for mark in (b"\xea\xb8\xb0\xeb\xb3\xb8\xeb\xaa\x85\xeb\xb6\x80_",):
+                  if mark in blob:
+                      sys.exit(f"{exe.name} 안에 기본명부 원자료가 남아 있다")
+          print("확인: 실행 파일에 명부 원자료 없음")
+          CHECK
 
       - name: 아티팩트 업로드
         uses: actions/upload-artifact@v4

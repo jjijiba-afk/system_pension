@@ -84,7 +84,7 @@ def _build_wheels(target: Path) -> list[str]:
          "--no-deps", "-d", str(target), "-q"],
         check=True,
     )
-    _strip_personal_data(next(target.glob("pension_actuarial-*.whl")))
+    _strip_engine_source(next(target.glob("pension_actuarial-*.whl")))
 
     names = sorted(p.name for p in target.glob("*.whl"))
     impure = [n for n in names if not n.endswith(("py3-none-any.whl", "py2.py3-none-any.whl"))]
@@ -93,22 +93,48 @@ def _build_wheels(target: Path) -> list[str]:
     return names
 
 
-def _strip_personal_data(wheel: Path) -> None:
-    """엔진 휠에서 기본 명부 CSV 를 뺀다.
+def _strip_engine_source(wheel: Path) -> None:
+    """엔진 휠에서 **읽을거리** 를 걷어낸다 — 자료 파일과 독스트링·주석.
 
-    기본 명부는 실제 평가 사례라 생년월일·임금이 들어 있다. PC 배포판에는
-    담당자용 예제로 들어가지만, **웹에 호스팅되는 앱** 에 실으면 주소를 아는
-    누구나 내려받을 수 있게 된다. 웹앱은 사용자가 자기 명부를 올려 쓰는
-    물건이라 예제 명부가 필요하지도 않다.
+    이 휠은 웹앱과 함께 그대로 배포된다. 브라우저가 파이썬을 실행해야 하므로
+    소스를 빼고 보낼 수는 없는데, 압축을 풀면 누구나 파일을 열어 볼 수 있다.
+    그 안에 이 시스템이 무엇을 옮긴 것인지, 원본 시트가 어떻게 생겼는지 적은
+    설계 메모가 통째로 들어 있었다.
+
+    코드는 그대로 두고 **주석과 독스트링만** 없앤다. 구문 트리를 다시 찍어
+    내므로 동작은 한 글자도 달라지지 않고, 주석은 애초에 트리에 없다.
     """
+    import ast
     import zipfile
+
+    def is_text(statement: ast.stmt) -> bool:
+        """그 줄이 글만 적어 둔 문장인지 — 독스트링과 속성 설명."""
+        return (isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Constant)
+                and isinstance(statement.value.value, str))
+
+    def strip(source: str) -> str:
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            body = getattr(node, "body", None)
+            if body is None or not isinstance(body, list):
+                continue
+            # 값에 붙여 쓴 설명(``SERVICE_DAILY = "일할"`` 다음 줄의 문자열)도
+            # 글이다. 파이썬이 실행할 때 버리는 문장이라 빼도 동작이 같다.
+            kept = [item for item in body if not is_text(item)]
+            node.body = kept or [ast.Pass()]
+        return ast.unparse(ast.fix_missing_locations(tree))
 
     kept = []
     with zipfile.ZipFile(wheel) as archive:
         for info in archive.infolist():
-            if "/data/" in info.filename and info.filename.endswith(".csv"):
+            name = info.filename
+            if name.endswith((".csv", ".txt", ".md")) and "dist-info" not in name:
                 continue
-            kept.append((info, archive.read(info)))
+            payload = archive.read(info)
+            if name.endswith(".py"):
+                payload = strip(payload.decode("utf-8")).encode("utf-8")
+            kept.append((info, payload))
     with zipfile.ZipFile(wheel, "w", zipfile.ZIP_DEFLATED) as archive:
         for info, payload in kept:
             archive.writestr(info, payload)
