@@ -71,6 +71,12 @@ jobs:
           # 방금 만든 EXE 로 기본 파일을 뽑는다. 빌드된 실행 파일이 실제로
           # 도는지까지 한 번에 확인된다.
           & "$pack/pension-cli.exe" --version
+
+          # [전체 기능 화면] 은 EXE 옆의 '아이패드웹앱' 폴더를 찾는다. 꾸러미
+          # 배치가 어긋나면 사용자가 버튼을 눌러야 알게 되므로 여기서 확인한다.
+          if (-not (Test-Path "$pack/아이패드웹앱/index.html")) {
+            throw "전체 기능 화면 폴더가 빠졌습니다"
+          }
           & "$pack/pension-cli.exe" samples "$pack/기본자료"
 
           # 기본 파일만으로 산출이 끝까지 도는지 확인한다. 기본 명부는 실제

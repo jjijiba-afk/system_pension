@@ -25,6 +25,7 @@ except ImportError as exc:  # pragma: no cover
         "리눅스에서는 python3-tk 패키지를 설치하세요."
     ) from exc
 
+from . import hidpi
 from .assumptions import write_template
 from .errors import PensionDataError
 from .pipeline import PensionRun, PriorPeriod, RunOptions, run_valuation
@@ -48,12 +49,18 @@ class PensionApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{APP_TITLE}  v{APP_VERSION}")
-        self.geometry("900x840")
-        self.minsize(860, 780)
+        # 배율은 창을 만든 직후에 먹인다. 크기·최소크기는 픽셀이라 함께 키워야
+        # 200% 화면에서 절반 크기로 뜨지 않는다.
+        self.scale = hidpi.apply(self)
+        self.geometry(hidpi.scale_geometry(self, "900x840"))
+        self.minsize(hidpi.px(self, 860), hidpi.px(self, 780))
         self.configure(bg=_BG)
 
         self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._app_server: Any = None
+        self._app_url: str = ""
+        """전체 기능 화면의 주소. 한 번 띄운 뒤에는 같은 주소를 다시 연다."""
 
         self.roster_path = tk.StringVar()
         self.assumptions_path = tk.StringVar()
@@ -102,7 +109,7 @@ class PensionApp(tk.Tk):
         )
         style.configure(
             "TProgressbar", troughcolor="#DDE3EE", background="#4472C4",
-            borderwidth=0, thickness=16,
+            borderwidth=0, thickness=hidpi.px(self, 16),
         )
         style.configure("TEntry", padding=3)
 
@@ -171,6 +178,16 @@ class PensionApp(tk.Tk):
         ttk.Button(
             buttons, text="기초율 양식 새로 만들기", command=self._make_template
         ).pack(side="left", padx=(6, 0))
+        ttk.Button(
+            buttons, text="전체 기능 화면 열기", command=self._open_full_app
+        ).pack(side="left", padx=(6, 0))
+        ttk.Label(
+            box,
+            text="※ [전체 기능 화면] 은 분석 그래프 · 계리평가 보고서 · 산출 내역 · "
+                 "단체 관리까지 있는 화면입니다. 이 PC 의 기본 브라우저로 열리고, "
+                 "계산도 브라우저 안에서 돌아 명부가 밖으로 나가지 않습니다.",
+            style="Hint.TLabel", wraplength=hidpi.px(self, 620), justify="left",
+        ).grid(row=7, column=1, sticky="w", padx=(10, 0), pady=(4, 0))
 
     def _build_option_section(self, parent, row: int) -> None:
         box = ttk.Labelframe(parent, text=" 2. 산출 옵션 ", padding=(14, 8, 14, 10))
@@ -296,6 +313,38 @@ class PensionApp(tk.Tk):
         )
         if path:
             self.output_path.set(path)
+
+    def _open_full_app(self) -> None:
+        """전체 기능 화면(웹앱)을 이 PC 브라우저로 연다.
+
+        서버는 한 번만 띄우고 이후로는 같은 주소를 다시 연다. 누를 때마다
+        새로 띄우면 포트가 하나씩 늘고, 브라우저 저장소가 주소(포트)마다
+        따로라 **저장해 둔 산출 내역이 안 보인다.**
+        """
+        from .localapp import MissingAppError, open_in_browser
+
+        if self._app_url:
+            import webbrowser
+
+            webbrowser.open(self._app_url)
+            self._write(f"전체 기능 화면: {self._app_url}\n")
+            return
+
+        try:
+            self._app_server, self._app_url = open_in_browser()
+        except MissingAppError as exc:
+            messagebox.showerror("전체 기능 화면", str(exc), parent=self)
+            return
+        except OSError as exc:
+            messagebox.showerror(
+                "전체 기능 화면",
+                f"로컬 서버를 띄우지 못했습니다.\n\n{exc}", parent=self)
+            return
+
+        self._write(
+            f"전체 기능 화면을 열었습니다: {self._app_url}\n"
+            "  분석 그래프 · 계리평가 보고서 · 산출 내역 · 단체 관리가 모두 있습니다.\n"
+            "  이 창을 닫으면 화면도 닫힙니다.\n", "ok")
 
     def _open_editor(self) -> None:
         """산출 가정 입력 창. 명부를 골라 두었으면 직군을 미리 채운다."""
@@ -641,6 +690,9 @@ def _parse_rate(value: str) -> float:
 
 def main() -> int:
     """GUI 진입점."""
+    # 창을 만들기 **전** 이어야 한다. Tk 가 뜬 뒤에는 윈도우가 이미 '늘려서
+    # 그리기' 로 정해 버려서, 나중에 선언해도 흐린 채로 남는다.
+    hidpi.declare_dpi_aware()
     app = PensionApp()
     app.mainloop()
     return 0

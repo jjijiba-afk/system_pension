@@ -693,3 +693,27 @@ def test_new_disclosures_flow_into_the_dashboard(page, tmp_path) -> None:
         "[...document.querySelectorAll('#page-dash details.section')]"
         ".every((d) => d.open)")
     assert "기준일" in page.inner_text("#dash-print-title")
+
+
+def test_the_pc_local_server_boots_the_engine(browser) -> None:
+    """PC 의 [전체 기능 화면] — 로컬 서버로 낸 웹앱이 실제로 뜨는지.
+
+    ``.wasm`` 의 MIME 이나 폴더 배치가 틀리면 화면만 뜨고 엔진이 죽는다.
+    파일을 그대로 복사한 것이라 조용히 어긋나기 쉬운 대목이다.
+    """
+    import threading
+
+    from pension import localapp
+
+    server = localapp.serve(DIST)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    page = browser.new_page()
+    try:
+        page.goto(f"http://127.0.0.1:{server.server_address[1]}/index.html")
+        # 엔진이 다 뜨면 [산출 실행] 의 잠금이 풀린다.
+        page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+        assert page.locator("#tab-dash").count() == 1
+    finally:
+        page.close()
+        server.shutdown()
+        server.server_close()
