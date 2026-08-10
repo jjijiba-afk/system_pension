@@ -26,8 +26,12 @@ from .assumption_form import (
     APPLY_CHOICES as _APPLY_CHOICES,
 )
 from .assumption_form import (
+    CAUSE_COLUMN_SEP,
     EXIT_CAUSE_HEADERS,
     FORM_SHEETS,
+    cause_split_rules,
+    merge_benefit_causes,
+    split_benefit_by_cause,
 )
 from .assumption_form import (
     ROUNDING_UNITS as _ROUNDING_UNITS,
@@ -81,6 +85,10 @@ class SheetSpec:
     note: str = ""
     key_choices: tuple[str, ...] = ()
     """첫 열 머리글을 바꿀 수 있는 경우의 선택지(연령/근속)."""
+    allow_extra: bool = False
+    """직군 말고 이름 붙인 열을 만들 수 있는 표인지(지급률·장기급여)."""
+    extra_hint: str = ""
+    """그 열을 언제 만드는지. [항목 추가] 를 누를 때 보여 준다."""
 
     @property
     def per_job_group(self) -> bool:
@@ -93,6 +101,8 @@ SPECS: tuple[SheetSpec, ...] = tuple(
         sheet=item["sheet"], tab=item["tab"], key_header=item["key"],
         fixed_headers=tuple(item["fixed"]), note=item["note"],
         key_choices=tuple(item["key_choices"]),
+        allow_extra=bool(item.get("allow_extra")),
+        extra_hint=item.get("extra_hint", ""),
     )
     for item in FORM_SHEETS
 )
@@ -108,8 +118,17 @@ class _Grid(ttk.Frame):
         super().__init__(parent, padding=_PAD)
         self.spec = spec
         self.job_groups = job_groups
+        self.extra: list[str] = []
+        """직군 말고 따로 이름 붙인 열('정규직·정년', '금').
+
+        지급률·장기급여 표는 직군 아닌 열을 가질 수 있다. 이 창이 그 열을
+        들고 있지 못하면, 그렇게 만든 파일을 여기서 열어 저장하는 것만으로
+        열과 값이 통째로 사라진다.
+        """
         self._entries: list[list[ttk.Entry]] = []
         self.key_var = tk.StringVar(value=spec.key_header)
+        self.on_columns_changed: Callable[[], None] | None = None
+        """열이 늘거나 줄면 부르는 것. 지급률은 방식·수식 줄이 따라와야 한다."""
 
         self._build_header()
         self._build_body()
@@ -131,6 +150,10 @@ class _Grid(ttk.Frame):
 
         ttk.Button(bar, text="행 추가", command=self.add_row).pack(side="left")
         ttk.Button(bar, text="빈 행 정리", command=self.compact).pack(side="left", padx=4)
+        if self.spec.allow_extra:
+            ttk.Button(bar, text="항목 추가", command=self.add_column).pack(side="left")
+            ttk.Button(bar, text="항목 삭제", command=self.remove_column).pack(
+                side="left", padx=4)
 
         if self.spec.note:
             ttk.Label(
@@ -161,28 +184,83 @@ class _Grid(ttk.Frame):
 
     # ── 열 ───────────────────────────────────────────────────────
     @property
+    def columns(self) -> list[str]:
+        """첫 열을 뺀 열 이름들. 웹앱의 ``grid_columns()`` 와 순서가 같아야 한다."""
+        if not self.spec.per_job_group:
+            return list(self.spec.fixed_headers)
+        extra = [text(n) for n in self.extra]
+        extra = [n for n in extra if n and n not in self.job_groups]
+        return [*self.job_groups, *dict.fromkeys(extra)]
+
+    @property
     def headers(self) -> list[str]:
-        if self.spec.per_job_group:
-            return [self.key_var.get(), *self.job_groups]
-        return [self.key_var.get(), *self.spec.fixed_headers]
+        return [self.key_var.get(), *self.columns]
 
     def _relabel_key(self) -> None:
         self._header_labels[0].configure(text=self.key_var.get())
 
-    def rebuild_columns(self, job_groups: list[str]) -> None:
-        """직군이 바뀌면 값을 지키면서 열을 다시 만든다."""
+    def rebuild_columns(
+        self, job_groups: list[str], extra: list[str] | None = None
+    ) -> None:
+        """열 구성이 바뀌면 값을 지키면서 다시 만든다.
+
+        값은 **열 이름을 키로** 옮긴다. 자리로 옮기면 열이 하나만 늘어도 그
+        뒤의 배수가 통째로 한 칸씩 밀린다.
+        """
         if not self.spec.per_job_group:
             return
         previous = self.get_rows()
-        old_groups = list(self.job_groups)
+        old = list(self.columns)
         self.job_groups = list(job_groups)
+        if extra is not None:
+            self.extra = [text(n) for n in extra]
 
-        # 직군명을 키로 값을 옮긴다. 이름이 사라진 직군의 값은 버린다.
         remapped: list[list[str]] = []
         for row in previous:
-            by_group = dict(zip(old_groups, row[1:], strict=False))
-            remapped.append([row[0], *[by_group.get(g, "") for g in self.job_groups]])
+            by_name = dict(zip(old, row[1:], strict=False))
+            remapped.append([row[0], *[by_name.get(c, "") for c in self.columns]])
         self.set_rows(remapped)
+
+    def load(self, rows: list[list[str]], extra: list[str] | None = None) -> None:
+        """파일에서 읽은 값을 그대로 앉힌다. 열 구성도 파일 것을 따른다."""
+        if self.spec.per_job_group and extra is not None:
+            self.extra = [text(n) for n in extra]
+        self.set_rows(rows)
+
+    def add_column(self) -> None:
+        """직군이 아닌 이름의 열을 하나 만든다."""
+        name = text(simpledialog.askstring(
+            "항목 추가", self.spec.extra_hint + "\n\n항목 이름", parent=self))
+        if not name:
+            return
+        if name in self.columns:
+            messagebox.showwarning("항목 추가", "이미 있는 이름입니다.", parent=self)
+            return
+        self.rebuild_columns(self.job_groups, [*self.extra, name])
+        self._notify()
+
+    def remove_column(self) -> None:
+        """따로 만든 열을 지운다. 직군 열은 [직군] 줄에서 다룬다."""
+        if not self.extra:
+            messagebox.showinfo("항목 삭제", "따로 만든 항목이 없습니다.", parent=self)
+            return
+        name = text(simpledialog.askstring(
+            "항목 삭제",
+            "지울 항목 이름\n\n" + " · ".join(self.extra) +
+            "\n\n그 열에 적은 값도 함께 사라집니다.",
+            parent=self))
+        if not name:
+            return
+        if name not in self.extra:
+            messagebox.showwarning("항목 삭제", f"'{name}' 은 없는 항목입니다.", parent=self)
+            return
+        self.rebuild_columns(self.job_groups, [n for n in self.extra if n != name])
+        self._notify()
+
+    def _notify(self) -> None:
+        """열이 바뀌었음을 창에 알린다. 방식·수식 줄이 따라와야 한다."""
+        if self.on_columns_changed is not None:
+            self.on_columns_changed()
 
     # ── 행 ───────────────────────────────────────────────────────
     def set_rows(self, rows: list[list[str]]) -> None:
@@ -238,9 +316,15 @@ class _BenefitRuleTab(ttk.Frame):
     드러나면 담당자는 어디를 고쳐야 할지 알기 어렵다.
     """
 
-    def __init__(self, parent, job_groups: list[str]) -> None:
+    def __init__(
+        self, parent, job_groups: list[str],
+        on_split: Callable[[str, bool], None] | None = None,
+    ) -> None:
         super().__init__(parent, padding=_PAD)
         self.job_groups = list(job_groups)
+        self.columns = list(job_groups)
+        self.split: list[str] = []
+        self._on_split = on_split
         self._rows: dict[str, dict[str, Any]] = {}
         self._passthrough: dict[str, dict[str, Any]] = {}
 
@@ -279,22 +363,33 @@ class _BenefitRuleTab(ttk.Frame):
             justify="left", style="Hint.TLabel",
         ).pack(anchor="w", pady=(2, 0))
 
-    def rebuild(self, job_groups: list[str]) -> None:
-        """직군 목록이 바뀌면 행을 다시 만든다. 기존 입력은 이름으로 이어받는다."""
+    def rebuild(
+        self, job_groups: list[str], columns: list[str] | None = None,
+        split: list[str] | None = None,
+    ) -> None:
+        """열 구성이 바뀌면 행을 다시 만든다. 기존 입력은 이름으로 이어받는다.
+
+        :param columns: 지급률 표의 **모든** 열. 직군 아닌 열('정규직·정년',
+            '사망가산')도 방식·수식을 따로 가지므로 여기 줄이 있어야 한다.
+        :param split: 이미 정년·중도·사망으로 갈라 놓은 직군.
+        """
         previous = self.get_values()
         for child in self._body.winfo_children():
             child.destroy()
         self._rows.clear()
         self.job_groups = list(job_groups)
+        self.columns = list(columns) if columns is not None else list(job_groups)
+        if split is not None:
+            self.split = list(split)
 
-        headers = ("규정명(직군)", "방식", "수식", "")
+        headers = ("규정명(직군)", "방식", "수식", "", "사유별 차등")
         for col, title in enumerate(headers):
             ttk.Label(self._body, text=title, style="Col.TLabel").grid(
                 row=0, column=col, sticky="w", padx=2, pady=(0, 4)
             )
         self._body.columnconfigure(2, weight=1)
 
-        for index, group in enumerate(self.job_groups, start=1):
+        for index, group in enumerate(self.columns, start=1):
             saved = previous.get(group, {})
             mode_var = tk.StringVar(value=saved.get("mode", STATUTORY_MODE))
             formula_var = tk.StringVar(value=saved.get("formula", ""))
@@ -317,14 +412,47 @@ class _BenefitRuleTab(ttk.Frame):
                 "mode": mode_var, "formula": formula_var,
                 "entry": entry, "status": status,
             }
+            self._build_split_cell(index, group)
 
             combo.bind("<<ComboboxSelected>>", lambda _e, g=group: self._sync_row(g))
             formula_var.trace_add("write", lambda *_a, g=group: self._validate_row(g))
             self._sync_row(group)
 
         bar = ttk.Frame(self._body)
-        bar.grid(row=len(self.job_groups) + 1, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        bar.grid(row=len(self.columns) + 1, column=0, columnspan=5, sticky="w", pady=(8, 0))
         ttk.Button(bar, text="수식 미리보기", command=self.preview).pack(side="left")
+        ttk.Label(
+            bar,
+            text="  사유별 차등을 켜면 그 직군이 " + " · ".join(EXIT_CAUSES) +
+                 " 세 열로 갈립니다. 비운 열은 원래 규정을 그대로 씁니다.",
+            style="Hint.TLabel",
+        ).pack(side="left")
+
+    def _build_split_cell(self, index: int, group: str) -> None:
+        """그 줄의 '사유별 차등' 칸.
+
+        갈라서 생긴 열 자신에게는 다시 물을 것이 없으므로 꼬리표만 남긴다.
+        """
+        if group not in self.job_groups:
+            label = "↑ 갈라 놓음" if CAUSE_COLUMN_SEP in group else ""
+            ttk.Label(self._body, text=label, style="Hint.TLabel").grid(
+                row=index, column=4, sticky="w", padx=2
+            )
+            return
+
+        var = tk.BooleanVar(value=group in self.split)
+        box = ttk.Checkbutton(
+            self._body, variable=var,
+            command=lambda g=group, v=var: self._toggle_split(g, v),
+        )
+        box.grid(row=index, column=4, sticky="w", padx=2)
+        self._rows[group]["split"] = var
+
+    def _toggle_split(self, group: str, var: tk.BooleanVar) -> None:
+        if self._on_split is None:
+            var.set(group in self.split)
+            return
+        self._on_split(group, var.get())
 
     def _sync_row(self, group: str) -> None:
         """방식에 맞춰 수식 칸을 열고 닫는다."""
@@ -1008,6 +1136,7 @@ class _ExitCauseTab(ttk.Frame):
     def __init__(self, parent, job_groups: list[str]) -> None:
         super().__init__(parent, padding=_PAD)
         self.job_groups = list(job_groups)
+        self.columns = list(job_groups)
         self._rows: list[dict[str, Any]] = []
 
         box = ttk.LabelFrame(self, text="언제 쓰나", padding=_PAD)
@@ -1028,19 +1157,23 @@ class _ExitCauseTab(ttk.Frame):
         self._body.pack(fill="both", expand=True, pady=(8, 0))
         self.rebuild(self.job_groups)
 
-    def rebuild(self, job_groups: list[str]) -> None:
+    def rebuild(self, job_groups: list[str], columns: list[str] | None = None) -> None:
+        """:param columns: 고를 수 있는 지급률 규정. 직군만 주면 '사망가산' 처럼
+        따로 만든 열을 지목할 수가 없다.
+        """
         previous = self.get_values()
         for child in self._body.winfo_children():
             child.destroy()
         self._rows.clear()
         self.job_groups = list(job_groups)
+        self.columns = list(columns) if columns is not None else list(job_groups)
 
         for col, title in enumerate(EXIT_CAUSE_HEADERS):
             ttk.Label(self._body, text=title, style="Col.TLabel").grid(
                 row=0, column=col, sticky="w", padx=3, pady=(0, 6)
             )
 
-        groups = ["", *self.job_groups]
+        groups = ["", *self.columns]
         for index in range(1, self.ROWS + 1):
             saved = previous[index - 1] if index <= len(previous) else [""] * 7
             row = {key: tk.StringVar(value=saved[position]) for position, key in enumerate(
@@ -1337,9 +1470,19 @@ class AssumptionsEditor(tk.Toplevel):
             grid.rebuild_columns(names)
         self._map_tab.rebuild(names)
         self._payout_tab.rebuild(names)
-        self._rule_tab.rebuild(names)
-        self._cause_tab.rebuild(names)
         self._longterm_tab.rebuild(names)
+        self._refresh_benefit_columns()
+
+    def _refresh_benefit_columns(self) -> None:
+        """지급률 표의 열이 바뀌면 그 열을 참조하는 두 탭을 따라 맞춘다.
+
+        방식·수식은 열마다 있고, 퇴직사유는 열 이름을 지목한다. 표만 고치고
+        두 탭을 두면 새 열이 규정 없이 남거나 없는 이름을 가리키게 된다.
+        """
+        columns = self._grids[BENEFIT_SHEET].columns
+        split = cause_split_rules(self.state())
+        self._rule_tab.rebuild(self.job_groups, columns, split)
+        self._cause_tab.rebuild(self.job_groups, columns)
 
     def _load_from_roster(self) -> None:
         """명부의 ``Input`` 시트에서 변환 직군명을 가져온다. 이름 불일치를 막는다."""
@@ -1383,11 +1526,14 @@ class AssumptionsEditor(tk.Toplevel):
             grid = _Grid(book, spec, self.job_groups)
             book.add(grid, text=spec.tab)
             self._grids[spec.sheet] = grid
+        # 지급률 열이 늘면 방식·수식 줄과 퇴직사유 선택지가 따라와야 한다.
+        self._grids[BENEFIT_SHEET].on_columns_changed = self._refresh_benefit_columns
 
         self._payout_tab = _PayoutRuleTab(book, self.job_groups)
         book.add(self._payout_tab, text="지급규정")
 
-        self._rule_tab = _BenefitRuleTab(book, self.job_groups)
+        self._rule_tab = _BenefitRuleTab(book, self.job_groups,
+                                        on_split=self._toggle_cause_split)
         book.add(self._rule_tab, text="지급률 규정")
 
         self._cause_tab = _ExitCauseTab(book, self.job_groups)
@@ -1411,6 +1557,10 @@ class AssumptionsEditor(tk.Toplevel):
 
     def fill_example(self) -> None:
         """빈 화면에서 시작하기 어려우니 흔한 값으로 한 벌 채워 준다."""
+        def wide(sheet: str) -> int:
+            """그 표의 열 수. 따로 만든 열이 있으면 직군 수보다 많다."""
+            return len(self._grids[sheet].columns)
+
         count = len(self.job_groups)
         self._grids[DISCOUNT_SHEET].set_rows([["1", "4.5%"]])
         self._grids[SALARY_SHEET].set_rows([["1", "3.0%"], ["6", "2.5%"]])
@@ -1423,11 +1573,15 @@ class AssumptionsEditor(tk.Toplevel):
         self._grids[MORTALITY_SHEET].set_rows(
             [["20", "0.0004", "0.0002"], ["40", "0.0012", "0.0006"], ["60", "0.006", "0.0025"]]
         )
+        benefit = wide(BENEFIT_SHEET)
         self._grids[BENEFIT_SHEET].set_rows(
-            [["1", *["1.0"] * count], ["10", *["10.0"] * count], ["20", *["20.0"] * count]]
+            [["1", *["1.0"] * benefit], ["10", *["10.0"] * benefit],
+             ["20", *["20.0"] * benefit]]
         )
+        longterm = wide(LONGTERM_SHEET)
         self._grids[LONGTERM_SHEET].set_rows(
-            [["10", *["10"] * count], ["20", *["20"] * count], ["30", *["30"] * count]]
+            [["10", *["10"] * longterm], ["20", *["20"] * longterm],
+             ["30", *["30"] * longterm]]
         )
         self.status.configure(text="예시 값을 채웠습니다. 회사 규정에 맞게 고쳐 주세요.")
 
@@ -1447,8 +1601,10 @@ class AssumptionsEditor(tk.Toplevel):
         self.status.configure(text=f"불러왔습니다: {Path(path).name}")
 
     def load_workbook(self, path: Path) -> None:
-        state = _read_state(path)
+        self.apply_state(_read_state(path))
 
+    def apply_state(self, state: dict[str, Any]) -> None:
+        """state 한 벌을 화면 전체에 앉힌다. 파일에서 읽든 화면에서 만들든 같다."""
         if state["job_groups"]:
             self.job_group_var.set(", ".join(state["job_groups"]))
             self._apply_job_groups()
@@ -1458,14 +1614,41 @@ class AssumptionsEditor(tk.Toplevel):
             item = state["grids"][spec.sheet]
             if spec.key_choices:
                 grid.key_var.set(item["key"])
-            grid.set_rows(item["rows"])
+            grid.load(item["rows"], item.get("extra"))
 
         self._payout_tab.set_values(state["payout"])
         if state["mapping"]:
             self._map_tab.set_rows([tuple(row) for row in state["mapping"]])
         self._longterm_tab.set_values(state["longterm_rules"])
-        self._rule_tab.set_values(state["benefit_rules"])
+        # 퇴직사유를 먼저 앉힌다. 어느 직군이 갈려 있는지는 '표의 열' 과
+        # '퇴직사유 줄' 을 함께 봐야 알 수 있어, 둘 중 하나만 새것이면
+        # 갈라 놓은 것을 못 알아본다.
         self._cause_tab.set_values(state.get("exit_causes", []))
+        self._refresh_benefit_columns()
+        self._rule_tab.set_values(state["benefit_rules"])
+
+    def _toggle_cause_split(self, rule: str, split: bool) -> None:
+        """지급률 열 하나를 정년·중도·사망으로 가르거나 도로 접는다."""
+        if not split and not messagebox.askyesno(
+            "사유별 차등",
+            f"'{rule}' 의 사유별 열 세 개를 지웁니다.\n"
+            "그 열에 적은 배수도 함께 사라집니다. 계속할까요?",
+            parent=self,
+        ):
+            self._refresh_benefit_columns()   # 체크를 되돌린다
+            return
+        try:
+            change = split_benefit_by_cause if split else merge_benefit_causes
+            self.apply_state(change(self.state(), rule))
+        except Exception as exc:
+            messagebox.showerror("사유별 차등", str(exc), parent=self)
+            self._refresh_benefit_columns()
+            return
+        self.status.configure(text=(
+            f"'{rule}' 을(를) {' · '.join(EXIT_CAUSES)} 세 열로 갈랐습니다. "
+            "사유마다 다른 배수만 채우세요 — 비운 열은 원래 규정을 씁니다."
+            if split else f"'{rule}' 의 사유별 열을 접었습니다."
+        ))
 
     def save(self) -> None:
         problems = self._rule_tab.problems()
@@ -1518,6 +1701,7 @@ class AssumptionsEditor(tk.Toplevel):
                 spec.sheet: {
                     "key": self._grids[spec.sheet].key_var.get(),
                     "rows": self._grids[spec.sheet].get_rows(),
+                    "extra": list(self._grids[spec.sheet].extra),
                 }
                 for spec in SPECS
             },
