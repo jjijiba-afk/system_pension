@@ -23,6 +23,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# 이 스크립트는 윈도우 러너에서 돈다. 영문 로캘의 콘솔 코드페이지(cp1252)는
+# 한글을 표현하지 못해, 아래 메시지를 print 하는 순간 UnicodeEncodeError 로
+# 죽는다 — `webapp/build.py` 가 실제로 그렇게 죽었다. 같은 함정이다.
+if sys.platform == "win32":  # pragma: no cover - 리눅스 CI 에서는 확인 못 한다
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 #: 실행 파일 안에서 찾을 흔적. 기본 명부 원자료의 파일명 앞부분이다.
 #: 바이트로 비교한다 — 실행 파일은 텍스트가 아니라 어떤 인코딩으로도 못 읽는다.
 ROSTER_MARK = "기본명부_".encode("utf-8")
