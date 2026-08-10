@@ -166,6 +166,8 @@ def _build_parser() -> argparse.ArgumentParser:
     app.add_argument("--path", type=Path, help="웹앱 폴더를 직접 지정")
     app.add_argument("--no-browser", action="store_true",
                      help="브라우저를 열지 않고 주소만 알려 줍니다")
+    app.add_argument("--check", action="store_true",
+                     help="화면을 띄우지 않고 웹앱이 제자리에 있는지만 확인합니다")
 
     sub.add_parser("gui", help="GUI 실행")
 
@@ -431,7 +433,17 @@ def _cmd_web(args: argparse.Namespace) -> int:
 
 def _cmd_app(args: argparse.Namespace) -> int:
     """전체 기능 화면(웹앱)을 이 PC 브라우저로 연다."""
-    from .localapp import MissingAppError, serve
+    from .localapp import MissingAppError, app_root, serve
+
+    # 빌드가 웹앱을 실행 파일 안에 제대로 묶었는지 확인하는 길. 화면을 띄우면
+    # 사람이 창을 닫아 줘야 끝나므로 자동 확인에 쓸 수 없다.
+    if args.check:
+        try:
+            print(f"확인: 전체 기능 화면이 제자리에 있습니다 — {app_root()}")
+            return 0
+        except MissingAppError as exc:
+            print(str(exc))
+            return 1
 
     try:
         server = serve(args.path, args.port)

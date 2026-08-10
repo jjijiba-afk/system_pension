@@ -202,17 +202,64 @@ def serve(directory: str | Path | None = None, port: int | None = None):
     )
 
 
+#: 앱 창으로 띄울 때 찾아볼 브라우저. ``Program Files`` 아래의 상대 경로다.
+#: 엣지는 윈도우에 늘 깔려 있어 사실상 여기서 걸린다.
+_APP_BROWSERS = (
+    ("Microsoft", "Edge", "Application", "msedge.exe"),
+    ("Google", "Chrome", "Application", "chrome.exe"),
+)
+
+
+def _app_browser() -> str:
+    """주소창 없는 창(``--app``)으로 띄울 수 있는 브라우저 경로. 없으면 빈 문자열."""
+    if sys.platform != "win32":
+        return ""
+    roots = [
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    ]
+    for root in roots:
+        for parts in _APP_BROWSERS:
+            path = Path(root).joinpath(*parts)
+            if path.is_file():
+                return str(path)
+    return ""
+
+
 def open_in_browser(directory: str | Path | None = None,
                     port: int | None = None) -> tuple:
-    """서버를 백그라운드로 띄우고 기본 브라우저로 연다.
+    """서버를 띄우고 화면을 연다.
+
+    가능하면 **주소창·탭이 없는 앱 창** 으로 연다(``--app``). 브라우저 탭으로
+    열리면 즐겨찾기·다른 탭 사이에 섞여 "프로그램" 으로 보이지 않고, 주소창이
+    보이면 그 주소를 남에게 알려 주면 되는 줄 오해하기도 한다.
+
+    앱 창을 못 띄우면 기본 브라우저로 연다. 화면이 아예 안 뜨는 것보다는
+    탭으로라도 뜨는 편이 낫다.
+
+    프로필을 따로 지정하지 않는 것이 중요하다 — 저장해 둔 산출 내역이
+    브라우저 프로필 안에 있어서, 전용 프로필을 만들면 그것이 안 보인다.
 
     :returns: ``(서버, 주소)``. 서버는 데몬 스레드에서 돌고 있으므로,
         부른 쪽이 살아 있는 동안만 열려 있다.
     """
-    import webbrowser
-
     server = serve(directory, port)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+
+    browser = _app_browser()
+    if browser:
+        import subprocess
+
+        try:
+            subprocess.Popen(
+                [browser, f"--app={url}", "--window-size=1280,900"],
+                close_fds=True)
+            return server, url
+        except OSError:
+            pass   # 아래 기본 브라우저로 넘어간다
+
+    import webbrowser
+
     webbrowser.open(url)
     return server, url
