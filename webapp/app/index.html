@@ -52,16 +52,20 @@
 </div>
 <form id="form">
 <fieldset><legend>1. 명부 파일</legend>
-  <div class="lib-line">
-    <span style="font-weight:600">저장된 명부</span>
+  <div class="field">
+    <span class="label">저장된 명부</span>
     <select id="roster-saved"><option value="">(새 파일 올리기)</option></select>
     <button class="small" type="button" id="roster-save">이 파일을 목록에 저장</button>
   </div>
-  <input type="file" id="roster" accept=".xls,.xlsx,.xlsm">
+  <div class="field">
+    <span class="label">명부 파일</span>
+    <input type="file" id="roster" accept=".xls,.xlsx,.xlsm">
+  </div>
   <div class="hint" id="roster-hint">Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서</div>
   <div class="hint" id="general-filled" style="display:none"></div>
 </fieldset>
 <fieldset><legend>2. 기초율(산출가정)</legend>
+  <div class="checks">
   <div class="check"><input type="radio" name="asrc" id="asrc-editor" value="editor">
     <label for="asrc-editor" style="margin:0">산출가정 입력 화면의 내용 사용
       <span class="hint" id="editor-state-hint" style="display:inline">— 아직 입력 없음</span></label></div>
@@ -70,27 +74,32 @@
       <span class="hint" id="saved-asrc-hint" style="display:inline">— [산출 내역] 탭에서 불러오면 열립니다</span></label></div>
   <div class="check"><input type="radio" name="asrc" id="asrc-file" value="file" checked>
     <label for="asrc-file" style="margin:0">기초율 파일 업로드</label></div>
-  <input type="file" id="assumptions" accept=".xlsx,.xlsm">
+  </div>
+  <div class="field">
+    <span class="label">기초율 파일</span>
+    <input type="file" id="assumptions" accept=".xlsx,.xlsm">
+  </div>
   <div class="hint">할인율 · 승급률 · 퇴직률 · 사망률 · 지급률 · 지급규정 시트가 든 워크북</div>
 </fieldset>
-<details class="section" id="sec-dates"><summary>3. 산출 기준일<span class="count"></span></summary>
+<details class="section calc-section" id="sec-dates" open><summary>3. 산출 기준일<span class="count"></span></summary>
 <div class="section-body">
-  <div class="row">
-    <span style="font-weight:600;min-width:92px">산출기준일</span>
+  <div class="field">
+    <span class="label">산출기준일</span>
     <input type="date" id="base_date">
     <button class="small" type="button" id="base-date-clear">명부 값 사용</button>
   </div>
   <div class="hint">비우면 명부 Input 시트의 산출기준일을 씁니다. 여기에 넣으면
   명부를 고치지 않고 기준일만 바꿔 산출합니다(가결산·시산).</div>
-  <div class="row" style="margin-top:10px">
-    <span style="font-weight:600;min-width:92px">산출 시작일</span>
+  <div class="field">
+    <span class="label">산출 시작일</span>
     <input type="date" id="period_start">
   </div>
   <div class="hint">직전 결산일(기초일)입니다. 넣으면 증감분석의 이자원가를 그
   기간으로 환산합니다. 비우면 1년으로 봅니다.</div>
 </div></details>
-<details class="section" id="sec-options"><summary>4. 산출 옵션<span class="count"></span></summary>
+<details class="section calc-section" id="sec-options" open><summary>4. 산출 옵션<span class="count"></span></summary>
 <div class="section-body">
+  <div class="checks">
   <div class="check"><input type="checkbox" id="force">
     <label for="force" style="margin:0">검증 오류가 있어도 산출 강행 (검토용)</label></div>
   <div class="check"><input type="checkbox" id="sensitivity" checked>
@@ -100,62 +109,49 @@
   <div class="check"><input type="checkbox" id="split_remeasurement">
     <label for="split_remeasurement" style="margin:0">재측정요소 가정별 분해
       (사망률·퇴직률·임금상승률·할인율)</label></div>
+  </div>
   <div class="hint">가정을 하나씩 갈아 끼우며 재는 것이라 <b>명부 전체 산출이
   네 번 더</b> 돕니다. 전기 기초율을 연결한 회차에서만 값이 나옵니다.</div>
 </div></details>
-<details class="section" id="sec-prior"><summary>5. 전기 산출 결과 (증감분석용)<span class="count"></span></summary>
+<details class="section calc-section" id="sec-prior" open><summary>5. 전기 산출 결과 (증감분석용)<span class="count"></span></summary>
 <div class="section-body">
-  <div class="lib-line">
-    <span style="font-weight:600">저장된 산출에서</span>
+  <div class="field">
+    <span class="label">저장된 산출에서</span>
     <select id="prior-run"><option value="">(직접 입력)</option></select>
+    <button class="small" type="button" id="prior-check" disabled>전기 명부와 맞대어 보기</button>
   </div>
   <div class="hint" id="prior-hint">지금 고른 단체의 저장된 산출만 뜹니다.
   전기 산출을 고르면 확정급여채무·할인율·근무원가가
   그대로 들어오고, 전기 기초율까지 연결되어 증감분석이 경험조정과 가정변경효과를
   나눠 계산합니다.</div>
-  <div class="lib-line" style="margin-top:8px">
-    <button class="small" type="button" id="prior-check" disabled>전기 명부와 맞대어 보기</button>
-    <span class="hint" id="prior-check-status"></span>
-  </div>
+  <div class="hint" id="prior-check-status"></div>
   <div class="hint">당기 명부만 보면 멀쩡한데 전기와 나란히 놓아야 드러나는 것이
   있습니다 — 같은 사번인데 <b>생년월일·입사일이 바뀐 것</b>, 전기 재직자가
   <b>어디에도 없는 것</b>, 임금이 1000배 뛴 것. 결산이 끝난 뒤에 발견하면 다시
   산출해야 하므로 <b>산출 전에</b> 한 번 보십시오.</div>
   <div id="prior-check-result"></div>
-  <label>전기말 확정급여채무 (원)</label>
-  <input type="text" id="prior_dbo" inputmode="numeric" placeholder="예: 10,000,000,000" style="width:100%">
-  <label>전기말 할인율</label>
-  <input type="text" id="prior_rate" inputmode="decimal" placeholder="예: 4.1%" style="width:100%">
-  <label>과거근무원가 (제도개정 · 원)</label>
-  <input type="text" id="past_service_cost" inputmode="numeric" placeholder="비우면 지급률 변경분을 자동 계산" style="width:100%">
+  <div class="field"><span class="label">전기말 확정급여채무 (원)</span><input type="text" id="prior_dbo" inputmode="numeric" placeholder="예: 10,000,000,000"></div>
+  <div class="field"><span class="label">전기말 할인율</span><input type="text" id="prior_rate" inputmode="decimal" placeholder="예: 4.1%"></div>
+  <div class="field"><span class="label">과거근무원가 (제도개정 · 원)</span><input type="text" id="past_service_cost" inputmode="numeric" placeholder="비우면 지급률 변경분을 자동 계산"></div>
   <div class="hint">전기 기초율을 연결하면 <b>지급률 규정이 바뀐 만큼</b>을 자동으로
   과거근무원가로 떼어 냅니다(당기손익). 정년 연장처럼 지급률 밖의 개정은 여기에
   직접 넣으세요 — 넣으면 자동 계산 대신 이 값을 씁니다.</div>
-  <label>정산으로 소멸한 채무 (원)</label>
-  <input type="text" id="settlement_obligation" inputmode="numeric" placeholder="중간정산·전출자의 전기 채무 합계" style="width:100%">
+  <div class="field"><span class="label">정산으로 소멸한 채무 (원)</span><input type="text" id="settlement_obligation" inputmode="numeric" placeholder="중간정산·전출자의 전기 채무 합계"></div>
   <div class="hint">지급액과의 차이를 정산손익으로 인식합니다(당기손익).
   비우면 인식하지 않습니다.</div>
-  <label>전기말 장기급여채무 (원)</label>
-  <input type="text" id="prior_longterm_dbo" inputmode="numeric" placeholder="넣으면 장기급여 증감표가 만들어집니다" style="width:100%">
+  <div class="field"><span class="label">전기말 장기급여채무 (원)</span><input type="text" id="prior_longterm_dbo" inputmode="numeric" placeholder="넣으면 장기급여 증감표가 만들어집니다"></div>
   <div class="hint">기타장기종업원급여의 재측정요소는 문단 154 에 따라
   <b>전액 당기손익</b>으로 인식합니다.</div>
 </div></details>
-<details class="section" id="sec-assets"><summary>6. 사외적립자산 (신탁 명세서)<span class="count"></span></summary>
+<details class="section calc-section" id="sec-assets" open><summary>6. 사외적립자산 (신탁 명세서)<span class="count"></span></summary>
 <div class="section-body">
-  <label>기초 공정가치 (원)</label>
-  <input type="text" id="asset_opening" inputmode="numeric" placeholder="전기말 잔액" style="width:100%">
-  <label>부담금 납입액 (원)</label>
-  <input type="text" id="asset_contributions" inputmode="numeric" placeholder="당기 중 회사가 넣은 돈" style="width:100%">
-  <label>자산에서 지급한 퇴직급여 (원)</label>
-  <input type="text" id="asset_paid" inputmode="numeric" placeholder="비우면 명부의 사외자산 지급액 사용" style="width:100%">
-  <label>기말 공정가치 (원)</label>
-  <input type="text" id="asset_closing" inputmode="numeric" placeholder="결산일 잔액" style="width:100%">
-  <label>미지급 퇴직급여 (원)</label>
-  <input type="text" id="unpaid_benefits" inputmode="numeric" placeholder="퇴직했으나 결산일까지 미지급한 금액" style="width:100%">
-  <label>차년도 예상 부담금 (원)</label>
-  <input type="text" id="expected_contributions" inputmode="numeric" placeholder="비우면 당기 납입액을 그대로 씀 (문단 147(b))" style="width:100%">
-  <label>자산인식상한 (원)</label>
-  <input type="text" id="asset_ceiling" inputmode="numeric" placeholder="초과적립일 때만 씀. 비우면 상한 미적용 (문단 64)" style="width:100%">
+  <div class="field"><span class="label">기초 공정가치 (원)</span><input type="text" id="asset_opening" inputmode="numeric" placeholder="전기말 잔액"></div>
+  <div class="field"><span class="label">부담금 납입액 (원)</span><input type="text" id="asset_contributions" inputmode="numeric" placeholder="당기 중 회사가 넣은 돈"></div>
+  <div class="field"><span class="label">자산에서 지급한 퇴직급여 (원)</span><input type="text" id="asset_paid" inputmode="numeric" placeholder="비우면 명부의 사외자산 지급액 사용"></div>
+  <div class="field"><span class="label">기말 공정가치 (원)</span><input type="text" id="asset_closing" inputmode="numeric" placeholder="결산일 잔액"></div>
+  <div class="field"><span class="label">미지급 퇴직급여 (원)</span><input type="text" id="unpaid_benefits" inputmode="numeric" placeholder="퇴직했으나 결산일까지 미지급한 금액"></div>
+  <div class="field"><span class="label">차년도 예상 부담금 (원)</span><input type="text" id="expected_contributions" inputmode="numeric" placeholder="비우면 당기 납입액을 그대로 씀 (문단 147(b))"></div>
+  <div class="field"><span class="label">자산인식상한 (원)</span><input type="text" id="asset_ceiling" inputmode="numeric" placeholder="초과적립일 때만 씀. 비우면 상한 미적용 (문단 64)"></div>
   <div class="hint">자산이 채무를 넘는 제도에서, 환급이나 미래 부담금 절감으로
   얻을 수 있는 효익의 현재가치입니다. 초과적립액이 이 값을 넘으면 넘는 만큼을
   자산에서 깎습니다.</div>
