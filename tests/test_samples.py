@@ -264,11 +264,18 @@ class TestNoPersonalDataShips:
         data = Path(pension.__file__).parent / "data"
         assert not data.exists(), f"꾸러미에 자료 파일이 남아 있다: {list(data.iterdir())}"
 
-    def test_the_exe_spec_bundles_nothing(self) -> None:
-        """PyInstaller 가 실어 나르는 자료가 없어야 한다."""
+    def test_the_exe_bundles_only_the_webapp(self) -> None:
+        """실행 파일에 실리는 것은 전체 기능 화면뿐이어야 한다.
+
+        웹앱은 들어가야 한다(옆 폴더에 두면 실행 파일만 복사했을 때 안 열린다).
+        **명부 원자료는 들어가면 안 된다** — 그것이 이 시험의 요점이다.
+        """
         spec = (Path(__file__).resolve().parent.parent / "pension.spec").read_text(
             encoding="utf-8")
-        assert "datas=[]" in spec
+        datas = spec.split("datas=[", 1)[1].split("]", 1)[0]
+        assert '"webapp/dist", "webapp"' in datas
+        assert "pension/data" not in datas
+        assert ".csv" not in datas
 
     def test_the_default_roster_is_generated_not_stored(self, pack) -> None:
         """씨앗에서 만들어 낸 것이라 파일로 들고 다닐 원자료가 없다."""

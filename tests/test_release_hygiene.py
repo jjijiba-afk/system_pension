@@ -199,3 +199,64 @@ class TestReleaseCheckScript:
         assert module.main([str(tmp_path)]) == 0
         (tmp_path / "명부.csv").write_text("x", encoding="utf-8")
         assert module.main([str(tmp_path)]) == 1
+
+
+class TestSelfContainedExe:
+    """전체 기능 화면이 실행 파일 **안** 에 들어가야 한다.
+
+    옆 폴더에 두면, 실행 파일만 바탕화면에 복사한 순간 그 화면이 안 열린다.
+    쓰는 사람은 그것이 왜인지 알 길이 없다 — 구조로 막는다.
+    """
+
+    def test_the_spec_bundles_the_webapp(self) -> None:
+        spec = (ROOT / "pension.spec").read_text(encoding="utf-8")
+        assert '("webapp/dist", "webapp")' in spec
+
+    def test_the_webapp_is_built_before_the_exe(self) -> None:
+        """PyInstaller 가 묶을 때 이미 있어야 한다. 순서가 뒤집히면 빈 채로 나간다."""
+        flow = (ROOT / ".github/workflows/build-exe.yml").read_text(encoding="utf-8")
+        assert flow.index("webapp/build.py") < flow.index("PyInstaller pension.spec")
+
+    def test_the_package_no_longer_carries_a_loose_copy(self) -> None:
+        """EXE 안에 있는데 옆에도 두면 어느 쪽이 쓰이는지 알 수 없다."""
+        flow = (ROOT / ".github/workflows/build-exe.yml").read_text(encoding="utf-8")
+        assert "Copy-Item -Recurse webapp/dist" not in flow
+
+    def test_the_build_verifies_it_can_find_the_webapp(self) -> None:
+        """묶이지 않았으면 사용자가 버튼을 눌러야 알게 된다. 빌드가 먼저 본다."""
+        flow = (ROOT / ".github/workflows/build-exe.yml").read_text(encoding="utf-8")
+        assert "app --no-browser --check" in flow
+
+    def test_meipass_is_searched(self) -> None:
+        """PyInstaller 는 묶은 자료를 _MEIPASS 아래에 푼다."""
+        from pension import localapp
+
+        source = (ROOT / "src/pension/localapp.py").read_text(encoding="utf-8")
+        assert "_MEIPASS" in source
+        assert "webapp" in localapp._FOLDER_NAMES
+
+
+class TestInstaller:
+    """설치 프로그램 — 회사 PC 에서 실제로 설치될 수 있어야 한다."""
+
+    def _script(self) -> str:
+        return (ROOT / "packaging/설치.iss").read_text(encoding="utf-8")
+
+    def test_needs_no_admin_rights(self) -> None:
+        """회사 PC 는 관리자 권한이 막혀 있는 경우가 흔하다."""
+        assert "PrivilegesRequired=lowest" in self._script()
+
+    def test_user_data_survives_uninstall(self) -> None:
+        """프로그램을 지웠다고 산출 내역까지 없애면 안 된다."""
+        script = self._script()
+        assert "{userappdata}" not in script
+        assert "연금계리산출\"" not in script.split("[UninstallDelete]")[1]
+
+    def test_makes_a_start_menu_entry_and_uninstaller(self) -> None:
+        script = self._script()
+        assert "[Icons]" in script and "{uninstallexe}" in script
+
+    def test_the_workflow_builds_and_ships_it(self) -> None:
+        flow = (ROOT / ".github/workflows/build-exe.yml").read_text(encoding="utf-8")
+        assert "packaging\\설치.iss" in flow
+        assert "연금계리산출_설치.exe" in flow

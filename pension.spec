@@ -32,9 +32,13 @@ analysis = Analysis(
     ["src/pension/__main__.py"],
     pathex=["src"],
     binaries=[],
-    # 실을 자료가 없다. 기본 명부는 난수로 만들므로 원자료 파일이 필요 없고,
+    # 전체 기능 화면(웹앱)을 실행 파일 **안** 에 넣는다. 옆 폴더에 두면
+    # 실행 파일만 꺼내 복사한 순간 그 화면이 안 열리는데, 쓰는 사람은 그것이
+    # 왜인지 알 길이 없다. 하나로 묶으면 그 사고가 구조적으로 없어진다.
+    #
+    # 명부 원자료는 여기 없다. 기본 명부는 난수로 만들므로 실을 것이 없고,
     # **실제 개인정보를 실행 파일에 넣지 않는다** 는 뜻이기도 하다.
-    datas=[],
+    datas=[("webapp/dist", "webapp")],
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],

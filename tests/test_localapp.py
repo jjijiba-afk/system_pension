@@ -172,3 +172,70 @@ class TestStablePort:
         with pytest.raises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(f"{running}/../secret.txt")
         assert caught.value.code == 404
+
+
+class TestAppWindow:
+    """브라우저 탭이 아니라 주소창 없는 앱 창으로 띄운다.
+
+    탭으로 열리면 즐겨찾기·다른 탭 사이에 섞여 '프로그램' 으로 보이지 않는다.
+    """
+
+    def test_no_app_browser_off_windows(self, monkeypatch) -> None:
+        monkeypatch.setattr(localapp.sys, "platform", "linux")
+        assert localapp._app_browser() == ""
+
+    def test_finds_edge_where_windows_puts_it(self, tmp_path, monkeypatch) -> None:
+        edge = tmp_path / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+        edge.parent.mkdir(parents=True)
+        edge.write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(localapp.sys, "platform", "win32")
+        monkeypatch.setenv("ProgramFiles", str(tmp_path))
+        monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "없음"))
+        assert localapp._app_browser() == str(edge)
+
+    def test_falls_back_when_no_browser_is_found(self, tmp_path, monkeypatch) -> None:
+        """엣지가 없는 PC 도 있다. 화면이 아예 안 뜨는 것보다 탭이 낫다."""
+        monkeypatch.setattr(localapp.sys, "platform", "win32")
+        monkeypatch.setenv("ProgramFiles", str(tmp_path / "없음"))
+        monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "없음2"))
+        assert localapp._app_browser() == ""
+
+    def test_opens_as_an_app_window(self, fake_app, monkeypatch) -> None:
+        """`--app=` 이 빠지면 그냥 탭으로 열린다. 인자를 지켜본다."""
+        import subprocess
+
+        seen = {}
+        monkeypatch.setattr(localapp, "_app_browser", lambda: "msedge.exe")
+        monkeypatch.setattr(subprocess, "Popen",
+                            lambda cmd, **kw: seen.setdefault("cmd", cmd))
+
+        server, url = localapp.open_in_browser(fake_app, port=0)
+        try:
+            assert seen["cmd"][0] == "msedge.exe"
+            assert seen["cmd"][1] == f"--app={url}"
+            # 전용 프로필을 만들면 저장해 둔 산출 내역이 안 보인다.
+            assert not any(a.startswith("--user-data-dir") for a in seen["cmd"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_uses_the_default_browser_when_the_app_window_fails(
+        self, fake_app, monkeypatch
+    ) -> None:
+        import subprocess
+        import webbrowser
+
+        opened = {}
+        monkeypatch.setattr(localapp, "_app_browser", lambda: "msedge.exe")
+        monkeypatch.setattr(subprocess, "Popen",
+                            lambda *a, **k: (_ for _ in ()).throw(OSError("못 띄움")))
+        monkeypatch.setattr(webbrowser, "open",
+                            lambda link: opened.setdefault("url", link))
+
+        server, url = localapp.open_in_browser(fake_app, port=0)
+        try:
+            assert opened["url"] == url
+        finally:
+            server.shutdown()
+            server.server_close()
