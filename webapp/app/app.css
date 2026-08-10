@@ -2,16 +2,20 @@
    터치 표적은 44px 안팎, 넓은 표는 가로 스크롤 컨테이너 안에서만 움직인다. */
 /* 기기가 다크 모드여도 이 앱은 항상 밝게 쓴다. 숫자표가 많아 밝은 배경이
    읽기 쉽고, 화면을 캡처해 감사인·담당자에게 그대로 보내는 일이 잦다. */
+/* 색은 PC 본 화면(pension/desk/theme.py)과 같은 값을 쓴다. 두 화면을 나란히
+   놓고 쓰는 사람이 있으므로, 같은 것이 같아 보여야 한다. */
 :root { color-scheme: light;
-  --navy: #1F3864; --navy-soft: #44546A; --line: #C4CBD8; --hint: #5B6478;
-  --bg-soft: #EEF3F8; --paper: #FFFFFF; --ink: #1A1D23;
+  --navy: #1F3864; --navy-soft: #44546A; --line: #D6DCE8; --hint: #5B6478;
+  --bg-soft: #EEF3F8; --paper: #FFFFFF; --ink: #1B2430;
+  /* 종이(카드)를 옅은 회색 바탕 위에 얹는다. 표가 어디서 끝나는지 보인다. */
+  --desk: #F4F6FA;
   /* 분석 화면의 계열 색. 퇴직사유 셋과 확률 곡선을 눈으로 가른다. */
   --plum: #7A5470; --teal: #2C6C67; --amber: #8F6318; --rust: #9A3B28; }
 * { box-sizing: border-box; }
-html { background: var(--paper); }
+html { background: var(--desk); }
 body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
-       max-width: 980px; margin: 0 auto; line-height: 1.55;
-       background: var(--paper); color: var(--ink);
+       max-width: 1100px; margin: 0 auto; line-height: 1.55;
+       background: var(--desk); color: var(--ink);
        /* 홈 화면 앱으로 열면 제목이 상태표시줄(시계·배터리) 밑으로 들어간다.
           노치·다이내믹 아일랜드 높이만큼 더 내린다. */
        padding: calc(env(safe-area-inset-top, 0px) + 26px)
@@ -21,29 +25,42 @@ body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
 h1 { font-size: 1.45rem; color: var(--navy); margin: 0 0 2px; }
 h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display: block; }
 
-/* ── 단체 고르는 줄 ──
-   탭보다 위에 둔다. 지금 어느 단체를 보고 있는지가 화면 어디에서나 보여야
-   전기 산출을 남의 회사 것으로 끌어오는 일이 없다. */
+/* ── 머리줄 ──
+   제목은 왼쪽, 단체는 오른쪽. 좁은 화면(아이패드 세로·휴대폰)에서는 위아래로
+   접힌다. 지금 어느 단체를 보고 있는지가 화면 어디에서나 보여야 전기 산출을
+   남의 회사 것으로 끌어오는 일이 없다. */
+#topbar { display: flex; flex-wrap: wrap; gap: 10px 16px;
+  align-items: flex-end; justify-content: space-between; }
+#topbar h1 { flex: 1 1 320px; }
 #clientbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--navy);
-  border-radius: 10px; background: var(--bg-soft); }
+  padding: 8px 10px; border: 1px solid var(--navy);
+  border-radius: 10px; background: var(--paper); }
 #clientbar label { margin: 0; color: var(--navy); }
-#clientbar select { flex: 1; min-width: 150px; max-width: 320px; font-weight: 600;
+#clientbar select { min-width: 140px; max-width: 260px; font-weight: 600;
   background: var(--paper); }
-#clientbar .spacer { flex: 1; }
 #clientbar button.small { background: var(--paper); }
 
-/* ── 큰 탭 ── */
-nav.tabs { display: flex; gap: 6px; margin: 14px 0 18px; }
-nav.tabs button { flex: 1; padding: 13px 6px; font-size: 1.02rem; font-weight: bold;
-  border: 1px solid var(--line); border-radius: 10px; background: transparent;
-  color: inherit; }
-nav.tabs button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+/* ── 큰 탭 ──
+   PC 본 화면의 탭(ttk.Notebook)과 같은 모양이다. 고른 탭이 아래 종이와 이어져
+   보이도록 흰 바탕에 남색 글씨, 나머지는 바탕색 그대로. 일곱 개라 좁은 화면
+   에서는 옆으로 밀어서 본다. */
+nav.tabs { display: flex; gap: 2px; margin: 14px 0 0; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; }
+nav.tabs button { flex: 1 0 auto; padding: 12px 14px; font-size: 0.98rem;
+  font-weight: 600; white-space: nowrap; color: var(--hint);
+  border: 1px solid transparent; border-bottom: none;
+  border-radius: 8px 8px 0 0; background: transparent; }
+nav.tabs button.on { background: var(--paper); color: var(--navy);
+  border-color: var(--line); }
 section.page { display: none; }
-section.page.on { display: block; }
+/* 탭 아래 내용판. PC 본 화면처럼 옅은 바탕 위에 테두리만 두르고, 흰색은
+   입력칸·표·그림에만 쓴다. 판 전체를 희게 하면 어디까지가 표인지 사라진다. */
+section.page.on { display: block; background: transparent;
+  border: 1px solid var(--line); border-radius: 0 8px 8px 8px;
+  padding: 16px; margin-bottom: 18px; }
 
 fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 0 0 16px;
-           padding: 14px 16px; min-width: 0; }
+           padding: 14px 16px; min-width: 0; background: transparent; }
 legend { font-weight: bold; color: var(--navy); padding: 0 6px; }
 label { display: block; margin: 10px 0 4px; font-weight: 600; }
 input[type=file] { width: 100%; padding: 12px; border: 1px dashed #8894AB;
@@ -89,7 +106,7 @@ nav.subtabs { display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scroll
   padding-bottom: 4px; margin: 12px 0 0; }
 nav.subtabs button { padding: 10px 13px; white-space: nowrap; font-size: 0.94rem;
   font-weight: 600; border: 1px solid var(--line); border-radius: 8px 8px 0 0;
-  border-bottom: none; background: transparent; color: inherit; }
+  border-bottom: none; background: var(--desk); color: var(--hint); }
 nav.subtabs button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
 .subpage { display: none; border: 1px solid var(--line); border-radius: 0 10px 10px 10px;
            padding: 12px; }

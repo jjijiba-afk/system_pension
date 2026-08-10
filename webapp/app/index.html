@@ -13,27 +13,35 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<h1>연금계리 산출<small>K-IFRS 1019 확정급여채무 (PUC) — 기기 안에서 계산, 자료는 밖으로 나가지 않음</small></h1>
+<!-- 제목은 왼쪽, 지금 보고 있는 단체는 오른쪽. PC 본 화면과 같은 배치다.
+     화면을 오갈 때 눈이 같은 자리를 찾게 하려는 것이다. -->
+<header id="topbar">
+  <h1>연금계리 산출 시스템<small>K-IFRS 1019호 예측단위적립방식(PUC) —
+    확정급여채무·근무원가·민감도·증감분석</small></h1>
+  <div id="clientbar">
+    <label for="client-pick">단체</label>
+    <select id="client-pick"></select>
+    <span class="badge" id="client-runs">0건</span>
+    <button class="small" type="button" id="client-add">＋ 새 단체</button>
+    <button class="small" type="button" id="client-rename">이름 바꾸기</button>
+    <button class="small" type="button" id="client-remove">삭제</button>
+  </div>
+</header>
 
 <div id="status">엔진을 준비하는 중… (처음 한 번만 오래 걸립니다)</div>
 
-<!-- 가장 먼저 고르는 것. 산출 내역이 이 단체 안에 쌓인다. -->
-<div id="clientbar">
-  <label for="client-pick">단체</label>
-  <select id="client-pick"></select>
-  <span class="badge" id="client-runs">0건</span>
-  <span class="spacer"></span>
-  <button class="small" type="button" id="client-add">＋ 새 단체</button>
-  <button class="small" type="button" id="client-rename">이름 바꾸기</button>
-  <button class="small" type="button" id="client-remove">삭제</button>
-</div>
-
+<!-- 탭 순서는 일하는 순서다. 자료를 걸고(산출) → 가정을 맞추고 → 결과를 보고
+     (분석·보고서·사번 조회) → 남긴다(산출 내역). 자료실은 여러 단체를 오갈 때
+     쓰는 서랍이라 맨 뒤. PC 본 화면과 같은 순서여야 두 화면을 오가도 헤매지
+     않는다. -->
 <nav class="tabs">
   <button id="tab-calc" class="on">산출</button>
   <button id="tab-edit">산출가정 입력</button>
   <button id="tab-dash">분석</button>
-  <button id="tab-lib">자료실</button>
+  <button id="tab-report">계리평가 보고서</button>
+  <button id="tab-member">사번 조회</button>
   <button id="tab-runs">산출 내역</button>
+  <button id="tab-lib">자료실</button>
 </nav>
 
 <!-- ════════ 산출 ════════ -->
@@ -177,25 +185,6 @@
   <button class="big" id="dl-result">결과 엑셀 내려받기</button>
   <button class="big secondary" id="dl-members">개인별 결과 내려받기</button>
 
-  <fieldset style="margin-top:16px"><legend>계리평가 보고서 (인쇄 → PDF)</legend>
-    <div class="row">
-      <button class="small primary" type="button" id="report-sev">퇴직급여 보고서</button>
-      <button class="small" type="button" id="report-lt">장기급여 보고서</button>
-    </div>
-    <div class="hint">표지·공시사항·민감도·주석·기초율 표까지 갖춘 평가보고서입니다.
-    미리보기에서 [인쇄 / PDF 저장] 을 누르면 아이패드에서는 인쇄 화면의 공유로
-    <b>파일에 저장</b>, PC 에서는 프린터 대신 <b>PDF로 저장</b>을 고르면 됩니다.</div>
-  </fieldset>
-
-  <fieldset><legend>사번 조회 — 개인별 산출 근거</legend>
-    <div class="row">
-      <input type="text" id="lookup-id" placeholder="사번 또는 성명 (예: A0001)">
-      <button class="small primary" type="button" id="lookup-run">조회</button>
-    </div>
-    <div class="hint">방금 산출한 명부·기초율로 <b>그 사람만 다시 산출</b>해
-    연차·퇴직사유별 계산 근거를 한 줄씩 보여줍니다. 여기 나온 채무의 합은
-    전체 산출의 그 사람 몫과 원 단위까지 같습니다.</div>
-  </fieldset>
   <fieldset style="margin-top:16px"><legend>이 산출을 기기에 저장</legend>
     <div class="row">
       <input type="text" id="run-name" placeholder="산출명 (예: 2412)">
@@ -384,6 +373,44 @@
     </div>
   </details>
 </div>
+</section>
+
+<!-- ════════ 계리평가 보고서 ════════ -->
+<section class="page" id="page-report">
+<p class="notice" id="report-empty">아직 산출 결과가 없습니다. [산출] 탭에서 실행하거나
+[산출 내역] 탭에서 저장해 둔 산출을 불러오면 여기 보고서가 만들어집니다.</p>
+<fieldset><legend>보고서 만들기</legend>
+  <div class="row">
+    <button class="big primary" type="button" id="report-sev">퇴직급여 보고서</button>
+    <button class="big secondary" type="button" id="report-lt">장기급여 보고서</button>
+  </div>
+  <div class="hint">표지 → 평가개요 → 평가 결과 요약 → 공시사항(확정급여채무·
+  사외적립자산 변동표, 재측정요소 분석, 차년도 예상 비용) → 민감도 분석 →
+  주석(규정 요약, 만기분석, 차년도 예상 기여금) → 첨부(임직원 분포, 승급률·
+  퇴직률·사망률·지급률 표) → 용어 정리까지, K-IFRS 1019 문단 135~147 의 공시
+  요구 항목을 모두 담았습니다. 장기급여 보고서는 문단 153~158 을 따릅니다.</div>
+  <div class="hint">미리보기에서 [인쇄 / PDF 저장] 을 누르면 아이패드는 인쇄 화면의
+  공유 → <b>파일에 저장</b>, PC 는 프린터 대신 <b>PDF로 저장</b>을 고르면 됩니다.
+  보고서 숫자는 산출 엔진 결과를 그대로 옮긴 것이라 화면 요약·결과 엑셀과
+  원 단위까지 같습니다.</div>
+</fieldset>
+</section>
+
+<!-- ════════ 사번 조회 ════════ -->
+<section class="page" id="page-member">
+<p class="notice" id="member-empty">아직 산출 결과가 없습니다. [산출] 탭에서 실행하거나
+[산출 내역] 탭에서 저장해 둔 산출을 불러오면 여기서 조회할 수 있습니다.</p>
+<fieldset><legend>사번 조회 — 개인별 산출 근거</legend>
+  <div class="row">
+    <input type="text" id="lookup-id" placeholder="사번 또는 성명 (예: A0001)">
+    <button class="small primary" type="button" id="lookup-run">조회</button>
+  </div>
+  <div class="hint">방금 산출한 명부·기초율로 <b>그 사람만 다시 산출</b>해
+  인적사항, 적용한 규정·가정, 연차·퇴직사유별 계산 근거(연령·근속·임금·
+  퇴직률·사망률·잔존확률·지급액·귀속액·할인계수·채무 기여)를 한 줄씩
+  보여줍니다. 근거 줄의 합이 곧 그 사람의 확정급여채무라, 전체 산출의 그 사람
+  몫과 원 단위까지 같습니다.</div>
+</fieldset>
 </section>
 
 <!-- ════════ 자료실 ════════ -->

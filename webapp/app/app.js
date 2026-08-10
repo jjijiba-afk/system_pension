@@ -117,6 +117,7 @@ from pension.webui import api
     renderState(saved ? JSON.parse(saved) : py("state_new").state);
     refreshLibrary();
     refreshRuns();
+    syncRunPages();
 
     status("준비 완료. 명부를 고르고 기초율을 정한 뒤 [산출 실행]을 누르세요.");
     $("run").disabled = false;
@@ -130,8 +131,9 @@ boot();
 
 // ── 큰 탭 ────────────────────────────────────────────────────────
 const PAGES = [["tab-calc", "page-calc"], ["tab-edit", "page-edit"],
-               ["tab-dash", "page-dash"], ["tab-lib", "page-lib"],
-               ["tab-runs", "page-runs"]];
+               ["tab-dash", "page-dash"], ["tab-report", "page-report"],
+               ["tab-member", "page-member"], ["tab-runs", "page-runs"],
+               ["tab-lib", "page-lib"]];
 for (const [tab, page] of PAGES) {
   $(tab).addEventListener("click", () => {
     // 탭을 옮기기 전에 편집 중이던 가정을 먼저 확정 저장한다. 디바운스만
@@ -1479,6 +1481,20 @@ function fillTable(table, rows, numericFrom) {
 // 산출 내역에서 불러온 입력. 파일을 새로 고르면 그쪽이 우선한다.
 let loadedRun = null;   // {name, roster, assumptions, rosterName}
 let lastRun = null;     // 방금 마친 산출 — 저장 버튼이 이것을 보관한다
+
+// 보고서·사번 조회 탭은 산출이 있어야 쓸 수 있다. 눌러 본 뒤에 '먼저 산출을
+// 실행하세요' 라고 하는 대신, 탭을 열자마자 지금 무엇을 볼 수 있는지 알린다.
+function syncRunPages() {
+  const ready = Boolean(lastRun);
+  for (const id of ["report-empty", "member-empty"]) {
+    const note = $(id);
+    if (note) note.style.display = ready ? "none" : "";
+  }
+  for (const id of ["report-sev", "report-lt", "lookup-run"]) {
+    const button = $(id);
+    if (button) button.disabled = !ready;
+  }
+}
 let priorLink = null;   // 전기로 연결한 저장 산출 {name, values, assumptions}
 
 // 명부를 어디서 가져올지: 방금 올린 파일 > 목록에서 고른 저장 명부 > 불러온 산출 내역.
@@ -1612,6 +1628,7 @@ $("form").addEventListener("submit", async (event) => {
     // 산출할 때마다 분석 화면을 그 결과로 다시 그린다 — 두 화면이 다른 회차를
     // 보여 주는 일이 없어야 한다.
     refreshDashboard();
+    syncRunPages();
 
     $("result").style.display = "block";
     status("산출을 마쳤습니다.");

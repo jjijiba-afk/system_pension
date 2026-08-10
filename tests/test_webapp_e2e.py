@@ -534,7 +534,11 @@ def test_client_bar_keeps_run_history_apart(page, tmp_path) -> None:
 
 
 def test_member_lookup_and_reports(page, tmp_path) -> None:
-    """산출 → 사번 조회(연차별 근거) → 계리평가 보고서 미리보기까지."""
+    """산출 → 사번 조회(연차별 근거) → 계리평가 보고서 미리보기까지.
+
+    사번 조회와 보고서는 **제 탭** 에 있다. PC 본 화면과 탭 구성이 같아야
+    두 화면을 오가는 사람이 무엇이 어디 있는지 다시 외우지 않는다.
+    """
     from pension.samples import write_sample_pack
 
     files = write_sample_pack(tmp_path)
@@ -549,6 +553,8 @@ def test_member_lookup_and_reports(page, tmp_path) -> None:
     page.wait_for_selector("#result", state="visible", timeout=180_000)
 
     # 사번 조회 — 그 사람만 재산출한 연차별 근거가 떠야 한다.
+    page.click("#tab-member")
+    assert not page.is_visible("#member-empty"), "산출을 마쳤으면 안내문이 빠져야 한다"
     page.fill("#lookup-id", "A0001")
     page.click("#lookup-run")
     page.wait_for_selector("#member-dialog[open]", timeout=120_000)
@@ -558,6 +564,7 @@ def test_member_lookup_and_reports(page, tmp_path) -> None:
     page.click("#member-dialog >> text=닫기")
 
     # 퇴직급여 보고서 — 미리보기 iframe 안에 표지 제목이 있어야 한다.
+    page.click("#tab-report")
     page.click("#report-sev")
     page.wait_for_selector("#print-dialog[open]", timeout=120_000)
     frame = page.frame_locator("#print-frame")
@@ -791,3 +798,26 @@ def test_prior_roster_comparison_runs_before_the_valuation(page, tmp_path) -> No
     result = page.inner_text("#prior-check-result")
     assert "생년월일" in result
     assert "1955-01-01" in result
+
+
+def test_both_screens_have_the_same_tabs(page) -> None:
+    """아이패드 화면과 PC 본 화면의 탭이 같아야 한다.
+
+    한 사람이 두 화면을 오간다. 탭 구성이 갈라지면 무엇이 어디 있는지 두 번
+    외워야 하고, 한쪽에만 있는 기능을 '없는 것' 으로 여기게 된다. 그래서 이름과
+    순서를 여기서 못 박는다 — 한쪽을 고치면 이 시험이 걸린다.
+    """
+    import re
+
+    web = page.eval_on_selector_all(
+        "nav.tabs button", "els => els.map(e => e.textContent.trim())")
+    assert web == ["산출", "산출가정 입력", "분석", "계리평가 보고서",
+                   "사번 조회", "산출 내역", "자료실"]
+
+    # PC 쪽은 소스에서 읽는다. 임포트하면 tkinter 가 필요한데, 이 시험을 돌리는
+    # 곳에 화면이 없을 수 있다 — 탭 이름을 맞대어 보는 데 창까지 띄울 일은 아니다.
+    source = (Path(__file__).resolve().parent.parent
+              / "src" / "pension" / "desk" / "app.py").read_text(encoding="utf-8")
+    block = source.split("self._pages = {", 1)[1].split("}", 1)[0]
+    desk = re.findall(r'"([^"]+)":', block)
+    assert desk == web
