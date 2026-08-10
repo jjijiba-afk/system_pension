@@ -32,8 +32,8 @@ h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display:
 #topbar { display: flex; flex-wrap: wrap; gap: 10px 16px;
   align-items: flex-end; justify-content: space-between; }
 #topbar h1 { flex: 1 1 320px; }
-#clientbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  padding: 8px 10px; border: 1px solid var(--navy);
+#clientbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 5px 8px; border: 1px solid var(--navy);
   border-radius: 0; background: var(--paper); }
 #clientbar label { margin: 0; color: var(--navy); }
 #clientbar select { min-width: 140px; max-width: 260px; font-weight: 600;
@@ -46,7 +46,7 @@ h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display:
    에서는 옆으로 밀어서 본다. */
 nav.tabs { display: flex; gap: 2px; margin: 14px 0 0; overflow-x: auto;
   -webkit-overflow-scrolling: touch; }
-nav.tabs button { flex: 1 0 auto; padding: 12px 14px; font-size: 0.98rem;
+nav.tabs button { flex: 1 0 auto; padding: 9px 14px; font-size: 0.96rem;
   font-weight: 600; white-space: nowrap; color: var(--hint);
   border: 1px solid transparent; border-bottom: none;
   border-radius: 0; background: transparent; }
@@ -57,23 +57,23 @@ section.page { display: none; }
    입력칸·표·그림에만 쓴다. 판 전체를 희게 하면 어디까지가 표인지 사라진다. */
 section.page.on { display: block; background: transparent;
   border: 1px solid var(--line); border-radius: 0;
-  padding: 16px; margin-bottom: 18px; }
+  padding: 12px; margin-bottom: 16px; }
 
-fieldset { border: 1px solid var(--line); border-radius: 0; margin: 0 0 16px;
-           padding: 14px 16px; min-width: 0; background: transparent; }
+fieldset { border: 1px solid var(--line); border-radius: 0; margin: 0 0 12px;
+           padding: 8px 12px 10px; min-width: 0; background: transparent; }
 legend { font-weight: bold; color: var(--navy); padding: 0 6px; }
 label { display: block; margin: 10px 0 4px; font-weight: 600; }
-input[type=file] { width: 100%; padding: 12px; border: 1px dashed #8894AB;
+input[type=file] { width: 100%; padding: 6px 8px; border: 1px dashed #8894AB;
                    border-radius: 0; font-size: 0.98rem; }
-input[type=text] { padding: 10px 12px; border: 1px solid var(--line);
-                   border-radius: 0; font-size: 1rem; background: transparent;
+input[type=text] { padding: 5px 8px; border: 1px solid var(--line);
+                   border-radius: 0; font-size: 0.96rem; background: transparent;
                    color: inherit; }
-select { padding: 10px 8px; border: 1px solid var(--line); border-radius: 0;
-         font-size: 0.98rem; background: transparent; color: inherit; }
+select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 0;
+         font-size: 0.96rem; background: transparent; color: inherit; }
 .hint { color: var(--hint); font-size: 0.85rem; margin-top: 2px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .row > input[type=text] { flex: 1; min-width: 160px; }
-.check { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-weight: 600; }
+.check { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-weight: 600; }
 .check input { width: 22px; height: 22px; }
 
 button.big { display: block; width: 100%; padding: 16px; margin-top: 14px;
@@ -81,11 +81,11 @@ button.big { display: block; width: 100%; padding: 16px; margin-top: 14px;
   font-size: 1.12rem; font-weight: bold; }
 button.big:disabled { background: #A9B2C4; }
 button.big.secondary { background: var(--navy-soft); }
-button.small { padding: 9px 14px; border: 1px solid var(--line); border-radius: 0;
-  background: transparent; color: inherit; font-size: 0.94rem; font-weight: 600; }
+button.small { padding: 5px 11px; border: 1px solid var(--line); border-radius: 0;
+  background: transparent; color: inherit; font-size: 0.92rem; font-weight: 600; }
 button.small.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
 
-#status { background: var(--bg-soft); border-radius: 0; padding: 10px 14px;
+#status { background: var(--bg-soft); border-radius: 0; padding: 6px 12px;
           margin: 10px 0; font-size: 0.92rem; white-space: pre-line; }
 .error { background: #FCE4E4; color: #5c1a1a; border-radius: 0; padding: 10px 14px;
          margin: 6px 0; font-size: 0.9rem; white-space: pre-line; }
@@ -97,8 +97,8 @@ button.small.primary { background: var(--navy); border-color: var(--navy); color
 
 /* ── 결과·데이터 표 ── */
 table.data { border-collapse: collapse; width: 100%; margin: 12px 0; }
-.data td, .data th { border: 1px solid var(--line); padding: 9px 12px;
-                     text-align: left; font-size: 0.94rem; }
+.data td, .data th { border: 1px solid var(--line); padding: 5px 9px;
+                     text-align: left; font-size: 0.92rem; }
 .data td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ── 가정 편집기 ── */
@@ -109,12 +109,12 @@ nav.subtabs button { padding: 10px 13px; white-space: nowrap; font-size: 0.94rem
   border-bottom: none; background: var(--desk); color: var(--hint); }
 nav.subtabs button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
 .subpage { display: none; border: 1px solid var(--line); border-radius: 0;
-           padding: 12px; }
+           padding: 9px; }
 .subpage.on { display: block; }
 
 /* 한 묶음 안의 표들. 접어 두면 긴 화면에서도 원하는 표로 바로 간다. */
 details.section { border: 1px solid var(--line); border-radius: 0; margin: 10px 0; }
-details.section > summary { padding: 11px 14px; font-weight: 600; cursor: pointer;
+details.section > summary { padding: 7px 12px; font-weight: 600; cursor: pointer;
   background: var(--bg-soft); border-radius: 0; list-style: none;
   display: flex; align-items: center; gap: 8px; }
 details.section[open] > summary { border-radius: 0;
@@ -124,18 +124,18 @@ details.section > summary::before { content: "▸"; color: var(--hint); font-siz
 details.section[open] > summary::before { content: "▾"; }
 details.section > summary .count { margin-left: auto; font-weight: 400;
   font-size: 0.85rem; color: var(--hint); }
-.section-body { padding: 4px 12px 12px; }
+.section-body { padding: 4px 10px 9px; }
 .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 table.grid { border-collapse: collapse; margin: 10px 0; }
-.grid th { border: 1px solid var(--line); padding: 7px 9px; font-size: 0.88rem;
+.grid th { border: 1px solid var(--line); padding: 4px 8px; font-size: 0.88rem;
            background: var(--bg-soft); white-space: nowrap; }
 .grid td { border: 1px solid var(--line); padding: 0; }
-.grid input[type=text] { width: 108px; border: 0; border-radius: 0; padding: 10px 8px;
+.grid input[type=text] { width: 108px; border: 0; border-radius: 0; padding: 5px 8px;
                          text-align: right; font-size: 0.95rem; }
 .grid select { border: 0; border-radius: 0; }
 .grid input[type=checkbox] { width: 20px; height: 20px; margin: 10px; }
-.grid td.name { padding: 8px 10px; font-weight: 600; white-space: nowrap; }
+.grid td.name { padding: 5px 9px; font-weight: 600; white-space: nowrap; }
 
 /* 열 머리 아래에 붙는 '이 열을 어떻게 읽는가' 줄들. 값 줄과 눈으로 갈린다. */
 .grid tr.panel td { background: var(--bg-soft); padding: 2px 4px; }
@@ -282,7 +282,7 @@ button.chip[aria-pressed="true"] .delta { color: #fff; opacity: 0.78; }
    좁은 화면에서는 줄을 접어 위아래로 쌓는다. */
 
 details.calc-section { border: 1px solid var(--line); border-radius: 0;
-  margin: 0 0 16px; background: transparent; }
+  margin: 0 0 12px; background: transparent; }
 /* 펼친 채로 둔다. 접는 삼각형도 없애 '눌러서 접는 것' 으로 보이지 않게 한다.
    (details.section 쪽 규칙이 [open] 때문에 더 세므로 여기서도 [open] 을 쓴다.) */
 details.calc-section[open] > summary { padding: 10px 14px 2px; font-weight: bold;
@@ -291,11 +291,11 @@ details.calc-section[open] > summary { padding: 10px 14px 2px; font-weight: bold
 details.calc-section[open] > summary::before { content: none; }
 details.calc-section[open] > summary .count { margin-left: auto; font-weight: normal;
   font-size: 0.82rem; color: var(--hint); }
-details.calc-section > .section-body { padding: 2px 14px 12px; }
+details.calc-section > .section-body { padding: 2px 12px 9px; }
 
 /* 라벨 | 입력칸 | 단추 한 줄. EXE 의 입력 줄과 같은 모양이다. */
-#page-calc .field { display: flex; flex-wrap: wrap; gap: 8px;
-  align-items: center; margin: 8px 0 0; }
+#page-calc .field { display: flex; flex-wrap: wrap; gap: 6px;
+  align-items: center; margin: 5px 0 0; }
 /* 라벨 칸 너비를 화면 전체에서 하나로 맞춘다. 칸마다 다르면 입력칸 왼쪽이
    들쭉날쭉해져서 훑어 내려가기 어렵다. */
 #page-calc .field > .label { flex: 0 0 auto; width: 152px; font-weight: 600;
@@ -311,10 +311,10 @@ details.calc-section > .section-body { padding: 2px 14px 12px; }
 #page-calc select, #page-calc input[type=file] {
   /* background 단축을 쓰면 고르는 칸의 화살표(background-image)까지 지워진다. */
   background-color: var(--paper); border: 1px solid var(--line); border-radius: 0;
-  font-size: 0.94rem; padding: 8px 10px; }
+  font-size: 0.94rem; padding: 5px 8px; }
 #page-calc select { padding-right: 30px; }
-#page-calc input[type=file] { border-style: solid; padding: 7px 10px; }
-#page-calc label { font-weight: 600; font-size: 0.92rem; margin: 10px 0 3px; }
+#page-calc input[type=file] { border-style: solid; padding: 4px 8px; }
+#page-calc label { font-weight: 600; font-size: 0.92rem; margin: 6px 0 2px; }
 #page-calc .hint { font-size: 0.82rem; }
 
 /* 체크상자는 EXE 처럼 가로로 늘어세운다. 한 줄에 하나씩 쌓으면 옵션 칸만
@@ -328,7 +328,7 @@ details.calc-section > .section-body { padding: 2px 14px 12px; }
 /* 실행 단추는 흐름 안에 둔다. 떠 있는 단추는 EXE 에 없고, 칸을 모두 펼친
    지금은 아래 내용을 가린다. */
 #page-calc button.big.sticky { position: static; display: inline-block;
-  width: auto; min-width: 190px; padding: 13px 30px; font-size: 1.02rem;
+  width: auto; min-width: 180px; padding: 9px 26px; font-size: 1rem;
   border-radius: 0; margin: 6px 0 0; box-shadow: none; }
 
 @media (max-width: 640px) {
