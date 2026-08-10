@@ -403,7 +403,9 @@ def merge_benefit_causes(state: dict[str, Any], rule: object) -> dict[str, Any]:
         for index in dead:
             if index < len(values):
                 del values[index]
-        if any(text(v) for v in values):
+        # 근속연수만 남은 줄은 버린다. 사유별 열에 넣으려고 만든 줄이라,
+        # 남겨 두면 배수 없는 빈 줄이 표에 쌓인다.
+        if any(text(v) for v in values[1:]):
             rows.append(values)
     grid["rows"] = rows
     grid["extra"] = [text(n) for n in (grid.get("extra") or [])
