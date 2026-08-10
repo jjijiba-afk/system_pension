@@ -1393,16 +1393,20 @@ $("form").addEventListener("submit", async (event) => {
     const options = {
       force: $("force").checked, sensitivity: $("sensitivity").checked,
       longterm: $("longterm").checked,
+      split_remeasurement: $("split_remeasurement").checked,
       base_date: $("base_date").value, period_start: $("period_start").value,
       prior_dbo: $("prior_dbo").value, prior_rate: $("prior_rate").value,
       prior_run: $("prior-run").value,
       past_service_cost: $("past_service_cost").value,
       settlement_obligation: $("settlement_obligation").value,
+      prior_longterm_dbo: $("prior_longterm_dbo").value,
       asset_opening: $("asset_opening").value,
       asset_contributions: $("asset_contributions").value,
       asset_paid: $("asset_paid").value,
       asset_closing: $("asset_closing").value,
       unpaid_benefits: $("unpaid_benefits").value,
+      expected_contributions: $("expected_contributions").value,
+      asset_ceiling: $("asset_ceiling").value,
     };
     if (options.base_date && options.period_start
         && options.period_start >= options.base_date) {
@@ -1412,6 +1416,7 @@ $("form").addEventListener("submit", async (event) => {
       roster: rosterPath, assumptions: assumptionsPath,
       force: options.force, sensitivity: options.sensitivity,
       longterm: options.longterm,
+      split_remeasurement: options.split_remeasurement,
       base_date: options.base_date, period_start: options.period_start,
       prior_dbo: parseNumber(options.prior_dbo),
       prior_rate: parseRate(options.prior_rate),
@@ -1419,11 +1424,16 @@ $("form").addEventListener("submit", async (event) => {
       prior_assumptions: priorLink ? priorLink.assumptions : "",
       past_service_cost: parseNumber(options.past_service_cost),
       settlement_obligation: parseNumber(options.settlement_obligation),
+      prior_longterm_dbo: parseNumber(options.prior_longterm_dbo),
       asset_opening: parseNumber(options.asset_opening),
       asset_contributions: parseNumber(options.asset_contributions),
       asset_paid: parseNumber(options.asset_paid),
       asset_closing: parseNumber(options.asset_closing),
       unpaid_benefits: parseNumber(options.unpaid_benefits),
+      expected_contributions: parseNumber(options.expected_contributions),
+      // 상한은 "비움"과 "0"이 다르다 — 0 은 초과적립을 전부 깎으라는 뜻이다.
+      asset_ceiling: options.asset_ceiling.trim()
+        ? String(parseNumber(options.asset_ceiling)) : "",
     });
 
     if (!report.run) {
@@ -1538,6 +1548,7 @@ function refreshDashboard(employeeId = "") {
   drawDashMaturity();
   drawDashRates();
   drawDashLongterm();
+  drawDashNextYear();
   refreshDashBadges();
 }
 
@@ -1555,6 +1566,8 @@ function refreshDashBadges() {
   mark("sec-dash-rates", Object.keys(d.curves).join(" · "));
   mark("sec-dash-lt", d.totals.lt_head
     ? `${d.totals.lt_head}명 · ${eok(d.totals.lt_dbo)}원` : "산출 안 함");
+  mark("sec-dash-next", d.projection
+    ? `기말 채무 ${eok(d.projection.dbo[d.projection.dbo.length - 1][1])}원` : "—");
 }
 
 function drawDashStrip() {
@@ -1776,6 +1789,17 @@ function drawDashRoll() {
   </div>`;
   if (d.rollforward.length) {
     dataTable($("dash-roll-tbl"), ["항목", "금액"], kv(d.rollforward));
+    if (d.assumption_steps.length) {
+      $("dash-roll-tbl").insertAdjacentHTML("afterend",
+        `<h4 style="margin-top:12px">가정변경효과 분해</h4>`
+        + `<div class="scroll-x"><table class="data" id="dash-steps"></table></div>`
+        + `<p class="hint">사망률 → 퇴직률 → 임금상승률 → 할인율 차례로 하나씩`
+        + ` 갈아 끼우며 잰 값입니다. 합계는 가정변경효과와 일치합니다.</p>`);
+      dataTable($("dash-steps"), ["가정", "금액"],
+        d.assumption_steps.map(([k, v]) => [k, signed(v)]).concat([{
+          cls: "total",
+          cells: ["합계", signed(d.assumption_steps.reduce((s2, r) => s2 + r[1], 0))] }]));
+    }
   } else {
     $("dash-roll-tbl").innerHTML =
       `<tr><td class="hint">전기 산출을 연결하지 않았습니다.</td></tr>`;
@@ -1785,10 +1809,41 @@ function drawDashRoll() {
     dataTable($("dash-net-tbl"), ["순확정급여부채", `적립비율 ${pctOf(d.funded, 1)}`],
       d.net.map(([k, v], i) => ({
         cls: i === d.net.length - 1 ? "total" : "", cells: [k, signed(v)] })));
+    if (d.ceiling) {
+      $("dash-net-tbl").insertAdjacentHTML("afterend",
+        `<p class="hint">자산인식상한 ${won(d.ceiling.limit)}원 · 초과적립액 `
+        + `${won(d.ceiling.surplus)}원 → 자산차감 ${won(d.ceiling.effect)}원 (문단 64)</p>`);
+    }
   } else {
     $("dash-asset-tbl").innerHTML =
       `<tr><td class="hint">사외적립자산 입력이 없습니다.</td></tr>`;
     $("dash-net-tbl").innerHTML = "";
+  }
+}
+
+function drawDashNextYear() {
+  const p = DASH_DATA.projection;
+  const box = $("dash-next");
+  if (!p) { box.innerHTML = `<p class="hint">차년도 예측이 없습니다.</p>`; return; }
+  const kv = (rows) => rows.map(([k, v], i) => ({
+    cls: i === 0 || i === rows.length - 1 ? "total" : "", cells: [k, signed(v)] }));
+  box.innerHTML = `<div class="two-up">
+    <div><h4>차년도 예상 퇴직급여 비용</h4><div class="scroll-x">
+      <table class="data" id="dash-next-expense"></table></div>
+      <h4 style="margin-top:12px">차년도 확정급여채무 예측</h4><div class="scroll-x">
+      <table class="data" id="dash-next-dbo"></table></div></div>
+    <div><h4>차년도 사외적립자산 예측</h4><div class="scroll-x">
+      <table class="data" id="dash-next-assets"></table></div></div>
+  </div>`;
+  dataTable($("dash-next-expense"), ["항목", "금액"],
+    p.expense.map(([k, v], i) => ({
+      cls: i === p.expense.length - 1 ? "total" : "", cells: [k, signed(v)] })));
+  dataTable($("dash-next-dbo"), ["항목", "금액"], kv(p.dbo));
+  if (p.assets.length) {
+    dataTable($("dash-next-assets"), ["항목", "금액"], kv(p.assets));
+  } else {
+    $("dash-next-assets").innerHTML =
+      `<tr><td class="hint">사외적립자산 입력이 없습니다.</td></tr>`;
   }
 }
 
@@ -1906,9 +1961,17 @@ function drawDashRates() {
 
 function drawDashLongterm() {
   const t = DASH_DATA.totals;
-  if (!t.lt_head) {
-    $("dash-lt").innerHTML =
-      `<tr><td class="hint">장기급여를 끄고 산출했습니다. [산출] 탭 옵션에서 켜세요.</td></tr>`;
+  const roll = DASH_DATA.longterm_roll;
+  if (!roll.length && !t.lt_head) {
+    $("dash-lt").innerHTML = `<tr><td class="hint">${
+      DASH_DATA.has_longterm
+        ? "장기급여 대상자가 없습니다. 명부의 [장기급여 대상] 열과 장기급여 지급률 규정을 확인하세요."
+        : "장기급여를 끄고 산출했습니다. [산출] 탭 옵션에서 켜세요."}</td></tr>`;
+    return;
+  }
+  if (roll.length) {
+    dataTable($("dash-lt"), ["항목", "금액"], roll.map(([k, v], i) => ({
+      cls: i === 0 || i === roll.length - 1 ? "total" : "", cells: [k, signed(v)] })));
     return;
   }
   dataTable($("dash-lt"), ["항목", "금액"], [
@@ -1919,6 +1982,16 @@ function drawDashLongterm() {
   ]);
 }
 
+$("dash-print").addEventListener("click", () => {
+  // 접어 둔 구획이 종이에서 빠지면 안 된다. 모두 펼친 뒤 인쇄를 부른다.
+  document.querySelectorAll("#page-dash details.section")
+    .forEach((box) => { box.open = true; });
+  const d = DASH_DATA;
+  $("dash-print-title").textContent = d
+    ? `${CLIENT} · 확정급여채무 산출 결과 (기준일 ${d.base_date})` : "";
+  drawMemberChart();
+  setTimeout(() => window.print(), 120);
+});
 $("dash-refresh").addEventListener("click", () => refreshDashboard());
 $("dash-emp-go").addEventListener("click", () =>
   refreshDashboard($("dash-emp").value.trim()));

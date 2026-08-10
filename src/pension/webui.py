@@ -445,6 +445,7 @@ def _run(request: dict) -> dict[str, Any]:
             period_start=_as_date(request.get("period_start")),
             include_sensitivity=bool(request.get("sensitivity", True)),
             include_longterm=bool(request.get("longterm", True)),
+            split_remeasurement=bool(request.get("split_remeasurement", False)),
             allow_errors=bool(request.get("force", False)),
             prior=PriorPeriod(
                 dbo=float(request.get("prior_dbo") or 0),
@@ -453,6 +454,7 @@ def _run(request: dict) -> dict[str, Any]:
                 assumptions_path=prior_assumptions,
                 past_service_cost=float(request.get("past_service_cost") or 0),
                 settlement_obligation=float(request.get("settlement_obligation") or 0),
+                longterm_dbo=float(request.get("prior_longterm_dbo") or 0),
             ),
             plan_assets=PlanAssetInput(
                 opening_fair_value=float(request.get("asset_opening") or 0),
@@ -460,6 +462,10 @@ def _run(request: dict) -> dict[str, Any]:
                 contributions=float(request.get("asset_contributions") or 0),
                 benefits_paid=float(request.get("asset_paid") or 0),
                 unpaid_benefits=float(request.get("unpaid_benefits") or 0),
+                asset_ceiling=(float(request["asset_ceiling"])
+                               if text(request.get("asset_ceiling")) else None),
+                expected_contributions=float(
+                    request.get("expected_contributions") or 0),
             ),
         ))
     except PensionDataError as exc:
@@ -497,11 +503,18 @@ def _run(request: dict) -> dict[str, Any]:
         if roll.settlement_gain:
             summary.append(("정산손익", f"{roll.settlement_gain:,.0f} 원"))
         summary.append(("보험수리적손익", f"{roll.actuarial_gain_loss:,.0f} 원"))
+        for label, amount in roll.assumption_steps:
+            summary.append((f"  └ 가정변경 · {label}", f"{amount:,.0f} 원"))
     if run.plan_assets is not None:
         assets = run.plan_assets
         summary.append(("사외적립자산", f"{assets.closing_fair_value:,.0f} 원"))
         summary.append(("순확정급여부채", f"{assets.net_liability:,.0f} 원"))
         summary.append(("적립비율", f"{assets.funded_ratio:.1%}"))
+        if assets.ceiling_effect:
+            summary.append(("자산인식상한 차감액", f"{assets.ceiling_effect:,.0f} 원"))
+    if run.longterm_rollforward is not None:
+        summary.append(("장기급여 재측정(당기손익)",
+                        f"{run.longterm_rollforward.remeasurement:,.0f} 원"))
 
     groups = [
         [name, f"{count:,}", f"{dbo:,.0f}", f"{sc:,.0f}"]

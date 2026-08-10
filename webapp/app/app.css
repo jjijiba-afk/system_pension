@@ -217,3 +217,28 @@ button.chip[aria-pressed="true"] .delta { color: #fff; opacity: 0.78; }
 @media (min-width: 760px) { .two-up { grid-template-columns: 1fr 1fr; } }
 .two-up > div { min-width: 0; }
 .two-up h4 { margin: 0 0 6px; font-size: 0.9rem; color: var(--navy); }
+
+/* ── 분석 화면 인쇄 ──
+   결산 회의 자료로 그대로 뽑는다. 조작 장치는 종이에 쓸모가 없으니 걷어내고,
+   접어 둔 구획은 JS 가 모두 펼친 뒤 인쇄를 부른다. */
+.print-only { display: none; }
+@media print {
+  @page { size: A4 portrait; margin: 14mm 12mm; }
+  body { padding: 0; max-width: none; font-size: 10pt; }
+  h1, nav.tabs, #status, #clientbar, .no-print,
+  section.page:not(.on), #page-calc, #page-edit, #page-lib, #page-runs,
+  #dash-emp, #dash-emp-go, .row:has(#dash-emp), #dash-chips { display: none !important; }
+  .print-only { display: block; }
+  #dash-print-title { font-size: 1.2rem; color: var(--navy); margin: 0 0 10px; }
+  /* 접이식 구획은 인쇄에서 늘 펼친 모양으로 나온다. */
+  details.section > summary { list-style: none; background: none; padding: 6px 0;
+    border-bottom: 1px solid var(--line); font-size: 1rem; color: var(--navy); }
+  details.section { border: 0; border-radius: 0; margin: 14px 0 0;
+    page-break-inside: avoid; }
+  .section-body { padding: 6px 0 0; }
+  .chart-scroll { overflow: visible; }
+  .chart-scroll svg { min-width: 0; }
+  .data, .readout, .strip { page-break-inside: avoid; }
+  .strip { grid-template-columns: repeat(4, 1fr); }
+  a[href]::after { content: none; }
+}

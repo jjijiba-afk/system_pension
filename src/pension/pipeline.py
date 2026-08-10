@@ -9,7 +9,7 @@ import datetime as _dt
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from .assumptions import Assumptions, load_assumptions
 from .config import CalculationConfig, read_config
@@ -19,7 +19,11 @@ from .models import Roster
 from .normalize import BenefitPlan, RetirementReason
 from .planassets import PlanAssets, build_plan_assets
 from .readers import read_roster
-from .rollforward import RollForward, build_rollforward, initial_period
+from .projection import Projection, project_next_year
+from .rollforward import (
+    LongTermRollForward, RollForward, build_longterm_rollforward,
+    build_rollforward, initial_period,
+)
 from .sensitivity import DEFAULT_SHOCKS, SensitivityResult, Shock, run_sensitivity
 from .upload import build_upload
 from .valuation import ValuationResult, value_roster
@@ -60,6 +64,8 @@ class PriorPeriod:
     계산한다. 정년 연장처럼 지급률 밖에서 일어난 개정은 프로그램이 알 수 없으니
     직접 넣어야 하고, 넣으면 자동 계산 대신 그 값을 쓴다.
     """
+    longterm_dbo: float = 0.0
+    """전기말 장기종업원급여채무. 주면 장기급여 증감표를 만든다."""
     settlement_obligation: float = 0.0
     """정산(중간정산·전출)으로 **소멸한** 확정급여채무.
 
@@ -84,6 +90,10 @@ class PlanAssetInput:
     """자산에서 직접 지급된 퇴직급여. 0 이면 명부의 사외자산 지급액을 쓴다."""
     unpaid_benefits: float = 0.0
     """미지급 퇴직급여. 퇴직했으나 결산일까지 지급하지 않은 금액."""
+    asset_ceiling: float | None = None
+    """자산인식상한(문단 64). 초과적립일 때만 뜻이 있다. ``None`` 이면 미적용."""
+    expected_contributions: float = 0.0
+    """차년도 예상 부담금. 비우면 당기 납입액을 그대로 쓴다(문단 147(b))."""
 
     def is_empty(self) -> bool:
         return not (self.opening_fair_value or self.closing_fair_value
@@ -111,6 +121,12 @@ class RunOptions:
     """
     include_sensitivity: bool = True
     include_longterm: bool = True
+    split_remeasurement: bool = False
+    """가정변경효과를 사망률·퇴직률·임금상승률·할인율로 쪼갤지.
+
+    가정을 하나씩 갈아 끼우며 재는 것이라 **명부 전체 산출이 네 번 더** 돈다.
+    전기 기초율을 준 회차에서만 의미가 있고, 없으면 조용히 건너뛴다.
+    """
     shocks: tuple[Shock, ...] = DEFAULT_SHOCKS
     prior: PriorPeriod = field(default_factory=PriorPeriod)
     plan_assets: PlanAssetInput = field(default_factory=PlanAssetInput)
@@ -139,6 +155,10 @@ class PensionRun:
     rollforward: RollForward | None = None
     plan_assets: PlanAssets | None = None
     """사외적립자산 증감과 순확정급여부채. 입력이 없으면 ``None``."""
+    longterm_rollforward: LongTermRollForward | None = None
+    """장기급여 증감표. 전기 장기급여채무를 주지 않으면 ``None``."""
+    projection: Projection | None = None
+    """차년도 예측. 산출을 마치면 늘 만든다."""
     general_info: Any = None
     """``1)일반사항`` 에서 읽은 것. 시트가 없으면 ``None``."""
     active_upload: list[list[Any]] = field(default_factory=list)
@@ -350,9 +370,33 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
     progress("증감분석을 만드는 중", 0.90)
     run.rollforward = _build_rollforward(run, options, progress)
     run.plan_assets = _build_plan_assets(run, options)
+    run.longterm_rollforward = _build_longterm_rollforward(run, options)
+    run.projection = project_next_year(
+        run, contributions=options.plan_assets.expected_contributions or None
+    )
 
     progress("산출을 마쳤습니다", 1.0)
     return run
+
+
+def _build_longterm_rollforward(
+    run: PensionRun, options: RunOptions
+) -> LongTermRollForward | None:
+    """장기급여 증감표. 전기 채무를 주지 않으면 만들지 않는다."""
+    if run.longterm is None or not options.prior.longterm_dbo:
+        return None
+    # 지급액은 회사 장부(자료요청서 8번)가 있으면 그것을, 없으면 퇴직자명부에서.
+    info = run.general_info
+    paid = (info.longterm_paid if info is not None and info.longterm_paid
+            else run.longterm_paid)
+    return build_longterm_rollforward(
+        opening_dbo=options.prior.longterm_dbo,
+        service_cost=run.longterm.service_cost,
+        discount_rate=options.prior.discount_rate or _fallback_rate(run),
+        benefits_paid=paid,
+        closing_dbo=run.longterm.dbo,
+        period_years=_period_years(run.config.base_date, _period_start(run, options)),
+    )
 
 
 def _period_years(base_date: _dt.date, start: _dt.date | None) -> float:
@@ -390,6 +434,7 @@ def _build_rollforward(
     dbo_prior_all: float | None = None
     dbo_after_amendment: float | None = None
     service_cost_prior_basis = 0.0
+    assumption_steps: list[tuple[str, float]] = []
     if prior.assumptions_path:
         progress("전기 가정으로 다시 산출하는 중", 0.93)
         prior_assumptions = load_assumptions(prior.assumptions_path, label="전기 가정")
@@ -402,6 +447,12 @@ def _build_rollforward(
             label="전기 계리가정 + 당기 지급률",
         )
         dbo_after_amendment = value_roster(run.roster, run.config, amended).dbo
+
+        if options.split_remeasurement:
+            progress("가정변경효과를 가정별로 나누는 중", 0.95)
+            assumption_steps = _split_assumption_change(
+                run, amended, dbo_after_amendment
+            )
 
     # 당기근무원가는 **기초 가정** 으로 재는 것이 원칙이다(문단 57). 전기 가정을
     # 주지 않았으면 당기 것으로 갈음할 수밖에 없다.
@@ -430,7 +481,7 @@ def _build_rollforward(
     if not past_service_cost and dbo_after_amendment is not None:
         past_service_cost = dbo_after_amendment - (dbo_prior_all or 0.0)
 
-    return build_rollforward(
+    roll = build_rollforward(
         opening_dbo=prior.dbo,
         service_cost=service_cost,
         interest_cost=interest_cost,
@@ -444,6 +495,44 @@ def _build_rollforward(
         dbo_after_amendment=dbo_after_amendment,
         past_service_cost=past_service_cost,
     )
+    roll.assumption_steps = assumption_steps
+    return roll
+
+
+#: 가정을 갈아 끼우는 차례. 인구통계적 가정을 먼저, 재무적 가정을 나중에 재는
+#: 것이 공시 관행이다(문단 141(c) 의 세부 분해). 순서가 바뀌면 교차효과가 어느
+#: 항목에 붙는지가 달라지므로 표에 차례를 함께 적는다.
+_ASSUMPTION_ORDER: Final = (
+    ("사망률", "mortality"),
+    ("퇴직률", "withdrawal"),
+    ("임금상승률", "salary"),
+    ("할인율", "discount"),
+)
+
+
+def _split_assumption_change(
+    run: PensionRun, amended: Assumptions, start_dbo: float
+) -> list[tuple[str, float]]:
+    """가정변경효과를 가정별로 쪼갠다.
+
+    제도개정까지 반영한 채무(``start_dbo``)에서 출발해 전기 가정을 당기 가정으로
+    하나씩 갈아 끼우며 그때마다 채무를 다시 잰다. 각 단계의 증가분이 그 가정의
+    몫이고, 마지막 단계는 당기 가정 전부를 쓴 것이므로 기말채무와 같아진다 —
+    그래서 몫의 합은 가정변경효과와 정확히 맞아떨어진다.
+    """
+    steps: list[tuple[str, float]] = []
+    current = run.assumptions
+    working = amended
+    previous = start_dbo
+
+    for label, attribute in _ASSUMPTION_ORDER:
+        working = working.replace(
+            label=f"{label}까지 당기 가정", **{attribute: getattr(current, attribute)}
+        )
+        moved = value_roster(run.roster, run.config, working).dbo
+        steps.append((label, moved - previous))
+        previous = moved
+    return steps
 
 
 def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | None:
@@ -484,6 +573,7 @@ def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | Non
         closing_dbo=run.valuation.dbo,
         unpaid_benefits=unpaid,
         period_years=_period_years(run.config.base_date, _period_start(run, options)),
+        asset_ceiling=given.asset_ceiling,
     )
 
 
