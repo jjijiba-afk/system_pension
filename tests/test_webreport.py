@@ -64,10 +64,10 @@ class TestSeveranceReport:
 
     def test_maturity_buckets_add_up(self, full_run) -> None:
         """만기분석 구간 합 = 전체 기대지급액. 구간을 빠뜨리면 합이 깨진다."""
-        from pension.webreport import _maturity_buckets
+        from pension.webreport import maturity_buckets
 
         flows = full_run.valuation.cash_flows()
-        buckets = _maturity_buckets(flows)
+        buckets = maturity_buckets(flows)
         assert sum(v for _, v in buckets) == pytest.approx(sum(flows.values()))
         assert buckets[0][0] == "1년미만"
         assert buckets[-1][0] == "20년이상"

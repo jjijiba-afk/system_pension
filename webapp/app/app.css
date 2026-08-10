@@ -4,7 +4,9 @@
    읽기 쉽고, 화면을 캡처해 감사인·담당자에게 그대로 보내는 일이 잦다. */
 :root { color-scheme: light;
   --navy: #1F3864; --navy-soft: #44546A; --line: #C4CBD8; --hint: #5B6478;
-  --bg-soft: #EEF3F8; --paper: #FFFFFF; --ink: #1A1D23; }
+  --bg-soft: #EEF3F8; --paper: #FFFFFF; --ink: #1A1D23;
+  /* 분석 화면의 계열 색. 퇴직사유 셋과 확률 곡선을 눈으로 가른다. */
+  --plum: #7A5470; --teal: #2C6C67; --amber: #8F6318; --rust: #9A3B28; }
 * { box-sizing: border-box; }
 html { background: var(--paper); }
 body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
@@ -149,3 +151,69 @@ dialog::backdrop { background: rgba(0,0,0,0.35); }
 /* 자주 안 쓰는 패널 줄은 [세부 설정] 을 눌러야 보인다. */
 .grid tbody tr.panel.detail { display: none; }
 .grid tbody.show-detail tr.panel.detail { display: table-row; }
+
+/* ── 분석 화면 ──
+   산출을 마칠 때마다 그 결과로 다시 그린다. 숫자는 모두 산출 엔진이 낸 값이고
+   이 화면은 배치만 한다. */
+.strip { display: grid; gap: 8px; margin: 12px 0 4px;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); }
+.strip .stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  background: var(--paper); }
+.strip dt { font-size: 0.72rem; color: var(--hint); margin: 0 0 3px; }
+.strip dd { margin: 0; font-size: 1.1rem; font-weight: bold; color: var(--navy);
+  font-variant-numeric: tabular-nums; }
+.strip dd small { font-size: 0.72rem; font-weight: normal; color: var(--hint);
+  margin-left: 2px; }
+
+/* 가정을 흔들어 보는 칩. 눌린 것이 지금 그려진 시나리오다. */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chipset { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chipset > .tag { font-size: 0.76rem; color: var(--hint); margin-right: 2px; }
+button.chip { font: inherit; font-size: 0.86rem; padding: 7px 11px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px; background: transparent;
+  color: inherit; display: inline-flex; gap: 6px; align-items: baseline;
+  font-variant-numeric: tabular-nums; }
+button.chip[aria-pressed="true"] { background: var(--navy); border-color: var(--navy);
+  color: #fff; }
+button.chip .delta { font-size: 0.78rem; color: var(--hint); }
+button.chip[aria-pressed="true"] .delta { color: #fff; opacity: 0.78; }
+
+.chart-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 10px 0 0; }
+.chart-scroll svg { display: block; width: 100%; min-width: 520px; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px;
+  font-size: 0.8rem; color: var(--hint); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  margin-right: 5px; vertical-align: -1px; }
+.legend i.ln { width: 14px; height: 2px; border-radius: 0; vertical-align: 4px; }
+
+/* 막대를 누르면 그 해의 곱셈식이 여기 펼쳐진다. */
+.readout { border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft);
+  padding: 12px 14px; margin-top: 12px; display: grid; gap: 12px;
+  grid-template-columns: 1fr; }
+@media (min-width: 720px) { .readout { grid-template-columns: 200px 1fr; } }
+.readout .head { font-size: 0.78rem; color: var(--hint); }
+.readout .big { font-size: 1.32rem; font-weight: bold; color: var(--navy);
+  font-variant-numeric: tabular-nums; line-height: 1.2; }
+.readout dl { margin: 6px 0 0; display: grid; grid-template-columns: auto 1fr;
+  gap: 3px 10px; font-size: 0.8rem; }
+.readout dt { color: var(--hint); }
+.readout dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.readout .causes { display: flex; flex-wrap: wrap; gap: 14px; }
+.readout .cause { font-size: 0.8rem; min-width: 170px; }
+.readout .cause b.nm { display: flex; align-items: center; gap: 6px; }
+.readout .cause b.nm i { width: 8px; height: 8px; border-radius: 2px; }
+.readout .expr { color: var(--hint); font-size: 0.76rem; line-height: 1.6;
+  font-variant-numeric: tabular-nums; margin-top: 2px; }
+.readout .expr b { color: var(--ink); }
+
+.data tr.on { background: var(--bg-soft); }
+.data tr.on td { font-weight: bold; }
+.data tbody tr.pick { cursor: pointer; }
+.data td.neg { color: var(--rust); }
+.data tr.total td { border-top: 2px solid var(--navy-soft); font-weight: bold; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 2px;
+  margin-right: 5px; }
+.two-up { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 760px) { .two-up { grid-template-columns: 1fr 1fr; } }
+.two-up > div { min-width: 0; }
+.two-up h4 { margin: 0 0 6px; font-size: 0.9rem; color: var(--navy); }
