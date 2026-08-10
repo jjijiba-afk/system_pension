@@ -1001,6 +1001,24 @@ class TestMemberDetailAndReport:
     def test_report_before_any_run_is_refused(self) -> None:
         assert "먼저 산출을" in call_error("report_html", kind="severance")
 
+    def test_dashboard_follows_the_last_run(self, tmp_path, roster_path) -> None:
+        """분석 화면은 방금 산출한 회차를 본다 — 다시 산출하면 값도 바뀐다."""
+        first = self._run(tmp_path, roster_path)
+        board = call("dashboard")
+        assert board["totals"]["dbo"] == pytest.approx(
+            float(first["values"]["dbo"]))
+        assert board["scenarios"][0]["trace"]
+
+        # 기준일을 당겨 다시 산출하면 분석 값도 그 회차로 갈린다.
+        again = self._run(tmp_path, roster_path, base_date="2025-06-30")
+        moved = call("dashboard")
+        assert moved["base_date"] == "2025-06-30"
+        assert moved["totals"]["dbo"] == pytest.approx(float(again["values"]["dbo"]))
+        assert moved["totals"]["dbo"] != board["totals"]["dbo"]
+
+    def test_dashboard_before_any_run_is_refused(self) -> None:
+        assert "먼저 산출을" in call_error("dashboard")
+
 
 class TestPlanAssetsAndAmendment:
     """사외적립자산과 제도개정 — 재무제표에 바로 들어가는 숫자들."""

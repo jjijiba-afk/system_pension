@@ -532,3 +532,50 @@ def test_build_stamp_is_visible_and_matches_the_cache(page) -> None:
     stamp = page.inner_text("#build-stamp").strip()
     assert re.fullmatch(r"[0-9a-f]{12}", stamp), f"빌드 값이 이상하다: {stamp}"
     assert f'"pension-{stamp}"' in (DIST / "sw.js").read_text(encoding="utf-8")
+
+
+def test_dashboard_tab_follows_each_run(page, tmp_path) -> None:
+    """분석 탭 — 산출할 때마다 그 회차로 다시 그려져야 한다."""
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+
+    page.click("#tab-dash")
+    page.wait_for_selector("#dash-body", state="visible", timeout=60_000)
+    assert page.locator("#dash-strip .stat").count() >= 6
+    assert page.locator("#dash-chart rect").count() > 0
+    assert page.locator("#dash-trace tr").count() > 2
+    first = page.inner_text("#dash-strip")
+
+    # 막대를 누르면 그 해의 계산식이 펼쳐진다.
+    page.locator("#dash-chart rect.hit").nth(1).click()
+    assert "귀속액" in page.inner_text("#dash-readout")
+
+    # 가정을 흔들면 채무가 움직인다.
+    base = page.inner_text("#dash-readout .big")
+    page.locator("#dash-chips .chip").nth(1).click()
+    assert page.inner_text("#dash-readout .big") != base
+
+    # 사번을 지정해 다른 사람을 해부한다.
+    page.fill("#dash-emp", "A0002")
+    page.click("#dash-emp-go")
+    assert "A0002" in page.inner_text("#dash-who")
+
+    # 기준일을 옮겨 다시 산출하면 분석 값도 그 회차로 갈린다.
+    # (앞으로 당기면 퇴직자 퇴사일이 기준일보다 늦어 검증에 걸린다 — 뒤로 민다.)
+    open_calc(page, "sec-dates")
+    page.fill("#base_date", "2026-06-30")
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    page.click("#tab-dash")
+    assert page.inner_text("#dash-when").strip() == "기준일 2026-06-30"
+    assert page.inner_text("#dash-strip") != first

@@ -99,7 +99,8 @@ boot();
 
 // ── 큰 탭 ────────────────────────────────────────────────────────
 const PAGES = [["tab-calc", "page-calc"], ["tab-edit", "page-edit"],
-               ["tab-lib", "page-lib"], ["tab-runs", "page-runs"]];
+               ["tab-dash", "page-dash"], ["tab-lib", "page-lib"],
+               ["tab-runs", "page-runs"]];
 for (const [tab, page] of PAGES) {
   $(tab).addEventListener("click", () => {
     // 탭을 옮기기 전에 편집 중이던 가정을 먼저 확정 저장한다. 디바운스만
@@ -1462,6 +1463,10 @@ $("form").addEventListener("submit", async (event) => {
     };
     if (!$("run-name").value && loadedRun) $("run-name").value = loadedRun.name;
 
+    // 산출할 때마다 분석 화면을 그 결과로 다시 그린다 — 두 화면이 다른 회차를
+    // 보여 주는 일이 없어야 한다.
+    refreshDashboard();
+
     $("result").style.display = "block";
     status("산출을 마쳤습니다.");
     $("result").scrollIntoView({ behavior: "smooth" });
@@ -1474,6 +1479,452 @@ $("form").addEventListener("submit", async (event) => {
 
 $("dl-result").addEventListener("click", () => download("/work/산출결과.xlsx", "산출결과.xlsx"));
 $("dl-members").addEventListener("click", () => download("/work/개인별결과.xlsx", "개인별결과.xlsx"));
+
+// ═════════ 분석 화면 ═════════════════════════════════════════════
+// 산출을 마칠 때마다 그 결과로 다시 그린다. 숫자는 전부 파이썬이 낸 값이고
+// 여기서는 배치만 한다 — 화면과 결과 엑셀이 어긋나는 사고를 막기 위해서다.
+
+const CAUSES = [
+  { key: "중도", color: "var(--navy)", label: "중도퇴직" },
+  { key: "사망", color: "var(--plum)", label: "사망퇴직" },
+  { key: "정년", color: "var(--teal)", label: "정년퇴직" },
+];
+const SERIES = ["var(--navy)", "var(--teal)", "var(--plum)", "var(--amber)"];
+const DASH = ["", "7 4", "2 4", "10 3 2 3"];
+
+const won = (n) => (n == null ? "—" : Math.round(n).toLocaleString("ko-KR"));
+const eok = (n) => (Math.abs(n) >= 1e12 ? (n / 1e12).toFixed(1) + "조"
+                  : (n / 1e8).toFixed(Math.abs(n) >= 1e10 ? 0 : 1) + "억");
+const pctOf = (n, d = 2) => (n * 100).toFixed(d) + "%";
+// 차감 항목은 공시 표에서 쓰는 괄호 표기로.
+const signed = (v) => (v < 0 ? `(${won(-v)})` : won(v));
+// 눈금은 사람이 읽는 자리에서 끊는다 — 0.1억·0.3억 같은 값은 읽어도 남지 않는다.
+function niceStep(max, ticks) {
+  const raw = max / ticks, mag = 10 ** Math.floor(Math.log10(raw)), n = raw / mag;
+  return mag * (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10);
+}
+
+let DASH_DATA = null;   // 마지막으로 그린 분석 자료
+let dashScenario = 0;
+let dashYear = null;
+let dashRate = 0;
+
+function refreshDashboard(employeeId = "") {
+  let data;
+  try {
+    data = py("dashboard", employeeId ? { employee_id: employeeId } : {});
+  } catch (error) {
+    if (employeeId) { alert(error.message); return; }
+    $("dash-empty").style.display = "";
+    $("dash-body").style.display = "none";
+    DASH_DATA = null;
+    return;
+  }
+  DASH_DATA = data;
+  dashScenario = 0;
+  dashYear = null;
+  $("dash-empty").style.display = "none";
+  $("dash-body").style.display = "";
+  $("dash-when").textContent = `기준일 ${data.base_date}`;
+  $("dash-scope").textContent =
+    `${CLIENT} · 재직 ${data.totals.headcount.toLocaleString("ko-KR")}명`
+    + (data.issues.오류 || data.issues.경고
+       ? ` · 오류 ${data.issues.오류} / 경고 ${data.issues.경고}` : "");
+  drawDashStrip();
+  drawMemberChart();
+  drawDashGroups();
+  drawDashRoll();
+  drawDashSensitivity();
+  drawDashMaturity();
+  drawDashRates();
+  drawDashLongterm();
+  refreshDashBadges();
+}
+
+function refreshDashBadges() {
+  const d = DASH_DATA;
+  if (!d) return;
+  const mark = (id, text) => {
+    const box = $(id); if (box) box.querySelector("summary .count").textContent = text;
+  };
+  mark("sec-dash-member", `${d.profile.사번} · ${won(d.scenarios[0].dbo)}원`);
+  mark("sec-dash-group", `${d.groups.length}개 직군`);
+  mark("sec-dash-roll", d.rollforward.length ? "전기 연결됨" : "전기 미연결");
+  mark("sec-dash-sens", d.sensitivity.length ? `${d.sensitivity.length}건` : "끄고 산출");
+  mark("sec-dash-mat", `${d.maturity.length}구간`);
+  mark("sec-dash-rates", Object.keys(d.curves).join(" · "));
+  mark("sec-dash-lt", d.totals.lt_head
+    ? `${d.totals.lt_head}명 · ${eok(d.totals.lt_dbo)}원` : "산출 안 함");
+}
+
+function drawDashStrip() {
+  const t = DASH_DATA.totals, net = DASH_DATA.net;
+  const rows = [
+    ["재직 인원", t.headcount.toLocaleString("ko-KR"), "명"],
+    ["확정급여채무", eok(t.dbo), "원"],
+    ["당기근무원가", eok(t.sc), "원"],
+    ["이자원가 (차기)", eok(t.ic), "원"],
+    ["가중평균만기", t.duration.toFixed(2), "년"],
+    ["적용 할인율", pctOf(DASH_DATA.single_rate, 3), ""],
+  ];
+  if (net.length) rows.push(["순확정급여부채", eok(net[net.length - 1][1]), "원"]);
+  if (t.lt_dbo) rows.push(["장기급여채무", eok(t.lt_dbo), "원"]);
+  $("dash-strip").replaceChildren(...rows.map(([k, v, u]) => {
+    const box = el("div", { class: "stat" }, el("dt", {}, k));
+    const value = el("dd", {}, v);
+    if (u) value.append(el("small", {}, u));
+    box.append(value);
+    return box;
+  }));
+}
+
+/* ── 개인별 채무 해부 ── */
+const traceYears = (s) => [...new Set(s.trace.map((r) => r.t))].sort((a, b) => a - b);
+
+function drawMemberChart() {
+  const d = DASH_DATA, s = d.scenarios[dashScenario];
+  const years = traceYears(s);
+  // 처음에는 첫 해에 선다 — 누적이 몇 %에서 출발하는지 보이고 큰 막대까지 따라간다.
+  if (dashYear === null || !years.includes(dashYear)) dashYear = years[0];
+
+  const peak = Math.max(...d.scenarios.flatMap((sc) =>
+    traceYears(sc).map((t) => sc.trace.filter((r) => r.t === t)
+      .reduce((sum, r) => sum + r.dbo, 0))));
+  const step = niceStep(peak, 4), ymax = peak * 1.05;
+  const unit = ymax >= 1e9 ? { div: 1e8, name: "억원" } : { div: 1e6, name: "백만원" };
+
+  const W = 1000, H = 380, L = 74, R = 52, T = 34, B = 42;
+  const iw = W - L - R, ih = H - T - B;
+  const bw = Math.min(38, (iw / years.length) * 0.62);
+  const xOf = (i) => L + (iw / years.length) * (i + 0.5);
+  const yOf = (v) => T + ih - (v / ymax) * ih;
+  const p = [];
+
+  for (let v = 0; v <= ymax; v += step) {
+    const y = yOf(v);
+    p.push(`<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)" opacity=".5"/>`);
+    p.push(`<text x="${L - 9}" y="${y + 4}" text-anchor="end" font-size="11"
+      fill="var(--hint)">${(v / unit.div).toFixed(0)}</text>`);
+  }
+  p.push(`<text x="${L - 9}" y="${T - 12}" text-anchor="end" font-size="10.5"
+    fill="var(--hint)">${unit.name}</text>`);
+  [0, 0.5, 1].forEach((q) => p.push(`<text x="${W - R + 9}" y="${T + ih - q * ih + 4}"
+    font-size="11" fill="var(--amber)">${q * 100}%</text>`));
+
+  years.forEach((t, i) => {
+    const rows = s.trace.filter((r) => r.t === t);
+    let acc = 0;
+    const on = t === dashYear;
+    CAUSES.forEach((c) => {
+      const v = rows.filter((r) => r.cause === c.key).reduce((sum, r) => sum + r.dbo, 0);
+      if (v <= 0) return;
+      p.push(`<rect x="${xOf(i) - bw / 2}" y="${yOf(acc + v)}" width="${bw}"
+        height="${(v / ymax) * ih}" fill="${c.color}" opacity="${on ? 1 : 0.62}"/>`);
+      acc += v;
+    });
+    p.push(`<rect class="hit" data-t="${t}" x="${xOf(i) - iw / years.length / 2}" y="${T}"
+      width="${iw / years.length}" height="${ih}" fill="transparent" tabindex="0"
+      role="button" aria-label="경과 ${t}년차"/>`);
+    p.push(`<text x="${xOf(i)}" y="${H - B + 18}" text-anchor="middle" font-size="11"
+      fill="${on ? "var(--ink)" : "var(--hint)"}" font-weight="${on ? 700 : 400}">${t}</text>`);
+  });
+
+  const line = years.map((t, i) => {
+    const r = s.trace.find((row) => row.t === t);
+    return `${xOf(i)},${T + ih - r.survival * ih}`;
+  }).join(" ");
+  p.push(`<polyline points="${line}" fill="none" stroke="var(--amber)" stroke-width="2"
+    stroke-linejoin="round"/>`);
+  years.forEach((t, i) => {
+    const r = s.trace.find((row) => row.t === t);
+    p.push(`<circle cx="${xOf(i)}" cy="${T + ih - r.survival * ih}"
+      r="${t === dashYear ? 4 : 2.4}" fill="var(--amber)"/>`);
+  });
+  p.push(`<line x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}" stroke="var(--line)"/>`);
+  p.push(`<text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="11"
+    fill="var(--hint)">경과연수 (년)</text>`);
+
+  const svg = $("dash-chart");
+  svg.innerHTML = p.join("");
+  svg.querySelectorAll(".hit").forEach((h) => {
+    const pick = () => { dashYear = +h.dataset.t; drawMemberChart(); };
+    h.addEventListener("click", pick);
+    h.addEventListener("focus", pick);
+    h.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+    });
+  });
+
+  const m = d.profile;
+  $("dash-who").textContent = `${m.사번} ${m.성명} · ${m.연령}세 ${m.성별} · ${m.직군}`
+    + ` · 근속 ${m.근속}년 · 정년 ${m.정년}세 · 월평균임금 ${won(m.월평균임금)}원`
+    + ` · 지급률규정 ${m.지급률규정}`;
+  drawDashChips();
+  drawDashReadout(s);
+  drawDashTrace(s);
+  refreshDashBadges();
+}
+
+function drawDashChips() {
+  const base = DASH_DATA.scenarios[0].dbo;
+  const groups = [["", [0]], ["할인율", [1, 2]], ["임금상승률", [3, 4]],
+                  ["사망률", [5, 6]], ["퇴직률", [7, 8]]]
+    .filter(([, list]) => list.every((i) => DASH_DATA.scenarios[i]));
+  $("dash-chips").innerHTML = groups.map(([tag, list]) => `
+    <span class="chipset">${tag ? `<span class="tag">${tag}</span>` : ""}${
+      list.map((i) => {
+        const s = DASH_DATA.scenarios[i], delta = (s.dbo - base) / base;
+        const name = i === 0 ? "기준" : s.label.replace(/^\S+\s/, "");
+        return `<button class="chip" type="button" data-s="${i}"
+          aria-pressed="${i === dashScenario}">${name}${i === 0 ? ""
+          : `<span class="delta">${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}%</span>`}</button>`;
+      }).join("")}</span>`).join("");
+  $("dash-chips").querySelectorAll(".chip").forEach((b) =>
+    b.addEventListener("click", () => { dashScenario = +b.dataset.s; drawMemberChart(); }));
+}
+
+function drawDashReadout(s) {
+  const rows = s.trace.filter((r) => r.t === dashYear);
+  const total = rows.reduce((sum, r) => sum + r.dbo, 0);
+  const cum = s.trace.filter((r) => r.t <= dashYear).reduce((sum, r) => sum + r.dbo, 0);
+  const f = rows[0];
+  const causes = rows.map((r) => {
+    const c = CAUSES.find((x) => x.key === r.cause) || CAUSES[0];
+    return `<div class="cause"><b class="nm"><i style="background:${c.color}"></i>${c.label}</b>
+      <div class="expr">귀속액 ${won(r.attributed)}<br>× 퇴직확률 ${pctOf(r.exit_probability, 3)}<br>
+      × 할인계수 ${r.discount.toFixed(6)}<br>= <b>${won(r.dbo)}원</b></div></div>`;
+  }).join("");
+  $("dash-readout").innerHTML = `
+    <div><div class="head">경과 ${dashYear}년차 · 지급시점 ${f.timing}년</div>
+      <div class="big">${won(total)}<small> 원</small></div>
+      <dl><dt>퇴직 시 연령</dt><dd>${f.age.toFixed(1)}세</dd>
+        <dt>그때 근속</dt><dd>${f.service.toFixed(2)}년</dd>
+        <dt>그때 월평균임금</dt><dd>${won(f.wage)}</dd>
+        <dt>연초 잔존확률</dt><dd>${pctOf(f.survival)}</dd>
+        <dt>누적 채무</dt><dd>${(cum / s.dbo * 100).toFixed(1)}%</dd></dl></div>
+    <div class="causes">${causes}</div>`;
+}
+
+function drawDashTrace(s) {
+  const head = ["경과", "사유", "연령", "근속", "월평균임금", "중도퇴직률", "사망률",
+                "잔존확률", "퇴직확률", "퇴직 시 지급액", "귀속액", "할인계수", "채무 기여"];
+  const body = s.trace.map((r) => {
+    const c = CAUSES.find((x) => x.key === r.cause) || CAUSES[0];
+    return `<tr class="pick ${r.t === dashYear ? "on" : ""}" data-t="${r.t}">
+      <td>${r.t}년차</td>
+      <td><span class="dot" style="background:${c.color}"></span>${c.label}</td>
+      <td class="num">${r.age.toFixed(1)}</td><td class="num">${r.service.toFixed(2)}</td>
+      <td class="num">${won(r.wage)}</td><td class="num">${pctOf(r.withdrawal)}</td>
+      <td class="num">${pctOf(r.mortality, 3)}</td><td class="num">${pctOf(r.survival)}</td>
+      <td class="num">${pctOf(r.exit_probability, 3)}</td><td class="num">${won(r.benefit)}</td>
+      <td class="num">${won(r.attributed)}</td><td class="num">${r.discount.toFixed(6)}</td>
+      <td class="num">${won(r.dbo)}</td></tr>`;
+  }).join("");
+  $("dash-trace").innerHTML = `<tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr>${body}
+    <tr class="total"><td colspan="12">합계 = 확정급여채무</td>
+      <td class="num">${won(s.dbo)}</td></tr>`;
+  $("dash-trace").querySelectorAll("tr.pick").forEach((tr) =>
+    tr.addEventListener("click", () => { dashYear = +tr.dataset.t; drawMemberChart(); }));
+  $("sec-dash-trace").querySelector("summary .count").textContent =
+    `${s.trace.length}줄 · 합계 ${won(s.dbo)}원`;
+}
+
+/* ── 직군·증감·자산 ── */
+function dataTable(node, head, rows, foot) {
+  node.innerHTML = `<tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr>`
+    + rows.map((r) => {
+        const cells = (r.cells || r);
+        return `<tr class="${r.cls || ""}">` + cells.map((c, i) =>
+          i === 0 ? `<td>${c}</td>`
+                  : `<td class="num${String(c).startsWith("(") ? " neg" : ""}">${c}</td>`
+        ).join("") + "</tr>";
+      }).join("")
+    + (foot || "");
+}
+
+function drawDashGroups() {
+  const d = DASH_DATA, t = d.totals;
+  dataTable($("dash-groups"), ["직군", "인원", "확정급여채무", "당기근무원가", "비중"],
+    d.groups.map((g) => [g.name, `${g.n.toLocaleString("ko-KR")}명`,
+      won(g.dbo), won(g.sc), pctOf(g.dbo / t.dbo, 1)]),
+    `<tr class="total"><td>합계</td><td class="num">${t.headcount.toLocaleString("ko-KR")}명</td>
+     <td class="num">${won(t.dbo)}</td><td class="num">${won(t.sc)}</td>
+     <td class="num">100.0%</td></tr>`);
+  const ex = Object.entries(d.excluded);
+  $("dash-excluded").innerHTML = ex.length
+    ? `<p class="hint" style="margin-top:8px">산출 제외 — ${
+        ex.map(([k, v]) => `<b>${v}명</b> ${k}`).join(" / ")}</p>`
+    : "";
+}
+
+function drawDashRoll() {
+  const d = DASH_DATA;
+  const kv = (rows) => rows.map(([k, v], i) => ({
+    cls: i === 0 || i === rows.length - 1 ? "total" : "", cells: [k, signed(v)] }));
+  const box = $("dash-roll");
+  if (!d.rollforward.length && !d.assets.length) {
+    box.innerHTML = `<p class="hint">전기 산출 결과와 사외적립자산을 넣지 않아
+      증감분석·자산 증감표가 없습니다. [산출] 탭의 5·6번 칸을 채우면 채워집니다.</p>`;
+    return;
+  }
+  box.innerHTML = `<div class="two-up">
+    <div><h4>확정급여채무 변동내역</h4><div class="scroll-x">
+      <table class="data" id="dash-roll-tbl"></table></div></div>
+    <div><h4>사외적립자산 · 순확정급여부채</h4><div class="scroll-x">
+      <table class="data" id="dash-asset-tbl"></table></div>
+      <div class="scroll-x"><table class="data" id="dash-net-tbl"></table></div></div>
+  </div>`;
+  if (d.rollforward.length) {
+    dataTable($("dash-roll-tbl"), ["항목", "금액"], kv(d.rollforward));
+  } else {
+    $("dash-roll-tbl").innerHTML =
+      `<tr><td class="hint">전기 산출을 연결하지 않았습니다.</td></tr>`;
+  }
+  if (d.assets.length) {
+    dataTable($("dash-asset-tbl"), ["항목", "금액"], kv(d.assets));
+    dataTable($("dash-net-tbl"), ["순확정급여부채", `적립비율 ${pctOf(d.funded, 1)}`],
+      d.net.map(([k, v], i) => ({
+        cls: i === d.net.length - 1 ? "total" : "", cells: [k, signed(v)] })));
+  } else {
+    $("dash-asset-tbl").innerHTML =
+      `<tr><td class="hint">사외적립자산 입력이 없습니다.</td></tr>`;
+    $("dash-net-tbl").innerHTML = "";
+  }
+}
+
+function drawDashSensitivity() {
+  const cases = DASH_DATA.sensitivity;
+  if (!cases.length) {
+    $("dash-sens").innerHTML = "";
+    $("dash-sens-tbl").innerHTML =
+      `<tr><td class="hint">민감도분석을 끄고 산출했습니다. [산출] 탭 옵션에서 켜세요.</td></tr>`;
+    return;
+  }
+  const W = 1000, H = 250, L = 152, R = 62, T = 12, B = 20;
+  const iw = W - L - R, ih = H - T - B, mid = L + iw / 2;
+  const bh = Math.min(20, (ih / cases.length) * 0.6);
+  const vmax = Math.max(...cases.map((c) => Math.abs(c[3]))) * 1.25 || 1;
+  const xOf = (r) => mid + (r / vmax) * (iw / 2);
+  const p = [`<line x1="${mid}" x2="${mid}" y1="${T}" y2="${T + ih}" stroke="var(--line)"/>`];
+  cases.forEach(([name, , , ratio], i) => {
+    const y = T + (ih / cases.length) * (i + 0.5);
+    p.push(`<rect x="${Math.min(mid, xOf(ratio))}" y="${y - bh / 2}"
+      width="${Math.abs(xOf(ratio) - mid)}" height="${bh}"
+      fill="${ratio >= 0 ? "var(--navy)" : "var(--teal)"}" opacity=".8"/>`);
+    p.push(`<text x="${L - 10}" y="${y + 4}" text-anchor="end" font-size="11.5"
+      fill="var(--ink)">${name}</text>`);
+    p.push(`<text x="${xOf(ratio) + (ratio >= 0 ? 7 : -7)}" y="${y + 4}"
+      text-anchor="${ratio >= 0 ? "start" : "end"}" font-size="11"
+      fill="var(--hint)">${ratio >= 0 ? "+" : ""}${(ratio * 100).toFixed(2)}%</text>`);
+  });
+  $("dash-sens").innerHTML = p.join("");
+  dataTable($("dash-sens-tbl"), ["가정 변동", "확정급여채무", "증감액", "변화율"],
+    cases.map(([n, dbo, ch, r]) => [n, won(dbo), signed(ch),
+      `${r >= 0 ? "+" : ""}${(r * 100).toFixed(2)}%`]));
+}
+
+function drawDashMaturity() {
+  const rows = DASH_DATA.maturity;
+  const W = 1000, H = 260, L = 62, R = 16, T = 14, B = 66;
+  const iw = W - L - R, ih = H - T - B;
+  const slot = iw / rows.length, bw = Math.min(15, slot * 0.34);
+  const peak = Math.max(...rows.flatMap(([, a, b]) => [a, b])) || 1;
+  const step = niceStep(peak, 4), vmax = peak * 1.05;
+  const yOf = (v) => T + ih - (v / vmax) * ih;
+  const p = [];
+  for (let v = 0; v <= vmax; v += step) {
+    const y = yOf(v);
+    p.push(`<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)" opacity=".5"/>`);
+    p.push(`<text x="${L - 8}" y="${y + 4}" text-anchor="end" font-size="11"
+      fill="var(--hint)">${(v / 1e8).toFixed(0)}</text>`);
+  }
+  p.push(`<text x="${L - 8}" y="${T - 2}" text-anchor="end" font-size="10.5"
+    fill="var(--hint)">억원</text>`);
+  rows.forEach(([label, dbo, paid], i) => {
+    const cx = L + slot * (i + 0.5);
+    p.push(`<rect x="${cx - bw - 1}" y="${yOf(dbo)}" width="${bw}"
+      height="${(dbo / vmax) * ih}" fill="var(--navy)" opacity=".85"/>`);
+    p.push(`<rect x="${cx + 1}" y="${yOf(paid)}" width="${bw}"
+      height="${(paid / vmax) * ih}" fill="var(--teal)" opacity=".85"/>`);
+    const short = label.replace("년미만", "").replace("년이상~", "–").replace("년", "");
+    p.push(`<text x="${cx}" y="${T + ih + 14}" text-anchor="end" font-size="10"
+      fill="var(--hint)" transform="rotate(-45 ${cx} ${T + ih + 14})">${short}</text>`);
+  });
+  p.push(`<line x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}" stroke="var(--line)"/>`);
+  $("dash-mat").innerHTML = p.join("");
+}
+
+function drawDashRates() {
+  const names = Object.keys(DASH_DATA.curves);
+  $("dash-rate-chips").innerHTML = names.map((n, i) =>
+    `<button class="chip" type="button" data-r="${i}"
+      aria-pressed="${i === dashRate}">${n}</button>`).join("");
+  $("dash-rate-chips").querySelectorAll(".chip").forEach((b) =>
+    b.addEventListener("click", () => { dashRate = +b.dataset.r; drawDashRates(); }));
+
+  const key = names[dashRate] || names[0];
+  const src = DASH_DATA.curves[key] || {};
+  const series = Object.keys(src).filter((n) => Object.keys(src[n]).length);
+  if (!series.length) { $("dash-rate").innerHTML = ""; $("dash-rate-legend").innerHTML = ""; return; }
+  const keys = [...new Set(series.flatMap((n) => Object.keys(src[n]).map(Number)))]
+    .sort((a, b) => a - b);
+  const vmax = Math.max(...series.flatMap((n) => Object.values(src[n]))) || 1;
+
+  const W = 1000, H = 300, L = 66, R = 22, T = 18, B = 34;
+  const iw = W - L - R, ih = H - T - B;
+  const span = Math.max(1, keys[keys.length - 1] - keys[0]);
+  const xs = (k) => L + ((k - keys[0]) / span) * iw;
+  const ys = (v) => T + ih - (v / vmax) * ih;
+  const p = [];
+  for (let g = 0; g <= 4; g++) {
+    const v = (vmax / 4) * g, y = ys(v);
+    p.push(`<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)" opacity=".5"/>`);
+    p.push(`<text x="${L - 8}" y="${y + 4}" text-anchor="end" font-size="11"
+      fill="var(--hint)">${(v * 100).toFixed(1)}%</text>`);
+  }
+  // 직군이 같은 표를 쓰면 선이 정확히 겹친다. 파선을 달리해 몇 개인지 남긴다.
+  series.forEach((n, i) => {
+    const pts = keys.filter((k) => src[n][k] !== undefined)
+      .map((k) => `${xs(k)},${ys(src[n][k])}`).join(" ");
+    p.push(`<polyline points="${pts}" fill="none" stroke="${SERIES[i % 4]}"
+      stroke-width="2" stroke-linejoin="round" stroke-dasharray="${DASH[i % DASH.length]}"/>`);
+  });
+  const stride = Math.ceil(keys.length / 10);
+  keys.filter((k, i) => i % stride === 0 && xs(k) < W - R - 46)
+      .forEach((k) => p.push(`<text x="${xs(k)}" y="${H - 12}" text-anchor="middle"
+        font-size="11" fill="var(--hint)">${k}</text>`));
+  p.push(`<text x="${W - R}" y="${H - 12}" text-anchor="end" font-size="11"
+    fill="var(--hint)">${DASH_DATA.curve_axis[key] || ""}</text>`);
+  p.push(`<line x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}" stroke="var(--line)"/>`);
+  $("dash-rate").innerHTML = p.join("");
+  const same = series.length > 1 &&
+    series.every((n) => JSON.stringify(src[n]) === JSON.stringify(src[series[0]]));
+  $("dash-rate-legend").innerHTML = series.map((n, i) =>
+    `<span><i style="background:${SERIES[i % 4]}"></i>${n}</span>`).join("")
+    + (same ? `<span style="color:var(--amber)">※ 세 직군이 같은 표를 씁니다</span>` : "");
+}
+
+function drawDashLongterm() {
+  const t = DASH_DATA.totals;
+  if (!t.lt_head) {
+    $("dash-lt").innerHTML =
+      `<tr><td class="hint">장기급여를 끄고 산출했습니다. [산출] 탭 옵션에서 켜세요.</td></tr>`;
+    return;
+  }
+  dataTable($("dash-lt"), ["항목", "금액"], [
+    ["산출 대상 인원", `${t.lt_head.toLocaleString("ko-KR")}명`],
+    ["장기급여채무", won(t.lt_dbo)],
+    ["당기근무원가", won(t.lt_sc)],
+    ["이자원가 (차기)", won(t.lt_ic)],
+  ]);
+}
+
+$("dash-refresh").addEventListener("click", () => refreshDashboard());
+$("dash-emp-go").addEventListener("click", () =>
+  refreshDashboard($("dash-emp").value.trim()));
+$("dash-emp").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") refreshDashboard($("dash-emp").value.trim());
+});
 
 // ═════════ 계리평가 보고서 ═══════════════════════════════════════
 // 표지부터 용어정리까지 갖춘 인쇄용 HTML 을 파이썬이 만들고, 여기서는
@@ -1504,8 +1955,6 @@ $("report-lt").addEventListener("click", () => showValuationReport("longterm"));
 // 그 한 명을 같은 명부·기초율로 다시 산출해 연차별 근거를 보여준다.
 // 엔진의 같은 코드가 돌므로 여기 나온 채무 합은 전체 산출의 그 사람 몫과 같다.
 
-const won = (x) => (x == null ? "—" : Math.round(x).toLocaleString("ko-KR"));
-const rate = (x, d = 2) => (x == null ? "" : (x * 100).toFixed(d) + "%");
 
 function kvTable(pairs) {
   return el("div", { class: "scroll-x" }, el("table", { class: "data" },
@@ -1519,8 +1968,8 @@ function traceTable(trace) {
                 "귀속액", "당기 1년치", "할인계수", "DBO 기여", "근무원가 기여"];
   const rows = trace.map((r) => [
     r.t, r.timing, r.age.toFixed(1), r.service.toFixed(2), won(r.wage),
-    rate(r.withdrawal), rate(r.mortality, 3), rate(r.survival),
-    r.cause, rate(r.exit_probability, 3), won(r.benefit),
+    pctOf(r.withdrawal), pctOf(r.mortality, 3), pctOf(r.survival),
+    r.cause, pctOf(r.exit_probability, 3), won(r.benefit),
     won(r.attributed), won(r.unit), r.discount.toFixed(6),
     won(r.dbo), won(r.service_cost),
   ]);
@@ -1535,7 +1984,7 @@ function longtermTraceTable(trace) {
                 "도달(잔존) 확률", "할인계수", "귀속비율", "DBO 기여", "근무원가 기여"];
   const rows = trace.map((r) => [
     r.item, r.target_service, r.timing.toFixed(2), r.value, won(r.benefit),
-    rate(r.survival), r.discount.toFixed(6), rate(r.share), won(r.dbo),
+    pctOf(r.survival), r.discount.toFixed(6), pctOf(r.share), won(r.dbo),
     won(r.service_cost),
   ]);
   return el("div", { class: "scroll-x" }, el("table", { class: "data" },
@@ -1558,7 +2007,7 @@ function showMemberDetail(args, sourceLabel) {
     : (detail.retired[0] ? `${detail.retired[0]["사번"]} — ${detail.retired[0]["성명"]} (퇴직자)` : "");
   $("member-title").textContent = `개인별 산출 근거 · ${who}`;
   $("member-note").textContent =
-    `${sourceLabel} · 산출기준일 ${detail.base_date} · 할인율 ${rate(detail.discount_rate, 3)}`;
+    `${sourceLabel} · 산출기준일 ${detail.base_date} · 할인율 ${pctOf(detail.discount_rate, 3)}`;
 
   const body = $("member-body");
   body.replaceChildren();

@@ -724,6 +724,18 @@ def _member_detail(request: dict) -> dict[str, Any]:
     )
 
 
+# ── 분석 화면 ────────────────────────────────────────────────────
+# 방금 산출한 회차를 그림으로 본다. 산출을 다시 하면 이 값도 함께 바뀐다.
+
+
+def _dashboard(request: dict) -> dict[str, Any]:
+    from .dashboard import build
+
+    if not _LAST_RUN:
+        raise ValueError("먼저 산출을 실행하세요. 분석 화면은 방금 산출한 결과를 봅니다")
+    return build(_LAST_RUN["run"], text(request.get("employee_id")))
+
+
 # ── 계리평가 보고서 ──────────────────────────────────────────────
 # 표지부터 용어정리까지 갖춘 인쇄용 HTML. 브라우저 인쇄 → PDF 저장으로 뽑는다.
 
@@ -1020,6 +1032,7 @@ _OPS = {
     "client_rename": _client_rename,
     "client_remove": _client_remove,
     "member_detail": _member_detail,
+    "dashboard": _dashboard,
     "report_html": _report_html,
     "library_path": _library_path,
     "backup_export": _backup_export,

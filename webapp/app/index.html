@@ -31,6 +31,7 @@
 <nav class="tabs">
   <button id="tab-calc" class="on">산출</button>
   <button id="tab-edit">산출가정 입력</button>
+  <button id="tab-dash">분석</button>
   <button id="tab-lib">자료실</button>
   <button id="tab-runs">산출 내역</button>
 </nav>
@@ -234,6 +235,115 @@
 </div>
 <div id="ed-status" class="hint"></div>
 <div id="ed-problems"></div>
+</section>
+
+<!-- ════════ 분석 ════════ -->
+<section class="page" id="page-dash">
+<p class="notice" id="dash-empty">아직 산출한 것이 없습니다. [산출] 탭에서 산출을
+실행하면 <b>그 결과가 이 화면에 그대로 이어집니다</b> — 산출을 다시 할 때마다
+아래 그림과 표가 함께 바뀝니다.</p>
+
+<div id="dash-body" style="display:none">
+  <div class="toolbar">
+    <span class="badge" id="dash-when"></span>
+    <span class="hint" id="dash-scope"></span>
+    <span class="spacer"></span>
+    <button class="small" type="button" id="dash-refresh">새로고침</button>
+  </div>
+  <dl class="strip" id="dash-strip"></dl>
+
+  <details class="section" id="sec-dash-member" open>
+    <summary>개인별 채무 해부<span class="count"></span></summary>
+    <div class="section-body">
+      <p class="hint">한 사람의 채무가 연차별로 어떻게 쌓이는지 봅니다. 막대를 누르면
+      그 해의 계산식이 펼쳐지고, 표의 줄 합계가 곧 그 사람의 확정급여채무입니다.</p>
+      <div class="row">
+        <input type="text" id="dash-emp" placeholder="사번 또는 성명 (비우면 대표 인원)">
+        <button class="small primary" type="button" id="dash-emp-go">조회</button>
+      </div>
+      <div id="dash-who" class="hint"></div>
+      <div class="chips" id="dash-chips" style="margin-top:10px"></div>
+      <div class="chart-scroll">
+        <svg id="dash-chart" viewBox="0 0 1000 380" role="img"
+             aria-label="연차별 확정급여채무 기여액과 재직 잔존확률"></svg>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--navy)"></i>중도퇴직</span>
+        <span><i style="background:var(--plum)"></i>사망퇴직</span>
+        <span><i style="background:var(--teal)"></i>정년퇴직</span>
+        <span><i class="ln" style="background:var(--amber)"></i>재직 잔존확률 (우축)</span>
+      </div>
+      <div id="dash-readout" class="readout" aria-live="polite"></div>
+      <!-- 투영 30년이면 60줄이 넘는다. 그림과 계산식이 먼저고, 줄줄이 훑는
+           것은 검산할 때뿐이라 접어 둔다. -->
+      <details class="section" id="sec-dash-trace">
+        <summary>연차별 근거표<span class="count"></span></summary>
+        <div class="section-body">
+          <div class="scroll-x"><table class="data" id="dash-trace"></table></div>
+        </div>
+      </details>
+    </div>
+  </details>
+
+  <details class="section" id="sec-dash-group">
+    <summary>직군별 집계<span class="count"></span></summary>
+    <div class="section-body">
+      <div class="scroll-x"><table class="data" id="dash-groups"></table></div>
+      <div id="dash-excluded"></div>
+    </div>
+  </details>
+
+  <details class="section" id="sec-dash-roll">
+    <summary>증감분석 · 사외적립자산<span class="count"></span></summary>
+    <div class="section-body" id="dash-roll"></div>
+  </details>
+
+  <details class="section" id="sec-dash-sens">
+    <summary>민감도 분석<span class="count"></span></summary>
+    <div class="section-body">
+      <p class="hint">다른 가정은 고정한 채 유의적 가정을 하나씩 흔들었습니다 (문단 145).</p>
+      <div class="chart-scroll">
+        <svg id="dash-sens" viewBox="0 0 1000 250" role="img"
+             aria-label="가정별 확정급여채무 증감률"></svg>
+      </div>
+      <div class="scroll-x"><table class="data" id="dash-sens-tbl"></table></div>
+    </div>
+  </details>
+
+  <details class="section" id="sec-dash-mat">
+    <summary>경과기간별 예상 지급액<span class="count"></span></summary>
+    <div class="section-body">
+      <p class="hint">앞으로 언제 얼마가 나갈지 (문단 147(c)). 할인 전 명목금액입니다.</p>
+      <div class="chart-scroll">
+        <svg id="dash-mat" viewBox="0 0 1000 260" role="img"
+             aria-label="경과기간별 확정급여채무와 지급 예상액"></svg>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--navy)"></i>확정급여채무 (가득반영)</span>
+        <span><i style="background:var(--teal)"></i>퇴직급여 지급 예상액</span>
+      </div>
+    </div>
+  </details>
+
+  <details class="section" id="sec-dash-rates">
+    <summary>적용한 기초율<span class="count"></span></summary>
+    <div class="section-body">
+      <div class="chips" id="dash-rate-chips"></div>
+      <div class="chart-scroll">
+        <svg id="dash-rate" viewBox="0 0 1000 300" role="img" aria-label="기초율 곡선"></svg>
+      </div>
+      <div class="legend" id="dash-rate-legend"></div>
+    </div>
+  </details>
+
+  <details class="section" id="sec-dash-lt">
+    <summary>장기종업원급여<span class="count"></span></summary>
+    <div class="section-body">
+      <div class="scroll-x"><table class="data" id="dash-lt"></table></div>
+      <p class="hint">재측정요소는 K-IFRS 1019 문단 154에 따라 당기손익으로 인식합니다.</p>
+    </div>
+  </details>
+</div>
 </section>
 
 <!-- ════════ 자료실 ════════ -->

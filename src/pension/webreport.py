@@ -21,7 +21,7 @@ import datetime as _dt
 import html
 from typing import Any, Iterable
 
-__all__ = ["render_html", "REPORT_KINDS"]
+__all__ = ["render_html", "maturity_buckets", "REPORT_KINDS"]
 
 REPORT_KINDS = ("severance", "longterm")
 
@@ -71,7 +71,7 @@ def _kv_table(rows: list[tuple[str, Any]], **kw) -> str:
     return _table(["구 분", "금액"], rows, **kw)
 
 
-def _maturity_buckets(flows: dict[float, float]) -> list[tuple[str, float]]:
+def maturity_buckets(flows: dict[float, float]) -> list[tuple[str, float]]:
     """만기분석 구간(문단 147(c)). 1년 단위로 15년, 이후 15~20년 · 20년 이상."""
     buckets: list[tuple[str, float]] = []
     for k in range(15):
@@ -419,8 +419,8 @@ def _notes_section(run: Any, single: float) -> str:
               a.severance_benefit.mode(r.mapped_name or r.source_name)]
              for r in rules if not r.excluded], unit=""))
 
-    attributed = _maturity_buckets(val.cash_flows())
-    paid = dict(_maturity_buckets(val.benefit_cash_flows()))
+    attributed = maturity_buckets(val.cash_flows())
+    paid = dict(maturity_buckets(val.benefit_cash_flows()))
     parts.append("""
 <h3>5.5 경과기간별 예상 확정급여채무 및 퇴직급여 지급 예상액 (문단 147(c))</h3>""")
     parts.append(_table(
