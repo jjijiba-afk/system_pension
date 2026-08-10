@@ -2315,6 +2315,9 @@ $("prior-run").addEventListener("change", () => {
     $("prior-hint").textContent =
       "전기 산출을 고르면 확정급여채무·할인율·근무원가가 그대로 들어오고, " +
       "전기 기초율까지 연결되어 증감분석이 경험조정과 가정변경효과를 나눠 계산합니다.";
+    $("prior-check").disabled = true;
+    $("prior-check-result").replaceChildren();
+    $("prior-check-status").textContent = "";
     return;
   }
   try {
@@ -2325,11 +2328,79 @@ $("prior-run").addEventListener("change", () => {
     $("prior-hint").textContent =
       `'${name}' (기준일 ${values.base_date || "?"}) 의 전기값을 연결했습니다. ` +
       "전기 기초율도 함께 넘겨 가정변경효과를 분리합니다.";
+    $("prior-check").disabled = false;
+    $("prior-check-result").replaceChildren();
+    $("prior-check-status").textContent = "";
   } catch (error) {
     priorLink = null;
     alert(error.message);
   }
 });
+
+// ── 전기 명부와 맞대어 보기 ──────────────────────────────────────
+// 당기 명부만 보면 멀쩡한데 전기와 나란히 놓아야 드러나는 것이 있다. 결산이
+// 끝난 뒤에 발견하면 다시 산출해야 하므로 **산출 전에** 본다.
+
+$("prior-check").addEventListener("click", async () => {
+  const name = $("prior-run").value;
+  if (!name) return;
+
+  const status = $("prior-check-status");
+  const target = $("prior-check-result");
+  target.replaceChildren();
+  status.textContent = "맞대어 보는 중…";
+  status.className = "hint";
+
+  try {
+    const roster = await rosterIntoFS();
+    const found = py("prior_check", { name, roster });
+    status.textContent = found.summary;
+    status.className = found.serious.length ? "hint bad-text" : "hint ok-text";
+    target.replaceChildren(...priorCheckTables(found));
+  } catch (error) {
+    status.textContent = "";
+    status.className = "hint";
+    alert(error.message);
+  }
+});
+
+function priorCheckTables(found) {
+  const made = [];
+  made.push(el("div", { class: "hint" },
+    `전기 재직 ${found.prior_active.toLocaleString()}명 · `
+    + `당기 재직 ${found.current_active.toLocaleString()}명 · `
+    + `사번이 겹치는 사람 ${found.matched.toLocaleString()}명`));
+
+  // 같은 성격이 수십 건씩 나온다. 무엇이 몇 건인지 먼저 보이고, 낱낱은 접어 둔다.
+  const counts = Object.entries(found.counts);
+  if (counts.length) {
+    made.push(el("div", { class: "chips" }, ...counts.map(([code, n]) =>
+      el("span", { class: "chip" }, `${code} ${n}건`))));
+  }
+
+  const section = (title, rows, bad) => {
+    if (!rows.length) return null;
+    const table = el("table", { class: "data" },
+      el("tr", {}, el("th", {}, "구분"), el("th", {}, "사번"), el("th", {}, "내용")),
+      ...rows.map((row) => el("tr", {},
+        el("td", { class: bad ? "bad-text" : "" }, row[0]),
+        el("td", {}, row[1] || "—"),
+        el("td", { style: "text-align:left" }, row[2]))));
+    return el("details", { class: "section", ...(bad ? { open: "" } : {}) },
+      el("summary", {}, title, el("span", { class: "count" }, `${rows.length}건`)),
+      el("div", { class: "section-body" }, el("div", { class: "scroll-x" }, table)));
+  };
+
+  const serious = section("확인이 필요합니다 — 산출값이 달라집니다", found.serious, true);
+  const notes = section("살펴볼 것 — 정상일 수도 있습니다", found.notes, false);
+  if (serious) made.push(serious);
+  if (notes) made.push(notes);
+  if (!found.serious.length && !found.notes.length) {
+    made.push(el("div", { class: "hint ok-text" },
+      "전기와 달라진 것이 없습니다. 그대로 산출하셔도 됩니다."));
+  }
+  return made;
+}
 
 // ── 단체 ─────────────────────────────────────────────────────────
 // 가장 먼저 고르는 것. 산출 내역·전기 산출 목록이 모두 이 단체 안으로 좁혀진다.

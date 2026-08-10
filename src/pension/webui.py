@@ -708,6 +708,50 @@ def _run_restore(request: dict) -> dict[str, Any]:
     }
 
 
+def _prior_check(request: dict) -> dict[str, Any]:
+    """당기 명부를 저장해 둔 전기 산출의 명부와 맞대어 본다.
+
+    산출 **전** 에 부른다. 생년월일이 바뀌었다거나 전기 재직자가 사라진 것은
+    당기 명부만 봐서는 알 수 없고, 결산이 끝난 뒤에 발견하면 다시 산출해야
+    한다.
+    """
+    from .priorcheck import compare_rosters
+
+    folder = _run_folder(request)
+    saved = _saved_roster(folder)
+    if saved is None:
+        raise ValueError("저장본에 명부가 없어 맞대어 볼 수 없습니다")
+
+    current = _read_roster_only(Path(request["roster"]))
+    prior = _read_roster_only(saved)
+    result = compare_rosters(current, prior)
+
+    return {
+        "summary": result.summary(),
+        "counts": result.counts(),
+        "serious": [f.as_row() for f in result.serious],
+        "notes": [f.as_row() for f in result.notes],
+        "current_active": result.current_active,
+        "prior_active": result.prior_active,
+        "matched": result.matched,
+        "prior_name": (_run_meta(folder) or {}).get("name", ""),
+    }
+
+
+def _read_roster_only(path: Path):
+    """명부만 읽는다. 검증은 하지 않는다 — 여기서는 두 명부를 맞대어 볼 뿐이다."""
+    from .config import read_config
+    from .errors import IssueLog
+    from .readers import read_roster
+    from .workbook import open_workbook
+
+    book = open_workbook(path)
+    try:
+        return read_roster(book, read_config(book), IssueLog())
+    finally:
+        book.close()
+
+
 def _run_results(request: dict) -> dict[str, Any]:
     """저장된 결과 파일을 내려받을 수 있게 작업 폴더로 꺼낸다."""
     folder = _run_folder(request)
@@ -1062,6 +1106,7 @@ _OPS = {
     "run_save": _run_save,
     "run_list": _run_list,
     "run_restore": _run_restore,
+    "prior_check": _prior_check,
     "run_results": _run_results,
     "run_delete": _run_delete,
     "run_prior": _run_prior,

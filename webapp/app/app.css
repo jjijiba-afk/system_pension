@@ -171,7 +171,12 @@ dialog::backdrop { background: rgba(0,0,0,0.35); }
   margin-left: 2px; }
 
 /* 가정을 흔들어 보는 칩. 눌린 것이 지금 그려진 시나리오다. */
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* 누르는 것이 아니라 세어 놓은 것. 같은 성격이 수십 건씩 나오므로 낱낱을
+   펴 보기 전에 무엇이 몇 건인지 먼저 보인다. */
+span.chip { display: inline-block; padding: 4px 10px; border-radius: 999px;
+  background: var(--bg-soft); border: 1px solid var(--line);
+  font-size: 0.82rem; white-space: nowrap; }
 .chipset { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chipset > .tag { font-size: 0.76rem; color: var(--hint); margin-right: 2px; }
 button.chip { font: inherit; font-size: 0.86rem; padding: 7px 11px; cursor: pointer;
