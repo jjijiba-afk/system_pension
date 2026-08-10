@@ -48,6 +48,13 @@ APP = Path(__file__).resolve().parent / "app"
 DIST = Path(__file__).resolve().parent / "dist"
 CACHE = Path(__file__).resolve().parent / ".cache"
 
+# 윈도우 콘솔은 로캘에 따라 stdout 인코딩이 cp1252 등으로 잡혀, 진행 메시지의
+# 한글을 print() 하는 순간 UnicodeEncodeError 로 죽는다(영어 로캘 CI 러너에서
+# 실제로 이렇게 죽었다). UTF-8 로 못 박아 로캘과 무관하게 돌게 한다.
+if sys.platform == "win32":  # pragma: no cover - 리눅스 CI 에서는 확인 못 한다
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _download_pyodide(target: Path) -> None:
     """npm 배포판에서 pyodide 런타임을 꺼낸다. 받은 tgz 는 캐시한다."""

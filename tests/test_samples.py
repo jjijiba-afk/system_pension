@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import openpyxl
 import pytest
 
 from pension.samples import (
@@ -231,12 +232,22 @@ class TestDefaultRoster:
         assert 0 < run.valuation.headcount < len(run.roster.active)
 
     def test_the_same_seed_gives_the_same_roster(self, tmp_path) -> None:
-        """받는 사람마다 다른 명부가 나오면 '같은 값이 나오나' 를 못 맞춰 본다."""
+        """받는 사람마다 다른 명부가 나오면 '같은 값이 나오나' 를 못 맞춰 본다.
+
+        원 바이트를 비교하지 않는다 — openpyxl 이 저장 시각을 파일 메타데이터
+        (``dcterms:created``)에 찍어 넣어서, 두 호출이 초 경계를 걸치면 내용이
+        같아도 바이트가 달라진다. 값을 다시 읽어 비교한다.
+        """
         from pension.samples import write_default_roster
 
-        one = write_default_roster(tmp_path / "가.xlsx").read_bytes()
-        two = write_default_roster(tmp_path / "나.xlsx").read_bytes()
-        assert one == two
+        def values(path):
+            wb = openpyxl.load_workbook(path, data_only=True)
+            return {name: [[c.value for c in row] for row in wb[name].iter_rows()]
+                    for name in wb.sheetnames}
+
+        one = write_default_roster(tmp_path / "가.xlsx")
+        two = write_default_roster(tmp_path / "나.xlsx")
+        assert values(one) == values(two)
 
 
 class TestNoPersonalDataShips:
