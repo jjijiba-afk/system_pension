@@ -312,14 +312,14 @@ def write_standard_assumptions(
     make(
         PROMOTION_SHEET, ["연령", *groups],
         [[age, *[rate] * n] for age, rate in promotion_table(size)],
-        f"· 출처: 표준승급률 {STANDARD_YEAR} — {size} (Base-up 제외 값)\n"
+        f"· 출처: {STANDARD_YEAR} 승급률 — {size} (Base-up 제외 값)\n"
         "· Base-up 과 더해져 총 임금상승률이 됩니다. A1 을 '근속'으로 바꾸면 근속 기준입니다.",
         warn="[필수 확인] 표준률입니다. 회사 경험률(호봉표·승진 이력)이 있으면 그쪽으로 바꾸세요.",
     )
     make(
         WITHDRAWAL_SHEET, ["연령", *groups],
         [[age, *[rate] * n] for age, rate in withdrawal_table(size)],
-        f"· 출처: 표준중도퇴직률 {STANDARD_YEAR} — {size}\n"
+        f"· 출처: {STANDARD_YEAR} 중도퇴직률 — {size}\n"
         "· 사망을 제외한 연간 중도퇴직률입니다. 계단식으로 읽히므로 모든 연령을 적을 필요는 없습니다.",
         warn="[필수 확인] 표준률입니다. 과거 3~5년 회사 경험률로 반드시 바꾸세요. "
              "채무에 가장 크게 영향을 주는 가정입니다.",
