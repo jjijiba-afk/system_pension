@@ -60,6 +60,7 @@ from .assumptions import (
     STATUTORY_MODE,
     WITHDRAWAL_SHEET,
 )
+from . import hidpi
 from .formula import FUNCTIONS, VARIABLES, Formula, FormulaError
 from .jobgroup import DEFAULT_GROUPS
 from .normalize import text
@@ -157,7 +158,7 @@ class _Grid(ttk.Frame):
 
         if self.spec.note:
             ttk.Label(
-                self, text=f"· {self.spec.note}", style="Hint.TLabel", wraplength=760,
+                self, text=f"· {self.spec.note}", style="Hint.TLabel", wraplength=hidpi.px(self, 760),
                 justify="left",
             ).pack(fill="x", pady=(6, 4))
 
@@ -165,7 +166,7 @@ class _Grid(ttk.Frame):
         wrapper = ttk.Frame(self)
         wrapper.pack(fill="both", expand=True)
 
-        self._canvas = tk.Canvas(wrapper, highlightthickness=0, height=260)
+        self._canvas = tk.Canvas(wrapper, highlightthickness=0, height=hidpi.px(self, 260))
         scroll = ttk.Scrollbar(wrapper, orient="vertical", command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=scroll.set)
 
@@ -349,12 +350,12 @@ class _BenefitRuleTab(ttk.Frame):
         ttk.Label(
             box,
             text="변수  " + " · ".join(f"{k}={v}" for k, v in VARIABLES.items()),
-            justify="left", style="Hint.TLabel", wraplength=780,
+            justify="left", style="Hint.TLabel", wraplength=hidpi.px(self, 780),
         ).pack(anchor="w")
         ttk.Label(
             box,
             text="함수  " + " ".join(sorted(FUNCTIONS)),
-            justify="left", style="Hint.TLabel", wraplength=780,
+            justify="left", style="Hint.TLabel", wraplength=hidpi.px(self, 780),
         ).pack(anchor="w")
         ttk.Label(
             box,
@@ -492,13 +493,13 @@ class _BenefitRuleTab(ttk.Frame):
 
         window = tk.Toplevel(self)
         window.title("지급률 수식 미리보기")
-        window.geometry("560x420")
+        window.geometry(hidpi.scale_geometry(self, "560x420"))
 
         box = ttk.Frame(window, padding=_PAD)
         box.pack(fill="both", expand=True)
         ttk.Label(
             box, text="연령 40세 · 정년 60세 · 제도 DB 기준으로 계산한 근속연수별 배수입니다.",
-            style="Hint.TLabel", wraplength=520,
+            style="Hint.TLabel", wraplength=hidpi.px(self, 520),
         ).pack(anchor="w", pady=(0, 6))
 
         columns = ("근속", *formulas)
@@ -600,7 +601,7 @@ class _JobGroupMapTab(ttk.Frame):
             text="명부의 직급·직군을 산출에 쓸 묶음으로 배정합니다. 묶음 이름은 위 "
                  "'직군별 규정' 칸에서 바꾸세요. 저장하면 '지급규정' 시트에 "
                  "명부직군·임직원구분·변환직군명 세 열로 적힙니다.",
-            style="Hint.TLabel", wraplength=840, justify="left",
+            style="Hint.TLabel", wraplength=hidpi.px(self, 840), justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
         bar = ttk.Frame(self)
@@ -618,7 +619,7 @@ class _JobGroupMapTab(ttk.Frame):
 
         wrapper = ttk.Frame(self)
         wrapper.pack(fill="both", expand=True)
-        self._canvas = tk.Canvas(wrapper, highlightthickness=0, height=260)
+        self._canvas = tk.Canvas(wrapper, highlightthickness=0, height=hidpi.px(self, 260))
         scroll = ttk.Scrollbar(wrapper, orient="vertical", command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=scroll.set)
         self._canvas.pack(side="left", fill="both", expand=True)
@@ -783,7 +784,7 @@ class _PayoutRuleTab(ttk.Frame):
             self,
             text="자료요청서 '1)일반사항' 6번(퇴직금 지급규정)을 여기에 옮깁니다. "
                  "규정 문구가 애매하면 담당자에게 확인하세요.",
-            style="Hint.TLabel", wraplength=840, justify="left",
+            style="Hint.TLabel", wraplength=hidpi.px(self, 840), justify="left",
         ).pack(anchor="w", pady=(0, 8))
 
         bar = ttk.Frame(self)
@@ -791,7 +792,7 @@ class _PayoutRuleTab(ttk.Frame):
         ttk.Button(
             bar, text="명부 일반사항에서 규정 읽어오기", command=self._load_from_general_info
         ).pack(side="left")
-        self.evidence = ttk.Label(bar, text="", style="Hint.TLabel", wraplength=560,
+        self.evidence = ttk.Label(bar, text="", style="Hint.TLabel", wraplength=hidpi.px(self, 560),
                                   justify="left")
         self.evidence.pack(side="left", padx=(10, 0))
 
@@ -1069,7 +1070,7 @@ class _LongTermRuleTab(ttk.Frame):
             self._body,
             text="현물 상승률은 '현물' 유형에만 씁니다. 환산 근거에는 "
                  "'순금 30돈 @ 2025-12-31 시세' 처럼 남겨 두세요.",
-            style="Hint.TLabel", wraplength=780, justify="left",
+            style="Hint.TLabel", wraplength=hidpi.px(self, 780), justify="left",
         ).grid(row=len(self.job_groups) + 1, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
     def _sync(self, group: str) -> None:
@@ -1234,8 +1235,9 @@ class AssumptionsEditor(tk.Toplevel):
     ) -> None:
         super().__init__(parent)
         self.title("산출 가정 입력")
-        self.geometry("980x820")
-        self.minsize(820, 680)
+        self.scale = hidpi.apply(self)
+        self.geometry(hidpi.scale_geometry(self, "980x820"))
+        self.minsize(hidpi.px(self, 820), hidpi.px(self, 680))
 
         self.job_groups = list(job_groups or DEFAULT_GROUPS)
         self.path: Path | None = None
@@ -1306,7 +1308,7 @@ class AssumptionsEditor(tk.Toplevel):
             box,
             text="한 번 등록해 두면 다른 단체를 산출할 때도 목록에서 골라 쓸 수 있습니다. "
                  "불러온 뒤 값을 고쳐도 됩니다 — 등록된 것은 출발점이지 확정이 아닙니다.",
-            style="Hint.TLabel", wraplength=820, justify="left",
+            style="Hint.TLabel", wraplength=hidpi.px(self, 820), justify="left",
         ).pack(anchor="w", pady=(6, 0))
 
         self._refresh_library()
@@ -1418,7 +1420,7 @@ class AssumptionsEditor(tk.Toplevel):
             box,
             text="여기 적은 이름이 모든 가정 표의 열 머리글이 됩니다. 명부의 직급·직군을 "
                  "어느 이름에 넣을지는 '직군 매핑' 탭에서 정합니다.",
-            style="Hint.TLabel", wraplength=820, justify="left",
+            style="Hint.TLabel", wraplength=hidpi.px(self, 820), justify="left",
         ).pack(anchor="w", pady=(0, 6))
 
         row = ttk.Frame(box)
@@ -1780,6 +1782,7 @@ def open_editor(
 
 def main() -> int:
     """가정 입력기만 단독 실행."""
+    hidpi.declare_dpi_aware()   # 창을 만들기 전이어야 효과가 있다
     root = tk.Tk()
     root.withdraw()
     editor = AssumptionsEditor(root)

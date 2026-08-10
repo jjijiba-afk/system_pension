@@ -1,0 +1,118 @@
+"""PC 에서 전체 기능 화면(웹앱) 띄우기.
+
+배포 꾸러미의 웹앱 폴더를 찾아 로컬 서버로 내어 준다. 여기서 지키는 것은 셋이다.
+
+* 폴더를 **어디에서 찾는지** — 실행 파일 옆, 개발 트리, 환경변수
+* 못 찾았을 때 **어디를 뒤졌는지 말하는지** — 폴더를 옮겨 둔 사람이 스스로 고쳐야 한다
+* ``.wasm`` 의 MIME — 틀리면 브라우저가 엔진을 아예 띄우지 못한다
+"""
+
+from __future__ import annotations
+
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+from pension import localapp
+
+
+@pytest.fixture
+def fake_app(tmp_path):
+    """웹앱처럼 생긴 최소 폴더."""
+    root = tmp_path / "아이패드웹앱"
+    (root / "wheels").mkdir(parents=True)      # 빌드된 표시
+    (root / "index.html").write_text("<p>화면</p>", encoding="utf-8")
+    (root / "engine.wasm").write_bytes(b"\0asm\x01\0\0\0")
+    return root
+
+
+@pytest.fixture
+def running(fake_app):
+    """실제로 도는 로컬 서버."""
+    import threading
+
+    server = localapp.serve(fake_app)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+class TestFindingTheFolder:
+    def test_env_var_wins(self, fake_app, monkeypatch) -> None:
+        monkeypatch.setenv("PENSION_WEBAPP", str(fake_app))
+        assert localapp.app_root() == fake_app
+
+    def test_env_var_pointing_nowhere_says_so(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("PENSION_WEBAPP", str(tmp_path / "없는곳"))
+        with pytest.raises(localapp.MissingAppError, match="PENSION_WEBAPP"):
+            localapp.app_root()
+
+    def test_the_unbuilt_source_folder_is_not_mistaken_for_the_app(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """webapp/app 에는 엔진이 없다. 띄우면 화면만 뜨고 아무것도 못 한다."""
+        source = tmp_path / "웹앱"
+        source.mkdir()
+        (source / "index.html").write_text("<p>원본</p>", encoding="utf-8")
+        monkeypatch.delenv("PENSION_WEBAPP", raising=False)
+        monkeypatch.setattr(localapp, "_bases", lambda: [tmp_path])
+
+        with pytest.raises(localapp.MissingAppError):
+            localapp.app_root()
+
+    def test_found_next_to_the_executable(self, fake_app, monkeypatch) -> None:
+        """배포 꾸러미는 실행 파일 옆에 '아이패드웹앱' 폴더를 둔다."""
+        monkeypatch.delenv("PENSION_WEBAPP", raising=False)
+        monkeypatch.setattr(localapp, "_bases", lambda: [fake_app.parent])
+        assert localapp.app_root() == fake_app
+
+    def test_missing_folder_lists_where_it_looked(self, tmp_path, monkeypatch) -> None:
+        """'못 찾았습니다' 만으로는 사용자가 할 수 있는 일이 없다."""
+        monkeypatch.delenv("PENSION_WEBAPP", raising=False)
+        monkeypatch.setattr(localapp, "_bases", lambda: [tmp_path])
+
+        with pytest.raises(localapp.MissingAppError) as caught:
+            localapp.app_root()
+        message = str(caught.value)
+        assert "같은 자리에" in message
+        assert str(tmp_path) in message
+
+    def test_the_real_dev_tree_is_reachable(self) -> None:
+        """개발 중에는 webapp/dist 가 그대로 쓰여야 한다."""
+        built = Path(localapp.__file__).resolve().parents[2] / "webapp" / "dist"
+        if not (built / "index.html").is_file():
+            pytest.skip("webapp/build.py 를 먼저 실행")
+        assert localapp.app_root() == built
+
+
+class TestServing:
+    def test_serves_the_page(self, running) -> None:
+        with urllib.request.urlopen(f"{running}/index.html") as response:
+            assert response.status == 200
+            assert "화면" in response.read().decode("utf-8")
+
+    def test_wasm_gets_the_right_type(self, running) -> None:
+        """application/octet-stream 으로 나가면 브라우저가 엔진을 못 띄운다."""
+        with urllib.request.urlopen(f"{running}/engine.wasm") as response:
+            assert response.headers["Content-Type"] == "application/wasm"
+
+    def test_nothing_is_cached(self, running) -> None:
+        """새 배포본을 덮어썼는데 옛 화면이 뜨면 원인을 찾기 어렵다."""
+        with urllib.request.urlopen(f"{running}/index.html") as response:
+            assert response.headers["Cache-Control"] == "no-cache"
+
+    def test_listens_only_on_this_pc(self, fake_app) -> None:
+        """인증이 없는 화면이다. 사내망에도 저절로 열리면 안 된다."""
+        server = localapp.serve(fake_app)
+        try:
+            assert server.server_address[0] == "127.0.0.1"
+        finally:
+            server.server_close()
+
+    def test_files_outside_the_folder_are_not_served(self, running, tmp_path) -> None:
+        (tmp_path / "secret.txt").write_text("명부", encoding="utf-8")
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(f"{running}/../secret.txt")
+        assert caught.value.code == 404

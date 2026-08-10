@@ -9,7 +9,13 @@
     pension samples 기본자료                 # 명부 양식·기초율 기본값 한 벌 생성
     pension library add 금리표 KIS.xlsx      # 한 번 등록해 두고 모든 단체에 재사용
     pension upload 명부.xlsm -o 업로드.xlsx  # 업로드 명부만 생성
+    pension app                              # 이 PC 브라우저로 전체 기능 화면
     pension web --host 0.0.0.0               # 아이패드 등에서 접속하는 웹 화면
+
+``app`` 과 ``web`` 은 다른 화면이다. ``app`` 은 분석 그래프·보고서·산출 내역이
+다 있는 전체 화면을 **이 PC 에만**(127.0.0.1) 열고, 계산은 브라우저 안에서
+돈다. ``web`` 은 다른 기기에서 붙어 쓰는 간단한 산출 폼이고 계산은 서버 PC 가
+한다 — 인증이 없으므로 사내망 밖으로 열면 안 된다.
 """
 
 from __future__ import annotations
@@ -149,6 +155,16 @@ def _build_parser() -> argparse.ArgumentParser:
     web.add_argument("--host", default="127.0.0.1",
                      help="접속을 허용할 주소. 아이패드에서 쓰려면 0.0.0.0 (기본: 이 PC 만)")
     web.add_argument("--port", type=int, default=8035, help="포트 (기본 8035)")
+
+    app = sub.add_parser(
+        "app",
+        help="전체 기능 화면 열기 (분석 그래프·보고서·산출 내역·단체 관리)",
+    )
+    app.add_argument("--port", type=int, default=0,
+                     help="포트 (기본: 비어 있는 포트를 알아서 고름)")
+    app.add_argument("--path", type=Path, help="웹앱 폴더를 직접 지정")
+    app.add_argument("--no-browser", action="store_true",
+                     help="브라우저를 열지 않고 주소만 알려 줍니다")
 
     sub.add_parser("gui", help="GUI 실행")
 
@@ -412,6 +428,37 @@ def _cmd_web(args: argparse.Namespace) -> int:
     return serve(args.host, args.port)
 
 
+def _cmd_app(args: argparse.Namespace) -> int:
+    """전체 기능 화면(웹앱)을 이 PC 브라우저로 연다."""
+    from .localapp import MissingAppError, serve
+
+    try:
+        server = serve(args.path, args.port)
+    except MissingAppError as exc:
+        print(str(exc))
+        return 1
+
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+    print("전체 기능 화면")
+    print(f"  주소:  {url}")
+    print("  분석 그래프 · 계리평가 보고서 · 산출 내역 · 단체 관리가 모두 있습니다.")
+    print("  계산은 브라우저 안에서 돕니다 — 명부가 이 PC 밖으로 나가지 않습니다.")
+    print("  멈추려면 Ctrl+C\n")
+
+    if not args.no_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n화면을 닫았습니다.")
+    finally:
+        server.server_close()
+    return 0
+
+
 def _cmd_library(args: argparse.Namespace) -> int:
     from .library import CURVE_KIND, RATES_KIND, entries, library_dir, register, remove
 
@@ -570,6 +617,7 @@ def main(argv: list[str] | None = None) -> int:
         "samples": _cmd_samples,
         "library": _cmd_library,
         "web": _cmd_web,
+        "app": _cmd_app,
         "assumptions": _cmd_assumptions,
         "members": _cmd_members,
         "upload": _cmd_upload,
