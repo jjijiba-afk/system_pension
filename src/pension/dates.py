@@ -43,19 +43,15 @@ _STRIP_CHARS: Final = " \t 　'\"()[]"
 
 
 def _is_digit(text: str, pos: int) -> bool:
-    """종전 규칙 ``ja(pos) Like "[0-9]"`` 와 같은 판정(pos 는 1-based)."""
+    """그 자리가 아스키 숫자인지(``pos`` 는 1부터 센다)."""
     return 1 <= pos <= len(text) and text[pos - 1].isascii() and text[pos - 1].isdigit()
 
 
 def pivot_two_digit_year(two_digit: int, base_year: int) -> int:
     """두 자리 연도를 네 자리로 확장한다.
 
-    종전 규칙::
-
-        cyy = Left(datetr, 2) + 1 - 1
-        If cyy <= kyy Then yy1 = 2000 + cyy Else yy1 = 1900 + cyy
-
-    ``kyy`` 는 산출기준일 연도의 뒤 두 자리다.
+    산출기준일 연도의 뒤 두 자리를 넘지 않으면 2000년대, 넘으면 1900년대로
+    본다. 기준일이 2025년이면 ``25`` 는 2025년, ``26`` 은 1926년이다.
     """
     kyy = base_year % 100
     return 2000 + two_digit if two_digit <= kyy else 1900 + two_digit
@@ -69,7 +65,7 @@ def _ymd(year: int, month: int, day: int, raw: str) -> _dt.date:
 
 
 def _num(text: str, start: int, length: int, raw: str) -> int:
-    """종전 규칙 ``Mid(text, start, length)`` 를 정수로. 숫자가 아니면 오류."""
+    """``start`` 부터 ``length`` 글자를 정수로. 숫자가 아니면 오류."""
     chunk = text[start - 1 : start - 1 + length]
     if not _DIGITS.match(chunk):
         raise DateParseError(raw, f"{start}번째부터 {length}자리가 숫자가 아닙니다({chunk!r})")

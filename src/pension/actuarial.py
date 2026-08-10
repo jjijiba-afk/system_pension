@@ -60,15 +60,10 @@ FRACTION_MODES = (FRACTION_KEEP, FRACTION_DOWN, FRACTION_UP, FRACTION_HALF)
 def attained_age(birth_date: _dt.date, as_of: _dt.date) -> int:
     """만 연령.
 
-    종전 규칙::
-
-        If mm > mm2 Or (mm = mm2 And dd >= dd2) Then six = 0 Else six = 1
-        age = yy - yy2 - six
-
     통상의 만 나이와 한 가지 다르다. 생일 **당일** 을 이미 지난 것으로 보므로
-    (``dd >= dd2``) 생일 당일에 나이가 한 살 오른다. 이 시스템의 기준일은 보통
-    12월 31일이고 생일이 12월 31일인 사람만 영향을 받지만, 원본 산출값과의
-    일치를 위해 그대로 둔다.
+    생일 당일에 나이가 한 살 오른다. 이 시스템의 기준일은 보통 12월 31일이고
+    생일이 12월 31일인 사람만 영향을 받지만, 종전 산출값과 어긋나지 않도록
+    그대로 둔다.
     """
     birthday_passed = as_of.month > birth_date.month or (
         as_of.month == birth_date.month and as_of.day >= birth_date.day
@@ -163,16 +158,7 @@ def normal_retirement_age(
 ) -> int:
     """퇴직급여 정년연령.
 
-    종전 규칙::
-
-        If c_impi(jc) > age(jc) Then
-            t_y(jc) = c_impi(jc)                       ' 임금피크 연령
-        ElseIf age(jc) >= nra(jkn_j) Then
-            t_y(jc) = age(jc) + add_age(jkn_j)         ' 정년 초과자
-        Else
-            t_y(jc) = nra(jkn_j)
-        End If
-
+    세 가지를 순서대로 본다 — 임금피크 연령, 정년 초과 여부, 직군 규정.
     임금피크 연령이 현재 연령보다 크면 그 값을 정년으로 쓰고, 이미 정년을 넘긴
     사람은 현재 연령에 직군별 가산연수를 더해 잔여 근무기간을 확보한다.
 

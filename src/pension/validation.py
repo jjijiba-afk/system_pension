@@ -607,8 +607,8 @@ def validate_retired(
         if is_ambiguous_reason(member.reason_raw):
             log.warning(
                 "TOI_REASON_AMBIGUOUS",
-                f"지급사유 '{member.reason_raw}' 는 종전 규칙 규칙상 4(정년퇴직)로 처리했습니다. "
-                "퇴직자명부 AC열 수식은 3(DC전환/당기 중간정산 후 퇴직)으로 분류하므로 "
+                f"지급사유 '{member.reason_raw}' 는 4(정년퇴직)로 처리했습니다. "
+                "3(DC전환/당기 중간정산 후 퇴직)으로 보는 명부도 있으니 "
                 "규정에 맞는 값을 직접 지정하세요",
                 column=_col(sheet, "reason"), value=member.reason_raw, **kw,
             )

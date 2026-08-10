@@ -7,8 +7,9 @@
 세 가지를 만든다.
 
 ``명부_기본.xlsx``
-    실제 평가 사례의 명부(재직 290명·퇴직 28명). 예시 두 줄로는 볼 수 없는
-    실제 형태가 그대로 들어 있다.
+    난수로 만든 가상 명부(재직 290명·퇴직 28명). 예시 두 줄로는 볼 수 없는
+    형태 — DC 혼재·임원의 직군 표기·중간정산 — 가 들어 있다. **실존 인물이
+    아니다**: 배포물에 실제 개인정보를 담지 않기 위해서다.
 
 ``명부_양식.xlsx``
     ``Input`` · ``재직자명부`` · ``퇴직자명부`` 세 시트. 머리글은 프로그램이
@@ -81,10 +82,6 @@ ROSTER_DEFAULT: Final = "명부_기본.xlsx"
 STANDARD_ASSUMPTIONS: Final = "기초율_기본값.xlsx"
 TEMPLATE_ASSUMPTIONS: Final = "기초율_빈양식.xlsx"
 
-#: 기본 명부의 원자료. :mod:`pension.data` 에 CSV 두 장으로 들어 있다.
-_DATA_DIR: Final = Path(__file__).with_name("data")
-_DEFAULT_ACTIVE: Final = "기본명부_재직자.csv"
-_DEFAULT_RETIRED: Final = "기본명부_퇴직자.csv"
 
 
 def _style():
@@ -212,101 +209,25 @@ def write_roster_template(path: str | Path) -> Path:
     return path
 
 
-def write_default_roster(path: str | Path) -> Path:
+def write_default_roster(path: str | Path, *, seed: int = 20251231) -> Path:
     """기본 명부를 만든다 — 재직 290명 · 퇴직 28명.
 
-    실제 평가 사례의 명부를 **값 변경 없이 그대로** 옮긴 것이다(성명은 원본에서도
-    비어 있었다).
+    **난수로 만든 가상 명부다.** 실존 인물이 아니고, 같은 씨앗이면 언제나 같은
+    명부가 나온다.
 
-    작성 예시 두 줄짜리 양식만으로는 알 수 없는 것들이 여기서 드러난다.
-    DC 가입자가 섞여 산출대상에서 빠지고, 근속 1년 미만 퇴직자가 지급액 없이
-    들어오고, 임원의 직군이 '정규직' 으로 적혀 온다. **제도구분 누락 같은 실제
-    오류도 그대로 있어** 검증 리포트가 무엇을 잡아내는지 볼 수 있다.
+    전에는 실제 평가 사례의 명부를 그대로 넣었다. 성명은 없었지만 생년월일·
+    입사일·30일 평균임금이 사람마다 한 줄씩이라, 같은 회사 안에서는 특정될 수
+    있는 자료였다 — 프로그램을 남에게 건네면 그 자료도 같이 건네진다. 처음 한 번
+    돌려 보는 것이 목적이니 실제 값일 이유가 없다.
+
+    형태는 그대로 남겼다. DC 가입자가 섞여 산출대상에서 빠지고, 임원인데 직군
+    칸이 '정규직' 인 사람이 있고, 중간정산자가 있다. 자료가 더 험한 명부를 보려면
+    :func:`~pension.rostergen.write_case_pack` 의 시험명부 3종을 쓴다.
     """
-    import csv
+    from .rostergen import DEFAULT_CASE, write_case_roster
 
-    import openpyxl
+    return write_case_roster(DEFAULT_CASE, path, seed=seed)
 
-    from .layout import ACTIVE_HEADER_ALIASES, RETIRED_HEADER_ALIASES
-
-    path = Path(path)
-    st = _style()
-    wb = openpyxl.Workbook()
-
-    def sheet(name, columns, aliases, first_row, csv_name, field_map):
-        ws = wb.create_sheet(name)
-        header_row = first_row - 2
-        ws.cell(header_row, 2, "순번").font = st["head_font"]
-        ws.cell(header_row, 2).fill = st["head_fill"]
-        for key, col in columns.items():
-            label = aliases.get(key, (col.label,))[0]
-            cell = ws.cell(header_row, col.index, label)
-            cell.font = st["head_font"]
-            cell.fill = st["head_fill"]
-            cell.alignment = st["center"]
-            ws.column_dimensions[cell.column_letter].width = max(10, min(22, len(label) + 4))
-
-        with (_DATA_DIR / csv_name).open(encoding="utf-8") as handle:
-            for offset, record in enumerate(csv.DictReader(handle)):
-                row = first_row + offset
-                ws.cell(row, 2, offset + 1)
-                for field, key in field_map.items():
-                    value = record.get(field, "")
-                    if value == "":
-                        continue
-                    column = columns.get(key)
-                    if column is None:
-                        continue
-                    ws.cell(row, column.index, _as_number(value))
-        ws.freeze_panes = ws.cell(first_row, 3)
-
-    sheet(
-        ACTIVE_SHEET, ACTIVE_COLUMNS, ACTIVE_HEADER_ALIASES, ACTIVE_FIRST_ROW,
-        _DEFAULT_ACTIVE,
-        {
-            "사번": "employee_id", "임직원구분": "employee_type", "직군": "job_group",
-            "성별": "gender", "생년월일": "birth_date", "입사일자": "hire_date",
-            "중간정산일": "settlement_date", "30일 평균임금": "monthly_wage",
-            "일 기본급": "daily_base_pay", "퇴직급여 제도구분": "plan",
-            "장기급여 산출대상여부": "longterm_target", "원가코드": "cost_code",
-        },
-    )
-    sheet(
-        RETIRED_SHEET, RETIRED_COLUMNS, RETIRED_HEADER_ALIASES, RETIRED_FIRST_ROW,
-        _DEFAULT_RETIRED,
-        {
-            "사번": "employee_id", "임직원구분": "employee_type", "직군": "job_group",
-            "성별": "gender", "생년월일": "birth_date", "입사일": "hire_date",
-            "퇴사일": "exit_date", "지급(퇴직)사유 구분": "reason",
-            "퇴직급여 제도구분": "plan", "퇴직급여 총지급금액": "total_payment",
-            "사외자산 지급금액": "fund_payment",
-            "장기급여 산출대상여부": "longterm_target", "원가코드": "cost_code",
-        },
-    )
-
-    ws = wb.create_sheet("Input", 0)
-    ws.cell(1, 2, "산출 기준").font = st["title_font"]
-    ws.cell(3, 2, "산출기준일")
-    ws.cell(3, 3, "2025-12-31")
-    ws.cell(5, 2, "평균임금 체크금액")
-    ws.cell(5, 3, 0)
-    ws.cell(7, 2, "실제 평가 사례의 명부입니다. 검증 오류가 남아 있어 "
-                  "'검증 오류가 있어도 산출 강행' 을 켜야 끝까지 돕니다.").font = st["note_font"]
-    ws.cell(8, 2, "직군 배정은 '산출 가정 입력' 화면의 [직군 매핑] 탭에서 확인하세요."
-            ).font = st["note_font"]
-
-    del wb["Sheet"]
-    wb.save(path)
-    return path
-
-
-def _as_number(value: str):
-    """CSV 문자열을 엑셀 셀 값으로. 날짜 문자열은 그대로 둔다(파서가 읽는다)."""
-    try:
-        number = float(value)
-    except ValueError:
-        return value
-    return int(number) if number == int(number) else number
 
 
 def write_standard_assumptions(
