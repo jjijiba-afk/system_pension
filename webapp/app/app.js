@@ -52,6 +52,35 @@ function download(path, filename, mime = XLSX_MIME) {
 }
 
 // ── 부팅 ────────────────────────────────────────────────────────
+// 이 앱의 자료(단체·산출 내역·자료실)는 브라우저 저장소에 있다. 브라우저는
+// 저장 공간이 모자라면 **말없이 지운다.** 아이폰·아이패드는 오래 안 연 홈
+// 화면 앱의 자료를 정리하기도 한다.
+//
+// 영구 저장을 요청해 두면 그 대상에서 빠진다. 요청이 받아들여졌는지는 기기와
+// 브라우저가 정하므로, 결과를 [자료실] 에 그대로 적어 둔다 — 보장되지 않는데
+// 보장된 줄 알고 내보내기를 건너뛰는 것이 제일 나쁘다.
+async function askForPersistentStorage() {
+  const note = $("storage-note");
+  if (!navigator.storage?.persist) {
+    note.textContent =
+      "이 브라우저는 자료 보관을 보장하지 않습니다. 결산이 끝날 때마다 "
+      + "[보관함 내보내기] 로 파일을 남겨 두세요.";
+    return;
+  }
+  try {
+    const kept = await navigator.storage.persisted() || await navigator.storage.persist();
+    note.textContent = kept
+      ? "✓ 이 기기에 영구 저장이 허용되어, 공간이 모자라도 자료가 지워지지 "
+        + "않습니다. 그래도 기기를 바꿀 때를 대비해 가끔 내보내 두세요."
+      : "⚠ 영구 저장이 허용되지 않았습니다. 브라우저가 공간이 필요하면 이 앱의 "
+        + "자료를 지울 수 있습니다 — 결산이 끝날 때마다 꼭 내보내 두세요.";
+    note.className = kept ? "hint ok-text" : "hint bad-text";
+  } catch {
+    note.textContent = "자료 보관 상태를 확인하지 못했습니다. 내보내기로 "
+      + "파일을 남겨 두세요.";
+  }
+}
+
 async function boot() {
   try {
     status("엔진을 준비하는 중… (1/3 런타임)");
@@ -91,6 +120,8 @@ from pension.webui import api
 
     status("준비 완료. 명부를 고르고 기초율을 정한 뒤 [산출 실행]을 누르세요.");
     $("run").disabled = false;
+    // 화면이 다 뜬 뒤에 묻는다. 이것 때문에 부팅이 늦어질 이유가 없다.
+    askForPersistentStorage();
   } catch (error) {
     status("엔진을 준비하지 못했습니다: " + error);
   }
