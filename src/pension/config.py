@@ -328,7 +328,8 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
     return rules
 
 
-def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
+def read_config(workbook, sheet_name: str = INPUT_SHEET, *,
+                base_date: _dt.date | None = None) -> CalculationConfig:
     """``Input`` 시트를 :class:`CalculationConfig` 로 읽는다.
 
     ``Input`` 시트가 없는 통합문서(자료요청서 원본 등)면 명부에서 산출기준일과
@@ -336,17 +337,24 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET) -> CalculationConfig:
     잠정값이므로, 반드시 확인하고 확정해야 한다.
 
     :param workbook: ``openpyxl`` 워크북(``data_only=True`` 로 연 것).
-    :raises ValueError: 산출기준일을 어디에서도 찾지 못했을 때.
+    :param base_date: 화면에서 지정한 산출기준일. 명부 어디에도 기준일이 없을 때
+        **이것이 있으면 그것으로 읽는다.** 예전에는 화면에 날짜를 넣어 두고도
+        이 함수가 먼저 터져서, 담당자는 넣은 값이 왜 무시되는지 알 수 없었다.
+    :raises ValueError: 산출기준일을 어디에서도 찾지 못했고 ``base_date`` 도 없을 때.
     """
     from .workbook import find_sheet
 
     ws = find_sheet(workbook, sheet_name)
     if ws is None:
-        return infer_config(workbook)
+        return infer_config(workbook, base_date=base_date)
 
-    base_date = to_date(ws.cell(3, 3).value)
-    if base_date is None:
-        raise ValueError(f"{sheet_name}!C3 산출기준일이 비어 있습니다")
+    found = to_date(ws.cell(3, 3).value) or base_date
+    if found is None:
+        raise ValueError(
+            f"{sheet_name}!C3 산출기준일이 비어 있습니다. "
+            "화면의 [산출 기준일] 칸에 날짜를 넣어도 됩니다"
+        )
+    base_date = found
 
     raw_check = ws.cell(5, 3).value
     wage_check = float(raw_check) if isinstance(raw_check, (int, float)) else 0.0
@@ -429,7 +437,7 @@ DEFAULT_OVER_NRA_ADD = 2
 """정년을 이미 넘긴 사람에게 더할 잠정 연수."""
 
 
-def infer_config(workbook) -> CalculationConfig:
+def infer_config(workbook, *, base_date: _dt.date | None = None) -> CalculationConfig:
     """``Input`` 시트 없이 명부만 있는 통합문서에서 설정을 끌어낸다.
 
     산출기준일은 재직자명부의 '작성기준일' 칸에서, 직군은 명부에 실제로 나오는
@@ -444,11 +452,11 @@ def infer_config(workbook) -> CalculationConfig:
             "Input 시트도 재직자명부도 없어 산출기준일을 정할 수 없습니다"
         )
 
-    base_date = _find_base_date(ws)
+    base_date = _find_base_date(ws) or base_date
     if base_date is None:
         raise ValueError(
-            "산출기준일을 찾지 못했습니다. Input 시트 C3 에 기준일을 넣거나 "
-            "재직자명부의 '작성기준일' 칸을 채우세요"
+            "산출기준일을 찾지 못했습니다. 화면의 [산출 기준일] 칸에 날짜를 넣거나, "
+            "Input 시트 C3 또는 재직자명부의 '작성기준일' 칸을 채우세요"
         )
 
     header_row = find_header_row(ws, ACTIVE_HEADER_ALIASES)

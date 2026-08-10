@@ -166,6 +166,15 @@ class MemberValuation:
     extra_payment: float = 0.0
     """전별금·위로금 등 정액 추가지급액. 명부에 금액이 적힌 사람만 대상이다."""
 
+    by_cause: dict[str, dict[str, float]] = field(default_factory=dict)
+    """퇴직사유별 몫 — ``{사유: {"dbo": …, "service_cost": …, "benefit_pv": …}}``.
+
+    사유마다 지급률이 다른 규정에서는 합계만으로는 검산이 안 된다. 어느 사유가
+    채무를 얼마나 만들었는지 보이지 않으면, 지급률 한 칸을 잘못 넣어도 총액이
+    조금 움직일 뿐이라 알아채지 못한다. 원 조서(DBO 산출표)가 사유별로 열을
+    나눠 두는 이유도 같다.
+    """
+
     excluded_reason: str = ""
     """산출 대상에서 뺀 이유. 비어 있으면 정상 산출."""
 
@@ -211,6 +220,27 @@ class ValuationResult:
         if not total:
             return 0.0
         return sum(m.dbo * m.duration for m in self.members) / total
+
+    def by_cause(self) -> dict[str, dict[str, float]]:
+        """퇴직사유별 채무·근무원가 합계.
+
+        ``{사유: {"dbo": …, "service_cost": …, "benefit_pv": …, "n": 인원}}``.
+        ``dbo`` 합은 :attr:`dbo` 와 같다 — 사유를 나눈 것이지 다시 계산한 것이
+        아니다. 사유마다 지급률이 다른 규정에서 지급률 한 칸을 잘못 넣으면
+        총액은 조금 움직일 뿐이라, 사유별로 갈라 놓아야 눈에 띈다.
+        """
+        found: dict[str, dict[str, float]] = {}
+        for member in self.members:
+            for cause, share in member.by_cause.items():
+                into = found.setdefault(
+                    cause, {"dbo": 0.0, "service_cost": 0.0, "benefit_pv": 0.0, "n": 0})
+                into["dbo"] += share["dbo"]
+                into["service_cost"] += share["service_cost"]
+                into["benefit_pv"] += share["benefit_pv"]
+                into["n"] += 1
+        # 정년 → 중도 → 사망 차례. 원 조서가 그 순서로 열을 세운다.
+        order = {CAUSE_NORMAL: 0, CAUSE_VOLUNTARY: 1, CAUSE_DEATH: 2}
+        return dict(sorted(found.items(), key=lambda kv: (order.get(kv[0], 9), kv[0])))
 
     def cash_flows(self) -> dict[float, float]:
         """전체 기대 급여지급액을 시점별로 합친다. 할인 전 금액이다."""
@@ -628,9 +658,19 @@ def value_member(
                 total_service, exit_age, wage, causes.get(rule, cause_name)
             )
 
-            dbo += attributed * exit_probability * discount
-            service_cost += unit * exit_probability * discount
-            benefit_pv += benefit * exit_probability * discount
+            part_dbo = attributed * exit_probability * discount
+            part_cost = unit * exit_probability * discount
+            part_pv = benefit * exit_probability * discount
+            dbo += part_dbo
+            service_cost += part_cost
+            benefit_pv += part_pv
+
+            # 사유별 몫을 따로 쌓아 둔다. 합은 위의 총액과 같다.
+            share = result.by_cause.setdefault(
+                cause_name, {"dbo": 0.0, "service_cost": 0.0, "benefit_pv": 0.0})
+            share["dbo"] += part_dbo
+            share["service_cost"] += part_cost
+            share["benefit_pv"] += part_pv
             weighted_time += attributed * exit_probability * discount * timing
             # 할인 전 현금흐름. 단일할인율 역산과 만기분석 공시에 쓴다.
             flow = attributed * exit_probability

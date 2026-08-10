@@ -80,6 +80,12 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
             "퇴직급여추계액": result.accrued_benefit,
             "듀레이션 (년)": result.duration,
         },
+        # 사유별로 갈라 놓은 몫. 합은 위의 채무·근무원가와 같다.
+        "by_cause": [
+            {"cause": cause, "dbo": share["dbo"],
+             "service_cost": share["service_cost"], "benefit_pv": share["benefit_pv"]}
+            for cause, share in result.by_cause.items()
+        ],
         "trace": trace,
     }
 
@@ -155,6 +161,15 @@ def lookup(
         "당기근무원가": sum(b["result"]["당기근무원가"] for b in blocks),
         "이자원가 (차기)": sum(b["result"]["이자원가 (차기)"] for b in blocks),
     }
+    # 지급구간이 여럿이면 구간별 사유 몫을 하나로 합쳐 준다.
+    causes: dict[str, dict[str, float]] = {}
+    for block in blocks:
+        for share in block["by_cause"]:
+            into = causes.setdefault(
+                share["cause"], {"dbo": 0.0, "service_cost": 0.0, "benefit_pv": 0.0})
+            into["dbo"] += share["dbo"]
+            into["service_cost"] += share["service_cost"]
+            into["benefit_pv"] += share["benefit_pv"]
     for block in longterm:
         if block and not block["excluded"]:
             total["장기급여채무"] = (
@@ -168,4 +183,5 @@ def lookup(
         "longterm": [b for b in longterm if b],
         "retired": [_retired_block(m) for m in retired],
         "total": total,
+        "by_cause": [{"cause": cause, **share} for cause, share in causes.items()],
     }

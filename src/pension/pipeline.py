@@ -253,7 +253,10 @@ def load_inputs(
 
     wb = open_workbook(roster_path)
     try:
-        config = read_config(wb)
+        # 화면에서 받은 기준일을 **읽기 전에** 넘긴다. 명부 어디에도 기준일이
+        # 없는 통합문서가 있는데, 예전에는 read_config 가 먼저 터져서 화면에
+        # 넣어 둔 날짜가 쓰이지도 못했다.
+        config = read_config(wb, base_date=base_date)
         general = _read_general_sheet(wb)
         if base_date is None and general is not None and general.period_end:
             # 자료요청서 2번 '대상 회계기간' 기말이 곧 산출기준일이다.

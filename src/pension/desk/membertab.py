@@ -53,6 +53,16 @@ class MemberTab(ttk.Frame):
         labeled(self.summary, "같은 사번이 지급 구간으로 여러 줄 나뉘어 있으면 "
                               "구간별 채무를 모두 더한 값입니다.")
 
+        self.cause_box = section(body, "퇴직사유별 (급부별) 금액")
+        self.cause_table = Table(
+            self.cause_box, ["퇴직사유", "확정급여채무", "당기근무원가", "급여 현가", "비중"],
+            widths=[120, 170, 150, 170, 80],
+            aligns=["w", "e", "e", "e", "e"], height=5)
+        self.cause_table.pack(fill="x")
+        labeled(self.cause_box, "이 사람의 채무를 정년·중도·사망이 각각 얼마나 만들었는지 "
+                                "입니다. 합은 위 확정급여채무와 같습니다. 아래 근거 표의 "
+                                "'퇴직사유' 열을 그 사유로 걸러 더한 값이기도 합니다.")
+
         self._rows = ttk.Frame(body)
         self._rows.pack(fill="both", expand=True)
 
@@ -133,6 +143,23 @@ class MemberTab(ttk.Frame):
         self._clear()
         self.total_table.fill([(key, theme.money(value))
                                for key, value in found["total"].items()])
+
+        causes = found.get("by_cause", [])
+        total = sum(row["dbo"] for row in causes)
+        rows = [(row["cause"], theme.money(row["dbo"]),
+                 theme.money(row["service_cost"]), theme.money(row["benefit_pv"]),
+                 f"{row['dbo'] / total:.1%}" if total else "-")
+                for row in causes]
+        if causes:
+            rows.append(("합계", theme.money(total),
+                         theme.money(sum(r["service_cost"] for r in causes)),
+                         theme.money(sum(r["benefit_pv"] for r in causes)), "100.0%"))
+            self.cause_box.pack(fill="x", pady=(0, 12))
+        else:
+            self.cause_box.pack_forget()
+        self.cause_table.fill(
+            rows, tags=lambda index, _row, last=len(rows) - 1:
+            "total" if index == last else "")
 
         longterm = {index: block for index, block in enumerate(found.get("longterm", []))}
         for index, block in enumerate(found.get("rows", [])):

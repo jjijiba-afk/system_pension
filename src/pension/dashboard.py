@@ -133,6 +133,11 @@ def build(run: Any, employee_id: str = "") -> dict[str, Any]:
         "has_longterm": lt is not None,
         "groups": [{"name": n, "n": c, "dbo": d, "sc": s}
                    for n, (c, d, s) in val.by_job_group().items()],
+        # 퇴직사유별 몫. 사유마다 지급률이 다른 규정에서는 합계만으로 검산이
+        # 안 된다 — 한 칸을 잘못 넣어도 총액은 조금 움직일 뿐이다.
+        "causes": [{"name": name, "dbo": share["dbo"], "sc": share["service_cost"],
+                    "pv": share["benefit_pv"]}
+                   for name, share in val.by_cause().items()],
         "excluded": val.exclusion_summary(),
         "rollforward": [[k, a] for k, a in roll.as_rows()] if roll else [],
         "assets": [[k, a] for k, a in assets.as_rows()] if assets else [],

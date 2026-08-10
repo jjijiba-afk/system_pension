@@ -43,6 +43,7 @@ class AnalysisTab(ttk.Frame):
         self.metrics.pack(fill="x", pady=(0, 4))
 
         self._build_groups(self._pages)
+        self._build_causes(self._pages)
         self._build_rollforward(self._pages)
         self._build_assets(self._pages)
         self._build_maturity(self._pages)
@@ -65,6 +66,20 @@ class AnalysisTab(ttk.Frame):
         self.group_table.pack(fill="x", pady=(8, 0))
         self.excluded = ttk.Label(box, text="", style="Hint.TLabel", justify="left")
         self.excluded.pack(anchor="w", pady=(6, 0))
+
+    def _build_causes(self, parent: tk.Misc) -> None:
+        box = section(parent, "퇴직사유별 (급부별) 금액")
+        self.cause_chart = Bars(box, height=150)
+        self.cause_chart.pack(fill="x")
+        self.cause_table = Table(
+            box, ["퇴직사유", "확정급여채무", "당기근무원가", "급여 현가", "채무 비중"],
+            widths=[130, 170, 150, 170, 90],
+            aligns=["w", "e", "e", "e", "e"], height=5)
+        self.cause_table.pack(fill="x", pady=(8, 0))
+        labeled(box, "정년·중도·사망 각각이 채무를 얼마나 만들었는지입니다. 합은 위 "
+                     "확정급여채무와 원 단위까지 같습니다 — 나눈 것이지 다시 계산한 "
+                     "것이 아닙니다. 사유마다 지급률이 다른 규정에서는 지급률 한 칸을 "
+                     "잘못 넣어도 총액은 조금 움직일 뿐이라, 여기서 갈라 봐야 눈에 띕니다.")
 
     def _build_rollforward(self, parent: tk.Misc) -> None:
         self.roll_box = section(parent, "확정급여채무 증감내역")
@@ -197,6 +212,7 @@ class AnalysisTab(ttk.Frame):
             text=("산출 제외 — " + " · ".join(f"{k} {v:,}명" for k, v in excluded.items()))
             if excluded else "산출에서 뺀 사람은 없습니다.")
 
+        self._fill_causes(data)
         self._fill_rollforward(data)
         self._fill_assets(data)
 
@@ -218,6 +234,22 @@ class AnalysisTab(ttk.Frame):
         self.mortality_chart.show(curves.get("사망률", {}))
 
         self._fill_member(data)
+
+    def _fill_causes(self, data: dict[str, Any]) -> None:
+        causes = data.get("causes", [])
+        total = sum(row["dbo"] for row in causes)
+        self.cause_chart.show([(row["name"], row["dbo"]) for row in causes])
+        rows = [(row["name"], theme.money(row["dbo"]), theme.money(row["sc"]),
+                 theme.money(row["pv"]),
+                 f"{row['dbo'] / total:.1%}" if total else "-")
+                for row in causes]
+        if causes:
+            rows.append(("합계", theme.money(total),
+                         theme.money(sum(r["sc"] for r in causes)),
+                         theme.money(sum(r["pv"] for r in causes)), "100.0%"))
+        self.cause_table.fill(
+            rows, tags=lambda index, _row, last=len(rows) - 1:
+            "total" if index == last else "")
 
     def _fill_rollforward(self, data: dict[str, Any]) -> None:
         rows = data.get("rollforward", [])

@@ -556,8 +556,16 @@ def _run(request: dict) -> dict[str, Any]:
         f"오류 {len(run.issues.errors)}건 / 경고 {len(run.issues.warnings)}건 — "
         "상세는 결과 파일의 검증리포트 시트"
     )
+    # 퇴직사유(급부)별 몫. 합은 확정급여채무와 원 단위까지 같다.
+    causes = [
+        [name, f"{share['dbo']:,.0f}", f"{share['service_cost']:,.0f}",
+         f"{share['benefit_pv']:,.0f}",
+         f"{share['dbo'] / valuation.dbo:.1%}" if valuation.dbo else "-"]
+        for name, share in valuation.by_cause().items()
+    ]
+
     return {
-        "run": True, "summary": summary, "groups": groups,
+        "run": True, "summary": summary, "groups": groups, "causes": causes,
         "issues": issues, "excluded": excluded,
         # 화면에 보이는 요약은 사람이 읽을 서식이라 다시 숫자로 되돌리기 어렵다.
         # 다음 결산에서 전기값으로 끌어 쓸 수 있게 원래 숫자를 함께 남긴다.

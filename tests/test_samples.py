@@ -556,3 +556,115 @@ class TestCurveTemplate:
 
         made = {path.name for path in write_sample_pack(tmp_path)}
         assert CURVE_TEMPLATE in made
+
+
+class TestByCause:
+    """퇴직사유(급부)별로 갈라 놓은 금액.
+
+    사유마다 지급률이 다른 규정에서는 합계만으로 검산이 안 된다. 지급률 한 칸을
+    잘못 넣어도 총액은 조금 움직일 뿐이라, 사유별로 갈라 놓아야 눈에 띈다.
+    원 조서(DBO 산출표)가 정년·중도·사망 열을 따로 세우는 이유와 같다.
+    """
+
+    def _run(self, pack, tmp_path):
+        from pension.pipeline import RunOptions, run_valuation
+
+        return run_valuation(RunOptions(
+            roster_path=pack / ROSTER_TEMPLATE,
+            assumptions_path=pack / STANDARD_ASSUMPTIONS,
+            output_path=tmp_path / "결과.xlsx",
+        ))
+
+    def test_the_parts_add_up_to_the_whole(self, pack, tmp_path) -> None:
+        """나눈 것이지 다시 계산한 것이 아니다 — 합이 총액과 원 단위까지 같아야 한다."""
+        valuation = self._run(pack, tmp_path).valuation
+        causes = valuation.by_cause()
+
+        assert causes, "사유별 몫이 비어 있다"
+        assert sum(s["dbo"] for s in causes.values()) == pytest.approx(valuation.dbo)
+        assert sum(s["service_cost"] for s in causes.values()) == pytest.approx(
+            valuation.service_cost)
+
+    def test_it_covers_the_three_ways_out(self, pack, tmp_path) -> None:
+        from pension.assumptions import CAUSE_DEATH, CAUSE_NORMAL, CAUSE_VOLUNTARY
+
+        causes = self._run(pack, tmp_path).valuation.by_cause()
+        assert set(causes) == {CAUSE_NORMAL, CAUSE_VOLUNTARY, CAUSE_DEATH}
+        # 정년이 맨 앞 — 원 조서의 열 차례다.
+        assert list(causes)[0] == CAUSE_NORMAL
+
+    def test_one_person_splits_the_same_way(self, pack, tmp_path) -> None:
+        """사번 조회의 사유별 몫도 그 사람 채무와 맞아야 한다."""
+        from pension.memberdetail import lookup
+
+        found = lookup(str(pack / ROSTER_TEMPLATE), str(pack / STANDARD_ASSUMPTIONS),
+                       "A0001")
+        shares = found["by_cause"]
+        assert shares
+        assert sum(s["dbo"] for s in shares) == pytest.approx(
+            found["total"]["확정급여채무 (DBO)"])
+
+    def test_the_result_workbook_carries_it(self, pack, tmp_path) -> None:
+        from pension.report import write_report
+
+        run = self._run(pack, tmp_path)
+        target = tmp_path / "결과.xlsx"
+        write_report(run, target)
+        ws = openpyxl.load_workbook(target)["산출요약"]
+        labels = [ws.cell(r, 2).value for r in range(1, ws.max_row + 1)]
+        assert any("퇴직사유별" in str(v) for v in labels)
+        assert any(v == "합계 (= 확정급여채무)" for v in labels)
+
+
+class TestBaseDateFromTheScreen:
+    """명부에 기준일이 없어도 화면에 넣은 날짜로 산출돼야 한다.
+
+    실제로 그런 명부가 왔다. 화면에 2025-12-31 을 넣어 두었는데도 '산출기준일을
+    찾지 못했습니다' 로 멈췄다 — 명부를 읽는 함수가 화면 값을 받기 **전에**
+    터졌기 때문이다. 담당자로서는 넣은 값이 왜 무시되는지 알 길이 없다.
+    """
+
+    def _roster_without_a_date(self, pack, tmp_path) -> Path:
+        book = openpyxl.load_workbook(pack / ROSTER_TEMPLATE)
+        del book["Input"]           # 기준일이 적힌 유일한 자리
+        target = tmp_path / "기준일없는명부.xlsx"
+        book.save(target)
+        return target
+
+    def test_without_a_date_anywhere_it_says_so(self, pack, tmp_path) -> None:
+        from pension.config import read_config
+        from pension.workbook import open_workbook
+
+        book = open_workbook(self._roster_without_a_date(pack, tmp_path))
+        try:
+            with pytest.raises(ValueError, match="산출 기준일"):
+                read_config(book)
+        finally:
+            book.close()
+
+    def test_the_screen_date_is_enough(self, pack, tmp_path) -> None:
+        import datetime as dt
+
+        from pension.config import read_config
+        from pension.workbook import open_workbook
+
+        book = open_workbook(self._roster_without_a_date(pack, tmp_path))
+        try:
+            config = read_config(book, base_date=dt.date(2025, 12, 31))
+        finally:
+            book.close()
+        assert config.base_date == dt.date(2025, 12, 31)
+
+    def test_the_whole_run_goes_through(self, pack, tmp_path) -> None:
+        import datetime as dt
+
+        from pension.pipeline import RunOptions, run_valuation
+
+        run = run_valuation(RunOptions(
+            roster_path=self._roster_without_a_date(pack, tmp_path),
+            assumptions_path=pack / STANDARD_ASSUMPTIONS,
+            output_path=tmp_path / "결과.xlsx",
+            base_date=dt.date(2025, 12, 31),
+        ))
+        assert run.config.base_date == dt.date(2025, 12, 31)
+        assert run.valuation.dbo > 0

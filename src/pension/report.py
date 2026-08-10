@@ -148,6 +148,19 @@ def _summary_sheet(wb, run: PensionRun) -> None:
     line("퇴직급여추계액 (즉시퇴직 가정)", run.valuation.accrued_benefit, _MONEY, "원")
     row += 1
 
+    causes = run.valuation.by_cause()
+    if causes:
+        # 사유마다 지급률이 다른 규정에서는 합계만으로 검산이 안 된다. 어느
+        # 사유가 채무를 얼마나 만들었는지 갈라 두어야 지급률 한 칸이 틀린 것을
+        # 알아챈다. 합은 위 확정급여채무와 원 단위까지 같다.
+        section("2-1. 퇴직사유별 (급부별) 금액")
+        for name, share in causes.items():
+            line(f"{name} — 확정급여채무", share["dbo"], _MONEY, "원")
+            line(f"{name} — 당기근무원가", share["service_cost"], _MONEY, "원")
+        line("합계 (= 확정급여채무)",
+             sum(share["dbo"] for share in causes.values()), _MONEY, "원")
+        row += 1
+
     if run.longterm is not None:
         section("3. 기타장기종업원급여")
         line("장기급여채무", run.longterm.dbo, _MONEY, "원")

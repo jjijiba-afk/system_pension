@@ -1629,6 +1629,10 @@ $("form").addEventListener("submit", async (event) => {
     fillTable($("summary"), report.summary, 1);
     fillTable($("groups"),
       [["직군", "인원", "확정급여채무", "당기근무원가"], ...report.groups], 1);
+    // 퇴직사유(급부)별. 합은 확정급여채무와 원 단위까지 같다.
+    fillTable($("causes"),
+      [["퇴직사유", "확정급여채무", "당기근무원가", "급여 현가", "채무 비중"],
+       ...(report.causes || [])], 1);
     if (report.rollforward && report.rollforward.length) {
       $("roll-wrap").style.display = "block";
       fillTable($("rollforward"),

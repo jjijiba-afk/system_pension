@@ -606,6 +606,14 @@ class CalcTab(ttk.Frame):
         self.write(f"  이자원가(차기)    {v.interest_cost:>18,.0f} 원")
         self.write(f"  퇴직급여추계액    {v.accrued_benefit:>18,.0f} 원")
         self.write(f"  듀레이션          {v.duration:>18,.1f} 년")
+        causes = v.by_cause()
+        if causes:
+            self.write("", "muted")
+            self.write("  ── 퇴직사유별 (급부별) ──", "head")
+            for cause, share in causes.items():
+                self.write(f"  {cause:<16}{share['dbo']:>18,.0f} 원"
+                           f"   (근무원가 {share['service_cost']:>14,.0f})")
+
         if run.longterm is not None:
             self.write(f"  장기급여채무      {run.longterm.dbo:>18,.0f} 원")
         if run.rollforward is not None:
