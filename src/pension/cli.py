@@ -169,7 +169,7 @@ def _build_parser() -> argparse.ArgumentParser:
     app.add_argument("--check", action="store_true",
                      help="화면을 띄우지 않고 웹앱이 제자리에 있는지만 확인합니다")
 
-    sub.add_parser("gui", help="GUI 실행")
+    sub.add_parser("gui", help="본 화면 실행 (인자 없이 실행한 것과 같습니다)")
 
     editor = sub.add_parser("assumptions", help="산출 가정 입력 화면 실행")
     editor.add_argument(
@@ -608,28 +608,34 @@ def _cmd_assumptions(args: argparse.Namespace) -> int:
 
 
 def _cmd_gui(_args: argparse.Namespace) -> int:
-    from .gui import main as gui_main
+    from .desk import main as desk_main
 
-    return gui_main()
+    return desk_main()
 
 
 def main(argv: list[str] | None = None) -> int:
     """진입점. 인자가 없으면 본 화면을 띄운다.
 
-    본 화면은 **전체 기능 화면 하나** 다. 산출·산출가정 입력·분석·보고서·
-    산출 내역이 한 창 안에 다 있다. 예전의 작은 입력 창은 `gui` 하위 명령으로
-    남겨 두었다 — 그 창에만 익숙한 사람이 있을 수 있어서다.
+    본 화면은 창 하나다. 산출·산출가정 입력·분석·계리평가 보고서·사번 조회·
+    산출 내역·자료실이 모두 그 안에 탭으로 들어 있고, 계산도 그 안에서 돈다 —
+    다른 화면을 따로 열지 않고, 명부가 이 컴퓨터 밖으로 나가지도 않는다.
+
+    아이패드용 화면은 :mod:`pension.web` 이 따로 띄운다(``pension web``).
     """
     force_utf8_output()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        from .localapp import MissingAppError, run_app
-
         try:
-            return run_app()
-        except MissingAppError:
-            # 웹앱이 없는 설치본이면 옛 입력 창이라도 띄운다.
             return _cmd_gui(argparse.Namespace())
+        except SystemExit:
+            # tkinter 가 없는 파이썬. 그래도 쓸 수 있게 웹앱 창으로 돌린다.
+            from .localapp import MissingAppError, run_app
+
+            try:
+                return run_app()
+            except MissingAppError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
 
     parser = _build_parser()
     args = parser.parse_args(argv)

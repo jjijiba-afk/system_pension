@@ -40,13 +40,13 @@ from typing import Final
 
 __all__ = [
     "DEFAULT_SIZE",
-    "SIZE_THRESHOLD",
     "DISCOUNT_RATE",
     "MORTALITY_SOURCE",
     "SALARY_BASE_UP",
     "SIZES",
     "SIZE_LARGE",
     "SIZE_SMALL",
+    "SIZE_THRESHOLD",
     "STANDARD_TABLE",
     "STANDARD_YEAR",
     "mortality_table",

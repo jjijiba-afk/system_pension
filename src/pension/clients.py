@@ -129,12 +129,12 @@ def names() -> list[str]:
 
 def entries() -> list[Client]:
     """단체 목록. 최근에 산출을 저장한 단체가 앞에 온다."""
-    from .webui import run_summaries   # 순환 참조를 피해 늦게 들여온다.
+    from .runs import summaries  # 순환 참조를 피해 늦게 들여온다.
 
     found = []
     for name in names():
         path = root() / name
-        saved = [run.get("saved", "") for run in run_summaries(name)]
+        saved = [run.get("saved", "") for run in summaries(name)]
         found.append(Client(
             name=name, path=path, memo=_memo(path),
             runs=len(saved), last_saved=max(saved, default=""),

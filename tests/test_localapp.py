@@ -262,9 +262,10 @@ class TestTheMainScreen:
 
     전에는 작은 입력 창이 먼저 뜨고 거기서 [전체 기능 화면 열기] 를 눌러야
     했다. 같은 프로그램인데 창이 둘로 나뉘고, 무엇이 어디 있는지 외워야 했다.
+    지금은 본 화면 하나이며, 그 화면이 곧 이 프로그램이다.
     """
 
-    def test_running_with_no_arguments_opens_the_full_screen(self, monkeypatch) -> None:
+    def test_running_with_no_arguments_opens_the_desk_window(self, monkeypatch) -> None:
         from pension import cli
 
         called = {}
@@ -275,32 +276,32 @@ class TestTheMainScreen:
                 return 0
             return record
 
-        monkeypatch.setattr(localapp, "run_app", note("run"))
-        monkeypatch.setattr(cli, "_cmd_gui", note("old_window"))
+        monkeypatch.setattr(cli, "_cmd_gui", note("desk"))
+        monkeypatch.setattr(localapp, "run_app", note("webapp"))
 
         assert cli.main([]) == 0
-        assert called.get("run") is True
-        assert "old_window" not in called      # 예전 창은 뜨지 않는다
+        assert called.get("desk") is True
+        assert "webapp" not in called      # 브라우저 창은 뜨지 않는다
 
-    def test_it_falls_back_to_the_old_window_without_the_webapp(
+    def test_it_falls_back_to_the_webapp_window_without_tkinter(
         self, monkeypatch
     ) -> None:
-        """웹앱이 없는 설치본이라도 아무것도 안 뜨는 것보다는 낫다."""
+        """tkinter 없는 파이썬이라도 아무것도 안 뜨는 것보다는 낫다."""
         from pension import cli
 
         called = {}
 
-        def missing():
-            raise localapp.MissingAppError("없다")
+        def no_tkinter(*_args, **_kw):
+            raise SystemExit("이 화면은 tkinter 가 필요합니다")
 
-        def old_window(*_args, **_kw):
-            called["old_window"] = True
+        def webapp_window(*_args, **_kw):
+            called["webapp"] = True
             return 0
 
-        monkeypatch.setattr(localapp, "run_app", missing)
-        monkeypatch.setattr(cli, "_cmd_gui", old_window)
+        monkeypatch.setattr(cli, "_cmd_gui", no_tkinter)
+        monkeypatch.setattr(localapp, "run_app", webapp_window)
         assert cli.main([]) == 0
-        assert called.get("old_window") is True
+        assert called.get("webapp") is True
 
     def test_the_program_ends_when_the_window_closes(self, fake_app, monkeypatch) -> None:
         """창을 닫으면 서버도 내려가야 한다. 남아 있으면 포트를 계속 잡는다."""

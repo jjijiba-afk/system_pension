@@ -16,6 +16,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 
+from . import hidpi
 from .actuarial import (
     FRACTION_KEEP,
     FRACTION_MODES,
@@ -60,7 +61,6 @@ from .assumptions import (
     STATUTORY_MODE,
     WITHDRAWAL_SHEET,
 )
-from . import hidpi
 from .formula import FUNCTIONS, VARIABLES, Formula, FormulaError
 from .jobgroup import DEFAULT_GROUPS
 from .normalize import text
@@ -1221,8 +1221,16 @@ class _ExitCauseTab(ttk.Frame):
                 self._rows[index][key].set(str(value))
 
 
-class AssumptionsEditor(tk.Toplevel):
-    """산출 가정 입력 창."""
+class AssumptionsEditor(ttk.Frame):
+    """산출 가정 입력 화면.
+
+    창으로도 뜨고 탭 안에도 그대로 박힌다. 본 프로그램에서는 탭으로 쓰고,
+    ``pension editor`` 로 가정만 만들 때는 창으로 뜬다. 두 벌을 따로 두면
+    한쪽만 고치는 일이 생기므로 화면은 한 벌뿐이다.
+
+    :param standalone: 참이면 제 창(Toplevel)을 만들어 그 안에 자리잡는다.
+        거짓이면 ``parent`` 안에 그냥 얹힌다 — 자리를 잡는 것은 부르는 쪽 몫.
+    """
 
     def __init__(
         self,
@@ -1232,12 +1240,24 @@ class AssumptionsEditor(tk.Toplevel):
         on_close: Callable[[AssumptionsEditor], None] | None = None,
         on_saved: Callable[[AssumptionsEditor], None] | None = None,
         roster_path: Path | None = None,
+        standalone: bool = True,
     ) -> None:
-        super().__init__(parent)
-        self.title("산출 가정 입력")
-        self.scale = hidpi.apply(self)
-        self.geometry(hidpi.scale_geometry(self, "980x820"))
-        self.minsize(hidpi.px(self, 820), hidpi.px(self, 680))
+        self.window: tk.Toplevel | None = None
+        """제 창을 가졌으면 그 창. 탭으로 박혔으면 ``None``."""
+
+        if standalone:
+            self.window = tk.Toplevel(parent)
+            self.window.title("산출 가정 입력")
+            hidpi.apply(self.window)
+            self.window.geometry(hidpi.scale_geometry(self.window, "980x820"))
+            self.window.minsize(hidpi.px(self.window, 820), hidpi.px(self.window, 680))
+            super().__init__(self.window)
+            self.pack(fill="both", expand=True)
+            self.window.protocol("WM_DELETE_WINDOW", self.close)
+        else:
+            super().__init__(parent)
+
+        self.scale = hidpi.scaling(self)
 
         self.job_groups = list(job_groups or DEFAULT_GROUPS)
         self.path: Path | None = None
@@ -1249,7 +1269,6 @@ class AssumptionsEditor(tk.Toplevel):
         self._on_close = on_close
         self._on_saved = on_saved
         """저장 직후 호출된다. 창을 닫아야만 결과가 전달되던 것을 없애기 위한 것."""
-        self.protocol("WM_DELETE_WINDOW", self.close)
 
         self._build_styles()
         self._build_library_bar()
@@ -1758,7 +1777,7 @@ class AssumptionsEditor(tk.Toplevel):
 
         if self._on_close is not None:
             self._on_close(self)
-        self.destroy()
+        (self.window or self).destroy()
 
 
 def open_editor(
@@ -1774,9 +1793,11 @@ def open_editor(
         parent, job_groups=job_groups, on_close=on_close,
         on_saved=on_saved, roster_path=roster_path,
     )
-    if parent is not None:
-        editor.transient(parent)
-    editor.grab_set()
+    window = editor.window
+    if window is not None:
+        if parent is not None:
+            window.transient(parent)
+        window.grab_set()
     return editor
 
 
@@ -1786,6 +1807,7 @@ def main() -> int:
     root = tk.Tk()
     root.withdraw()
     editor = AssumptionsEditor(root)
-    editor.protocol("WM_DELETE_WINDOW", root.destroy)
+    assert editor.window is not None
+    editor.window.protocol("WM_DELETE_WINDOW", root.destroy)
     root.mainloop()
     return 0

@@ -17,7 +17,7 @@ build = ["pyinstaller>=6.11"]
 pension = "pension.cli:main"
 
 [project.gui-scripts]
-pension-gui = "pension.gui:main"
+pension-gui = "pension.desk:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
