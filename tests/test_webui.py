@@ -1263,3 +1263,50 @@ class TestRemainingGapsClosed:
                       work=str(tmp_path), sensitivity=False, longterm=False)
         assert report["run"] is True
         assert "경고" in report["issues"]
+
+
+class TestPriorCheck:
+    """전기 명부와 맞대어 보기 — 저장해 둔 산출을 상대로."""
+
+    def _saved(self, tmp_path, roster_path, assumptions_path, name="2412 전기"):
+        """산출 하나를 저장해 둔 상태를 만든다."""
+        call("run", roster=str(roster_path), assumptions=str(assumptions_path),
+             work=str(tmp_path), sensitivity=False, longterm=False, force=True)
+        call("run_save", name=name, roster=str(roster_path),
+             assumptions=str(assumptions_path), work=str(tmp_path))
+        return name
+
+    def test_the_same_roster_twice_is_clean(self, tmp_path, roster_path,
+                                            assumptions_path) -> None:
+        name = self._saved(tmp_path, roster_path, assumptions_path)
+        found = call("prior_check", name=name, roster=str(roster_path),
+                     work=str(tmp_path))
+        assert found["serious"] == []
+        assert "이상 없습니다" in found["summary"]
+        assert found["matched"] > 0
+        assert found["prior_name"] == name
+
+    def test_a_changed_birth_date_is_caught(self, tmp_path, roster_path,
+                                            assumptions_path) -> None:
+        """당기 명부만 봐서는 알 수 없다. 전기와 맞대야 드러난다."""
+        import openpyxl
+
+        from pension.readers import ACTIVE_COLUMNS, ACTIVE_FIRST_ROW, ACTIVE_SHEET
+
+        name = self._saved(tmp_path, roster_path, assumptions_path)
+
+        changed = tmp_path / "당기명부.xlsx"
+        wb = openpyxl.load_workbook(roster_path)
+        ws = wb[ACTIVE_SHEET]
+        ws.cell(ACTIVE_FIRST_ROW, ACTIVE_COLUMNS["birth_date"].index, "1955-01-01")
+        wb.save(changed)
+
+        found = call("prior_check", name=name, roster=str(changed), work=str(tmp_path))
+        assert "생년월일 변경" in found["counts"]
+        assert any("생년월일" in row[2] for row in found["serious"])
+
+    def test_it_needs_a_saved_run(self, tmp_path, roster_path) -> None:
+        result = json.loads(api(json.dumps({
+            "op": "prior_check", "name": "없는산출", "roster": str(roster_path),
+            "work": str(tmp_path)})))
+        assert result["ok"] is False

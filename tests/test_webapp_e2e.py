@@ -743,3 +743,51 @@ def test_storage_persistence_is_requested_and_reported(page) -> None:
     # 허용되지 않았으면 눈에 띄어야 한다. 회색 안내문에 섞이면 아무도 안 읽는다.
     if "허용되지 않" in text:
         assert note.get_attribute("class") == "hint bad-text"
+
+
+def test_prior_roster_comparison_runs_before_the_valuation(page, tmp_path) -> None:
+    """전기 명부와 맞대어 보기 — 산출 전에 잡아야 할 것을 잡는지.
+
+    당기 명부만 보면 멀쩡한데 전기와 나란히 놓아야 드러나는 것이 있다. 여기서는
+    생년월일이 바뀐 사람을 심어 두고, 그것이 **빨간 쪽** 으로 나오는지 본다.
+    """
+    import openpyxl
+
+    from pension.readers import ACTIVE_COLUMNS, ACTIVE_FIRST_ROW, ACTIVE_SHEET
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    # 전기로 쓸 산출을 하나 만들어 저장한다.
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    page.fill("#run-name", "2312 맞대기시험")
+    page.click("#run-save")
+    page.wait_for_selector("text=저장했습니다", timeout=30_000)
+
+    # 당기 명부 — 첫 사람의 생년월일만 바꾼다.
+    changed = tmp_path / "당기명부.xlsx"
+    book = openpyxl.load_workbook(roster)
+    sheet = book[ACTIVE_SHEET]
+    sheet.cell(ACTIVE_FIRST_ROW, ACTIVE_COLUMNS["birth_date"].index, "1955-01-01")
+    book.save(changed)
+
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(changed))
+    open_calc(page, "sec-prior")
+    page.select_option("#prior-run", "2312 맞대기시험")
+    page.click("#prior-check")
+
+    page.wait_for_function(
+        "() => document.querySelector('#prior-check-status').textContent.includes('건')",
+        timeout=60_000)
+    assert "확인이 필요한" in page.inner_text("#prior-check-status")
+    result = page.inner_text("#prior-check-result")
+    assert "생년월일" in result
+    assert "1955-01-01" in result
