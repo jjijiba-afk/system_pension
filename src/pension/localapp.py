@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import http.server
 import mimetypes
@@ -148,13 +149,34 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
 class _Server(socketserver.ThreadingTCPServer):
     """고정 포트로 다시 열 수 있는 서버.
 
-    ``allow_reuse_address`` 를 켜 두지 않으면, 창을 닫고 곧바로 다시 열 때
-    직전 연결이 ``TIME_WAIT`` 로 남아 있어 "포트가 사용 중" 으로 거절된다.
-    같은 포트를 계속 쓰는 것이 요점이므로 이것이 켜져 있어야 한다.
+    ``SO_REUSEADDR`` 의 뜻이 운영체제마다 다르다.
+
+    유닉스
+        창을 닫고 곧바로 다시 열 때 직전 연결이 ``TIME_WAIT`` 로 남아 있어도
+        같은 포트를 다시 잡게 해 준다. 같은 포트를 계속 쓰는 것이 요점이므로
+        이것이 있어야 한다.
+
+    윈도우
+        **이미 듣고 있는 소켓이 있어도 같은 포트에 또 바인드하게 해 준다.**
+        그러면 프로그램을 두 번 띄웠을 때 둘 다 8036 을 잡고 요청을 서로
+        가로챈다. 물러서야 할 자리에서 물러서지 않는다.
+
+    그래서 윈도우에서는 켜지 않고, 대신 ``SO_EXCLUSIVEADDRUSE`` 로 "이 포트는
+    내가 독점한다" 고 못 박는다. 두 번째 창은 :func:`serve` 의 사다리를 타고
+    다음 포트로 간다.
     """
 
-    allow_reuse_address = True
+    allow_reuse_address = sys.platform != "win32"
     daemon_threads = True
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32":  # pragma: no cover - 리눅스 CI 에서는 못 탄다
+            import socket
+
+            with contextlib.suppress(OSError):
+                self.socket.setsockopt(
+                    socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", 0), 1)
+        super().server_bind()
 
 
 def _register_types() -> None:
