@@ -151,6 +151,20 @@ def _state_read(request: dict) -> dict[str, Any]:
     return {"state": form.read_state(request["path"])}
 
 
+def _benefit_split(request: dict) -> dict[str, Any]:
+    """지급률 열 하나를 정년·중도·사망으로 가른다(또는 도로 접는다).
+
+    가르는 일 자체는 state 를 손보는 것뿐이라 화면에서도 할 수 있지만,
+    PC 편집기와 웹앱이 각자 구현하면 열 이름이 한 글자만 달라도 파일이
+    갈린다. 두 화면이 같은 함수를 부르게 여기에 둔다.
+    """
+    rule = text(request["rule"])
+    change = (form.merge_benefit_causes if request.get("merge")
+              else form.split_benefit_by_cause)
+    state = change(request["state"], rule)
+    return {"state": state, "split": form.cause_split_rules(state)}
+
+
 def _standard_state(request: dict) -> dict[str, Any]:
     """내장 표준률로 채운 state. 등록해 둔 표준률이 없어도 출발점은 있어야 한다.
 
@@ -1027,6 +1041,7 @@ _OPS = {
     "state_write": _state_write,
     "state_read": _state_read,
     "standard_state": _standard_state,
+    "benefit_split": _benefit_split,
     "formula_check": _formula_check,
     "formula_preview": _formula_preview,
     "library_list": _library_list,

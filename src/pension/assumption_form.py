@@ -55,6 +55,7 @@ from .standard_rates import SALARY_BASE_UP
 
 __all__ = [
     "APPLY_CHOICES",
+    "CAUSE_COLUMN_SEP",
     "EDITOR_GROUPS",
     "EXIT_CAUSE_HEADERS",
     "FORM_SHEETS",
@@ -63,6 +64,8 @@ __all__ = [
     "ROUNDING_UNITS",
     "ROUNDING_VALUES",
     "UNIT_LABELS",
+    "cause_column",
+    "cause_split_rules",
     "check_formula",
     "default_benefit_rule",
     "default_longterm_rule",
@@ -71,7 +74,9 @@ __all__ = [
     "example_state",
     "formula_preview",
     "grid_columns",
+    "merge_benefit_causes",
     "read_state",
+    "split_benefit_by_cause",
     "state_problems",
     "state_to_sheets",
     "write_state",
@@ -284,6 +289,139 @@ def grid_columns(state: dict[str, Any], sheet: str) -> list[str]:
         if text(name) and text(name) not in groups
     ]
     return groups + list(dict.fromkeys(extra))
+
+
+# ── 퇴직사유별 지급률 ────────────────────────────────────────────
+#
+# 엔진은 처음부터 사유별 차등을 받았지만(``퇴직사유`` 시트), 넣는 길이 2단
+# 우회였다. ① [지급률] 표에 '정년배수' 같은 열을 손으로 만들고 ② [퇴직사유]
+# 탭에서 그 이름을 지목해야 했다. 자료요청서 6번에 세 줄이 나란히 있는데도
+# 처음 쓰는 사람은 이 경로를 찾지 못했다.
+#
+# 그래서 **한 번에 갈라 주는 조작** 을 둔다. 파일 서식과 엔진은 그대로다 —
+# 갈라 놓은 결과가 곧 종전의 '여분 열 + 퇴직사유 줄' 이라, 다른 도구로 연
+# 파일도 그대로 읽힌다.
+
+CAUSE_COLUMN_SEP: Final = "·"
+"""사유별로 가른 지급률 열 이름의 구분자(``정규직·정년``)."""
+
+
+def cause_column(rule: object, cause: object) -> str:
+    """그 규정·사유에 붙는 지급률 열 이름."""
+    return f"{text(rule)}{CAUSE_COLUMN_SEP}{text(cause)}"
+
+
+def _pad_cause(row: object) -> list[str]:
+    values = [text(v) for v in list(row)[: len(EXIT_CAUSE_HEADERS)]]
+    return values + [""] * (len(EXIT_CAUSE_HEADERS) - len(values))
+
+
+def cause_split_rules(state: dict[str, Any]) -> list[str]:
+    """지금 사유별로 갈라 놓은 지급률 규정 이름들.
+
+    파일에서 되읽었을 때도 화면이 갈라진 상태로 뜨려면, 저장된 것만 보고
+    되짚을 수 있어야 한다. 세 사유의 열이 모두 있고 퇴직사유 줄이 그 열을
+    가리키고 있으면 갈라 놓은 것으로 본다.
+    """
+    columns = set(grid_columns(state, BENEFIT_SHEET))
+    linked = {(row[0], row[1]): row[2] for row in map(_pad_cause,
+                                                      state.get("exit_causes", []))}
+    return [
+        rule for rule in grid_columns(state, BENEFIT_SHEET)
+        if CAUSE_COLUMN_SEP not in rule
+        and all(cause_column(rule, cause) in columns for cause in EXIT_CAUSES)
+        and all(linked.get((rule, cause)) == cause_column(rule, cause)
+                for cause in EXIT_CAUSES)
+    ]
+
+
+def split_benefit_by_cause(state: dict[str, Any], rule: object) -> dict[str, Any]:
+    """지급률 열 하나를 정년·중도·사망 세 열로 가른다.
+
+    세 열의 방식·수식은 원래 열에서 복사해 온다 — 가르는 목적은 '셋이 다르다'
+    를 적는 것이지 처음부터 다시 짜는 것이 아니다. 원래 열은 그대로 남는다:
+    사유를 안 적은 경우(퇴직자 명부의 이미 확정된 급여 등)에 여전히 쓰인다.
+
+    :raises ValueError: 지급률 표에 없는 열이거나 이미 가른 열일 때.
+    """
+    from copy import deepcopy
+
+    name = text(rule)
+    columns = grid_columns(state, BENEFIT_SHEET)
+    if name not in columns:
+        raise ValueError(f"지급률 표에 '{name}' 열이 없습니다")
+    if CAUSE_COLUMN_SEP in name:
+        raise ValueError(f"'{name}' 은 이미 사유별로 가른 열입니다")
+
+    state = deepcopy(state)
+    grid = state.setdefault("grids", {}).setdefault(
+        BENEFIT_SHEET, {"key": "근속연수", "rows": [], "extra": []})
+    extra = [text(n) for n in (grid.get("extra") or [])]
+    rules = state.setdefault("benefit_rules", {})
+    base = dict(rules.get(name) or default_benefit_rule())
+
+    for cause in EXIT_CAUSES:
+        column = cause_column(name, cause)
+        if column not in columns and column not in extra:
+            extra.append(column)
+        rules.setdefault(column, dict(base))
+    grid["extra"] = extra
+
+    # 퇴직사유 줄이 이미 있으면 대체 규정만 갈아 끼운다. 가산액·근속 하한을
+    # 먼저 적어 둔 회사가 있어, 줄을 새로 만들면 그 값이 사라진다.
+    rows = [_pad_cause(row) for row in state.get("exit_causes", [])]
+    for cause in EXIT_CAUSES:
+        column = cause_column(name, cause)
+        found = next((r for r in rows if r[0] == name and r[1] == cause), None)
+        if found is None:
+            rows.append([name, cause, column, "", "", "", ""])
+        else:
+            found[2] = column
+    state["exit_causes"] = rows
+    return state
+
+
+def merge_benefit_causes(state: dict[str, Any], rule: object) -> dict[str, Any]:
+    """가른 세 열을 도로 접는다. 그 열에 적은 값은 함께 사라진다."""
+    from copy import deepcopy
+
+    name = text(rule)
+    columns = grid_columns(state, BENEFIT_SHEET)
+    doomed = [cause_column(name, cause) for cause in EXIT_CAUSES]
+
+    state = deepcopy(state)
+    grid = state.setdefault("grids", {}).setdefault(
+        BENEFIT_SHEET, {"key": "근속연수", "rows": [], "extra": []})
+
+    # 값 칸도 같이 들어낸다. 이름만 지우면 남은 값이 한 칸씩 옆으로 밀려
+    # 엉뚱한 열의 배수가 된다 (열 0 은 근속연수라 +1).
+    dead = sorted((columns.index(c) + 1 for c in doomed if c in columns),
+                  reverse=True)
+    rows = []
+    for row in grid.get("rows") or []:
+        values = list(row)
+        for index in dead:
+            if index < len(values):
+                del values[index]
+        if any(text(v) for v in values):
+            rows.append(values)
+    grid["rows"] = rows
+    grid["extra"] = [text(n) for n in (grid.get("extra") or [])
+                     if text(n) not in doomed]
+    for column in doomed:
+        state.get("benefit_rules", {}).pop(column, None)
+
+    # 퇴직사유 줄은 대체 규정만 비운다. 가산액 같은 것을 같이 적었으면 그
+    # 규정은 여전히 유효하므로 줄째로 지우면 안 된다.
+    kept = []
+    for row in map(_pad_cause, state.get("exit_causes", [])):
+        if row[0] == name and row[2] in doomed:
+            row[2] = ""
+            if not any(row[2:]):
+                continue
+        kept.append(row)
+    state["exit_causes"] = kept
+    return state
 
 
 def example_state(job_groups: list[str] | None = None) -> dict[str, Any]:

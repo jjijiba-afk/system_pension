@@ -300,6 +300,12 @@ function benefitGuide() {
        "누진  표의 값이 그 구간에서만 적용할 연 배수입니다. " +
        "0년 1.0 / 5년 1.5 / 10년 2.0 이면 근속 12년 = 5×1.0 + 5×1.5 + 2×2.0 = 16.5\n" +
        "수식  방식을 '수식' 으로 두고 그 아래 칸에 직접 씁니다."),
+    el("div", { class: "hint", style: "white-space:pre-line" },
+       "사유별 차등  켜면 그 직군이 " + META.exit_causes.join("·") +
+       " 세 열로 갈립니다. 자료요청서 6번의 세 줄을 그대로 옮길 때 쓰세요.\n" +
+       "             사유마다 다른 배수만 채우면 됩니다 — 비운 열은 왼쪽의 " +
+       "기본 규정을 그대로 씁니다.\n" +
+       "             가산액·근속 하한처럼 배수가 아닌 것은 아래 [퇴직사유별 차등] 에 적습니다."),
     el("div", { class: "hint" }, "변수  " + vars),
     el("div", { class: "hint" }, "함수  " + META.formula_functions.join(" ")),
     el("div", { class: "hint" },
@@ -535,10 +541,62 @@ function toggleDetailRows(sheet) {
   syncDetailRows(grid);
 }
 
+/** 어느 지급률 열이 정년·중도·사망으로 갈려 있는지. renderState 가 채운다. */
+let benefitSplit = [];
+
+/** 그 열이 어느 규정의 어느 사유인지 — 갈라 놓은 열의 머리에 붙일 꼬리표. */
+function causeOf(name) {
+  const at = name.indexOf("·");
+  if (at < 0) return null;
+  const [rule, cause] = [name.slice(0, at), name.slice(at + 1)];
+  return benefitSplit.includes(rule) && META.exit_causes.includes(cause)
+    ? { rule, cause } : null;
+}
+
+// 자료요청서 6번에는 '중도퇴직시 / 사망시 / 정년퇴직시' 지급률이 세 줄로
+// 갈려 있다. 종전에는 열을 손으로 만들고 [퇴직사유] 탭에서 그 이름을 지목해야
+// 해서, 세 줄을 그대로 옮기는 길이 눈에 보이지 않았다. 여기 체크 한 번으로
+// 세 열이 생기고 연결까지 끝난다 — 파일에 저장되는 모양은 종전과 같다.
+function toggleCauseSplit(rule, split) {
+  if (!split && !confirm(
+    `'${rule}' 의 사유별 열 세 개를 지웁니다. 그 열에 적은 배수도 함께 사라집니다.`
+  )) { renderState(collectState()); return; }
+  try {
+    const result = py("benefit_split",
+                      { state: collectState(), rule, merge: !split });
+    renderState(result.state);
+    saveEditorLocal();
+    $("ed-status").textContent = split
+      ? `'${rule}' 을(를) ${META.exit_causes.join("·")} 세 열로 갈랐습니다. ` +
+        "사유마다 다른 배수만 채우면 됩니다 — 비운 열은 기본 규정을 씁니다."
+      : `'${rule}' 의 사유별 열을 접었습니다.`;
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 /** 지급률 — 누적·누진·수식과 그 수식. */
 function benefitColumnPanel(grid, columns, values) {
   const widgets = grid.columnWidgets;
   const states = {};
+
+  // 가른 열은 '<규정>·<사유>' 라 머리글이 길다. 무엇의 어느 사유인지가
+  // 표를 보는 동안 늘 보여야 하므로 머리 칸에 사유만 크게 붙인다.
+  const head = grid.tbody.firstChild;
+  columns.forEach((name, index) => {
+    const part = causeOf(name);
+    if (part) head.children[index + 1].append(el("div", { class: "cause-tag" },
+                                                 part.cause));
+  });
+
+  grid.tbody.append(panelRow("사유별 차등", columns, (name) => {
+    // 가른 열 자신에게는 다시 물을 것이 없다.
+    if (causeOf(name)) return el("span", { class: "hint" }, "↑ 갈라 놓음");
+    const box = el("input", { type: "checkbox" });
+    box.checked = benefitSplit.includes(name);
+    box.addEventListener("change", () => toggleCauseSplit(name, box.checked));
+    return box;
+  }));
   const syncAll = () => {
     for (const name of columns) {
       const w = widgets[name];
@@ -621,6 +679,8 @@ const CAUSE_MIN_ROWS = 4;
 function buildCauseTab(page) {
   const guide =
     "중도퇴직·사망·정년퇴직의 지급이 다를 때만 채웁니다. 비우면 사유를 가리지 않습니다.\n" +
+    "배수만 다르면 위 [지급률] 표에서 '사유별 차등' 을 켜는 편이 빠릅니다 — " +
+    "세 열이 생기고 이 표까지 자동으로 채워집니다.\n" +
     "대체 지급률 규정  그 사유일 때 기본 규정 대신 쓸 '지급률' 탭의 열 이름 " +
     "(예: 정년퇴직만 대표이사 3배)\n" +
     "가산 규정        기본 급여에 더할 배수를 내는 규정 " +
@@ -866,9 +926,22 @@ function collectState() {
 //: 열 머리 패널이 읽을 값. 시트마다 state 의 어느 자리에서 오는지.
 const PANEL_SOURCE = { benefit: "benefit_rules", longterm: "longterm_rules" };
 
+/** 파이썬 ``cause_split_rules`` 와 같은 판정. 되그릴 때마다 물으면 느리다. */
+function splitRulesOf(state) {
+  const grid = state.grids?.[benefitSheet()] || {};
+  const columns = new Set([...(state.job_groups || []), ...(grid.extra || [])]);
+  const linked = new Map(
+    (state.exit_causes || []).map((row) => [`${row[0]} ${row[1]}`, row[2] || ""]));
+  return [...columns].filter((rule) => !rule.includes("·")
+    && META.exit_causes.every((cause) =>
+      columns.has(`${rule}·${cause}`)
+      && linked.get(`${rule} ${cause}`) === `${rule}·${cause}`));
+}
+
 function renderState(state) {
   groups = state.job_groups?.length ? [...state.job_groups] : [...META.default_groups];
   $("ed-groups").value = groups.join(", ");
+  benefitSplit = splitRulesOf({ ...state, job_groups: groups });
   for (const spec of META.sheets) {
     const item = state.grids?.[spec.sheet] || {};
     renderGrid(spec.sheet, item.key || spec.key, item.rows || [], item.extra || [],

@@ -577,6 +577,17 @@ class TestDefaults:
         assert scale.multiple("정규직", 12.6) == pytest.approx(12)
         assert scale.multiple("정규직", 25) == pytest.approx(26)
 
+    def test_benefit_split_op_goes_both_ways(self) -> None:
+        """화면 둘이 같은 함수를 부르도록 web API 로도 열어 둔다."""
+        state = form.example_state(["정규직", "임원"])
+        split = call("benefit_split", state=state, rule="정규직")
+        assert split["split"] == ["정규직"]
+        assert "정규직·정년" in form.grid_columns(split["state"], "지급률")
+
+        merged = call("benefit_split", state=split["state"], rule="정규직", merge=True)
+        assert merged["split"] == []
+        assert "정규직·정년" not in form.grid_columns(merged["state"], "지급률")
+
     def test_standard_state_keeps_statutory_default(self) -> None:
         state = call("standard_state", groups=["정규직", "임원"])["state"]
         assert state["benefit_rules"]["정규직"]["mode"] == "법정"
