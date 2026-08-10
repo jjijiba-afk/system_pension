@@ -827,6 +827,9 @@ async function scanRoster() {
       target: previous.get(pairKey(f.source, f.kind)) || f.suggest,
     }));
     renderMap();
+    // 인원을 이제 알게 됐으니 표준률 규모를 다시 제안한다. 손으로 고른
+    // 뒤라면 건드리지 않는다.
+    if (!$("ed-size").dataset.touched) $("ed-size").value = suggestedSize();
     saveEditorLocal();
   } catch (error) {
     alert("명부에서 직군을 읽지 못했습니다.\n\n" + error.message);
@@ -964,11 +967,31 @@ $("ed-preset-load").addEventListener("click", () => {
 });
 
 // ── 등록 자료 불러오기 ──
+
+// 내장 표준률의 승급률·중도퇴직률은 상시근로자 300인 미만/이상으로 갈린다.
+// 명부를 읽어 두었으면 그 인원으로 한쪽을 잡아 준다 — 제안일 뿐이라 바꿀 수 있다.
+function suggestedSize() {
+  const people = mapData.reduce((n, r) => n + (r.active || 0), 0);
+  const [small, large] = META.standard_sizes;
+  return people >= META.standard_size_threshold ? large : small;
+}
+
+// 등록해 둔 표준률 워크북에는 규모 개념이 없다 — 파일에 적힌 값이 곧 답이다.
+function syncSizeRow() {
+  const builtin = $("ed-rates").value === "__builtin__";
+  $("ed-size").disabled = !builtin;
+  $("ed-size-hint").style.display = builtin ? "" : "none";
+}
+
+$("ed-rates").addEventListener("change", syncSizeRow);
+$("ed-size").addEventListener("change", () => { $("ed-size").dataset.touched = "1"; });
+
 $("ed-rates-load").addEventListener("click", () => {
   try {
     const name = $("ed-rates").value;
+    const size = $("ed-size").value;
     const state = name === "__builtin__"
-      ? py("standard_state", { groups }).state
+      ? py("standard_state", { groups, size }).state
       : py("rates_state", { name }).state;
     // 표준률은 출발점일 뿐이다. 매핑·지급규정은 지금 화면 것을 지킨다.
     const keep = collectState();
@@ -979,7 +1002,9 @@ $("ed-rates-load").addEventListener("click", () => {
     renderState(state);
     saveEditorLocal();
     $("ed-status").textContent =
-      (name === "__builtin__" ? "내장 표준률" : `표준률 '${name}'`) +
+      (name === "__builtin__"
+        ? `내장 표준률 ${META.standard_year} (${size})`
+        : `표준률 '${name}'`) +
       " 을(를) 불러왔습니다. 회사에 맞게 고친 뒤 쓰세요.";
   } catch (error) {
     alert(error.message);
@@ -1106,9 +1131,16 @@ function refreshLibrary() {
 
   const rates = $("ed-rates");
   rates.replaceChildren(
-    el("option", { value: "__builtin__" }, "내장 표준률 (15~70세)"),
+    el("option", { value: "__builtin__" }, `내장 표준률 ${META.standard_year}`),
     ...library["표준률"].entries.map((e) => el("option", { value: e.name }, e.name)));
   if (library["표준률"].default) rates.value = library["표준률"].default;
+
+  const size = $("ed-size");
+  const kept = size.value;
+  size.replaceChildren(
+    ...META.standard_sizes.map((s) => el("option", { value: s }, s)));
+  size.value = kept || suggestedSize();
+  syncSizeRow();
 
   const curve = $("ed-curve");
   curve.replaceChildren(

@@ -430,6 +430,25 @@ def test_standard_rates_fill_the_grids(page) -> None:
     assert grid_row(page, "사망률").first.input_value() == "15"
 
 
+def test_workplace_size_switches_the_standard_table(page) -> None:
+    """300인 미만/이상은 다른 표다 — 고른 쪽이 실제로 표에 들어와야 한다."""
+    page.click("#tab-edit")
+    page.select_option("#ed-rates", "__builtin__")
+
+    def first_withdrawal(size: str) -> str:
+        page.select_option("#ed-size", size)
+        page.click("#ed-rates-load")
+        assert size in page.inner_text("#ed-status")
+        return grid_row(page, "퇴직률").nth(1).input_value()
+
+    small = first_withdrawal("300인 미만")
+    large = first_withdrawal("300인 이상")
+    assert small != large
+
+    # 사망률은 규모로 갈리지 않으므로 그대로여야 한다.
+    assert grid_row(page, "사망률").first.input_value() == "15"
+
+
 def test_client_bar_keeps_run_history_apart(page, tmp_path) -> None:
     """단체를 갈아 끼우면 산출 내역과 전기 산출 목록이 그 단체 것만 남는다."""
     from pension.samples import write_sample_pack

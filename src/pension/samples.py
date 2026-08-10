@@ -15,8 +15,9 @@
     인식하는 표준 표기 그대로이고, 작성 예시가 두 줄 들어 있다.
 
 ``기초율_기본값.xlsx``
-    사망률은 통계청 공표치에 맞춘 값이라 그대로 써도 되고, 퇴직률·승급률은
-    형태만 보여 주는 참고용이라 회사 경험률로 바꿔야 한다
+    표준률 원표를 그대로 옮긴다. 사망률은 재직자 기준이라 그대로 써도 되고,
+    퇴직률·승급률은 표준률이라 회사 경험률이 있으면 그쪽이 우선이다. 이 둘은
+    사업장 규모(300인 미만/이상)로 갈리므로 ``size`` 로 고른다
     (:mod:`pension.standard_rates` 에 근거를 적어 두었다).
 
 ``기초율_빈양식.xlsx``
@@ -53,12 +54,15 @@ from .readers import (
     RETIRED_SHEET,
 )
 from .standard_rates import (
+    DEFAULT_SIZE,
     DISCOUNT_RATE,
     MORTALITY_SOURCE,
-    PROMOTION_BY_AGE,
     SALARY_BASE_UP,
-    WITHDRAWAL_BY_AGE,
+    STANDARD_YEAR,
     mortality_table,
+    normalize_size,
+    promotion_table,
+    withdrawal_table,
 )
 
 __all__ = [
@@ -311,12 +315,17 @@ def write_standard_assumptions(
     job_groups: tuple[str, ...] = DEFAULT_GROUPS,
     yield_curve_path: str | Path | None = None,
     grade: str = "",
+    size: str = DEFAULT_SIZE,
 ) -> Path:
     """기본값이 채워진 기초율 워크북을 만든다.
 
     사망률만 근거 있는 값이고 나머지는 회사가 손봐야 한다. 그 구분이 파일을
     여는 순간 보이도록 시트마다 비고를 적는다 — 파일이 담당자에서 감사인까지
     돌아다니는 동안 근거를 되짚을 수 있는 곳은 파일 안뿐이다.
+
+    :param size: 표준률 원표의 사업장 규모 열(``300인 미만`` / ``300인 이상``).
+        승급률·중도퇴직률이 이 값으로 갈린다. 어느 쪽을 썼는지 시트 비고에
+        남긴다 — 나중에 파일만 보고는 알 수 없기 때문이다.
     """
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -324,6 +333,7 @@ def write_standard_assumptions(
     path = Path(path)
     groups = [g for g in job_groups if g] or list(DEFAULT_GROUPS)
     n = len(groups)
+    size = normalize_size(size)
 
     # 금리표 파일을 주면 결산일 현물이자율 곡선을 그대로 쓴다. 만기가 17개나
     # 되어 손으로 옮기면 자릿수를 틀리기 쉽다.
@@ -380,22 +390,24 @@ def write_standard_assumptions(
     )
     make(
         PROMOTION_SHEET, ["연령", *groups],
-        [[age, *[rate] * n] for age, rate in PROMOTION_BY_AGE],
+        [[age, *[rate] * n] for age, rate in promotion_table(size)],
+        f"· 출처: 표준승급률 {STANDARD_YEAR} — {size} (Base-up 제외 값)\n"
         "· Base-up 과 더해져 총 임금상승률이 됩니다. A1 을 '근속'으로 바꾸면 근속 기준입니다.",
-        warn="[필수 확인] 형태만 보여 주는 참고용입니다. 회사 경험률(호봉표·승진 이력)로 바꾸세요.",
+        warn="[필수 확인] 표준률입니다. 회사 경험률(호봉표·승진 이력)이 있으면 그쪽으로 바꾸세요.",
     )
     make(
         WITHDRAWAL_SHEET, ["연령", *groups],
-        [[age, *[rate] * n] for age, rate in WITHDRAWAL_BY_AGE],
+        [[age, *[rate] * n] for age, rate in withdrawal_table(size)],
+        f"· 출처: 표준중도퇴직률 {STANDARD_YEAR} — {size}\n"
         "· 사망을 제외한 연간 중도퇴직률입니다. 계단식으로 읽히므로 모든 연령을 적을 필요는 없습니다.",
-        warn="[필수 확인] 형태만 보여 주는 참고용입니다. 과거 3~5년 회사 경험률로 반드시 바꾸세요. "
+        warn="[필수 확인] 표준률입니다. 과거 3~5년 회사 경험률로 반드시 바꾸세요. "
              "채무에 가장 크게 영향을 주는 가정입니다.",
     )
     make(
         MORTALITY_SHEET, ["연령", "남자", "여자"], mortality_table(),
         f"· 출처: {MORTALITY_SOURCE}\n"
-        "· 남녀를 구분하지 않으므로 두 열의 값이 같습니다. 회사 경험률로 남녀를 "
-        "나누려면 이 두 열만 고치면 됩니다.\n"
+        "· 재직자 사망률이라 국민 전체 생명표보다 낮습니다. 회사 경험률로 바꾸려면 "
+        "이 두 열만 고치면 됩니다.\n"
         "· 사망률이 채무에 미치는 영향은 퇴직률·임금상승률에 비해 작습니다.",
     )
     # 비워 둔다. '지급률규정' 방식이 법정이라 표가 비면 배수 = 근속연수(법정
@@ -459,6 +471,7 @@ def write_sample_pack(
     job_groups: tuple[str, ...] = DEFAULT_GROUPS,
     yield_curve_path: str | Path | None = None,
     grade: str = "",
+    size: str = DEFAULT_SIZE,
 ) -> list[Path]:
     """기본 파일 한 벌을 폴더에 만든다. 만든 파일 경로 목록을 돌려준다."""
     directory = Path(directory)
@@ -467,7 +480,7 @@ def write_sample_pack(
         write_default_roster(directory / ROSTER_DEFAULT),
         write_standard_assumptions(
             directory / STANDARD_ASSUMPTIONS, job_groups=job_groups,
-            yield_curve_path=yield_curve_path, grade=grade,
+            yield_curve_path=yield_curve_path, grade=grade, size=size,
         ),
         write_roster_template(directory / ROSTER_TEMPLATE),
         write_template(directory / TEMPLATE_ASSUMPTIONS, job_groups=job_groups),

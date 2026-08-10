@@ -94,19 +94,19 @@ class TestOutOfTheBox:
 
 
 class TestMortality:
-    """표준사망률은 남녀를 나눠 쓴다."""
+    """표준사망률은 남녀를 나눠 쓴다. 규모로는 갈리지 않는다."""
 
     def test_covers_the_supplied_age_range(self) -> None:
         assert [row[0] for row in mortality_table()] == [r[0] for r in STANDARD_TABLE]
 
     def test_columns_are_male_then_female(self) -> None:
-        for (age, _w, _p, male, female), row in zip(
+        for (age, *_rates, male, female), row in zip(
             STANDARD_TABLE, mortality_table(), strict=True
         ):
             assert row == [age, male, female]
 
     def test_women_die_later(self) -> None:
-        assert all(row[2] < row[1] for row in mortality_table())
+        assert all(row[2] <= row[1] for row in mortality_table())
 
     def test_rates_increase_with_age(self) -> None:
         for column in (1, 2):
@@ -116,27 +116,57 @@ class TestMortality:
 
 
 class TestStandardTable:
-    """퇴직률·승급률은 표에 적힌 그대로 쓰인다."""
+    """퇴직률·승급률은 사업장 규모로 갈린 원표를 그대로 쓴다."""
 
-    def test_withdrawal_and_promotion_match_the_table(self) -> None:
-        from pension.standard_rates import PROMOTION_BY_AGE, WITHDRAWAL_BY_AGE
+    def test_size_picks_the_column(self) -> None:
+        from pension.standard_rates import (
+            SIZE_LARGE, SIZE_SMALL, promotion_table, withdrawal_table,
+        )
 
-        assert [[r[0], r[1]] for r in STANDARD_TABLE] == WITHDRAWAL_BY_AGE
-        assert [[r[0], r[2]] for r in STANDARD_TABLE] == PROMOTION_BY_AGE
+        assert [[r[0], r[1]] for r in STANDARD_TABLE] == withdrawal_table(SIZE_SMALL)
+        assert [[r[0], r[2]] for r in STANDARD_TABLE] == withdrawal_table(SIZE_LARGE)
+        assert [[r[0], r[3]] for r in STANDARD_TABLE] == promotion_table(SIZE_SMALL)
+        assert [[r[0], r[4]] for r in STANDARD_TABLE] == promotion_table(SIZE_LARGE)
+
+    def test_the_two_sizes_really_differ(self) -> None:
+        """한 열을 두 번 넣은 것이 아님을 못 박는다."""
+        from pension.standard_rates import (
+            SIZE_LARGE, SIZE_SMALL, promotion_table, withdrawal_table,
+        )
+
+        assert withdrawal_table(SIZE_SMALL) != withdrawal_table(SIZE_LARGE)
+        assert promotion_table(SIZE_SMALL) != promotion_table(SIZE_LARGE)
+
+    def test_unknown_size_falls_back_to_the_default(self) -> None:
+        from pension.standard_rates import (
+            DEFAULT_SIZE, normalize_size, withdrawal_table,
+        )
+
+        assert normalize_size("아무거나") == DEFAULT_SIZE
+        assert withdrawal_table("아무거나") == withdrawal_table(DEFAULT_SIZE)
+        assert normalize_size("300인↑") == "300인 이상"
+
+    def test_size_is_suggested_from_headcount(self) -> None:
+        from pension.standard_rates import SIZE_LARGE, SIZE_SMALL, size_for
+
+        assert size_for(299) == SIZE_SMALL
+        assert size_for(300) == SIZE_LARGE
 
     def test_withdrawal_peaks_at_the_retirement_ramp(self) -> None:
-        """55세부터 정년까지 가파르게 오른다(임금피크·명예퇴직 구간)."""
-        rates = {r[0]: r[1] for r in STANDARD_TABLE}
-        assert rates[55] < rates[58] < rates[60]
-        assert rates[60] > 0.4
-
-    def test_promotion_falls_with_age(self) -> None:
-        rates = [r[2] for r in STANDARD_TABLE]
-        assert rates == sorted(rates, reverse=True)
+        """55세부터 정년 언저리까지 가파르게 오른다(임금피크·명예퇴직 구간)."""
+        for column in (1, 2):
+            rates = {r[0]: r[column] for r in STANDARD_TABLE}
+            assert rates[55] < rates[58] < rates[61]
+            assert rates[61] > rates[50] * 2
 
     def test_last_row_is_age_70(self) -> None:
-        """70세를 넘는 연령은 70세 값을 쓴다. 표는 계단식으로 읽힌다."""
+        """원표는 110세까지 있지만 70세부터 값이 같다. 표는 계단식으로 읽힌다."""
         assert STANDARD_TABLE[-1][0] == 70
+
+    def test_every_rate_is_a_probability(self) -> None:
+        for age, *rates in STANDARD_TABLE:
+            assert 15 <= age <= 70
+            assert all(0.0 < r < 1.0 for r in rates)
 
 
 class TestDefaultRoster:
