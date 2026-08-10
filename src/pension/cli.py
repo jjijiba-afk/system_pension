@@ -418,7 +418,7 @@ def _cmd_samples(args: argparse.Namespace) -> int:
     else:
         print("할인율은 자리값(4.5%)입니다. --yield-curve 로 결산일 금리표를 주세요.")
     print(
-        f"퇴직률·승급률은 표준률 {STANDARD_YEAR} 의 '{args.size}' 열입니다. "
+        f"퇴직률·승급률은 {STANDARD_YEAR} 의 '{args.size}' 열입니다. "
         "회사 경험률이 있으면 그쪽이 우선입니다.\n"
         "사망률은 재직자 기준 표준사망률(남녀 구분)이라 그대로 쓸 수 있습니다."
     )
