@@ -33,7 +33,7 @@ h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display:
   align-items: flex-end; justify-content: space-between; }
 #topbar h1 { flex: 1 1 320px; }
 #clientbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-  padding: 5px 8px; border: 1px solid var(--navy);
+  padding: 3px 8px; border: 1px solid var(--navy);
   border-radius: 0; background: var(--paper); }
 #clientbar label { margin: 0; color: var(--navy); }
 #clientbar select { min-width: 140px; max-width: 260px; font-weight: 600;
@@ -44,9 +44,9 @@ h1 small { font-weight: normal; font-size: 0.85rem; color: var(--hint); display:
    PC 본 화면의 탭(ttk.Notebook)과 같은 모양이다. 고른 탭이 아래 종이와 이어져
    보이도록 흰 바탕에 남색 글씨, 나머지는 바탕색 그대로. 일곱 개라 좁은 화면
    에서는 옆으로 밀어서 본다. */
-nav.tabs { display: flex; gap: 2px; margin: 14px 0 0; overflow-x: auto;
+nav.tabs { display: flex; gap: 2px; margin: 10px 0 0; overflow-x: auto;
   -webkit-overflow-scrolling: touch; }
-nav.tabs button { flex: 1 0 auto; padding: 9px 14px; font-size: 0.96rem;
+nav.tabs button { flex: 1 0 auto; padding: 5px 14px; font-size: 0.96rem;
   font-weight: 600; white-space: nowrap; color: var(--hint);
   border: 1px solid transparent; border-bottom: none;
   border-radius: 0; background: transparent; }
@@ -85,11 +85,11 @@ button.small { padding: 5px 11px; border: 1px solid var(--line); border-radius: 
   background: transparent; color: inherit; font-size: 0.92rem; font-weight: 600; }
 button.small.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
 
-#status { background: var(--bg-soft); border-radius: 0; padding: 6px 12px;
-          margin: 10px 0; font-size: 0.92rem; white-space: pre-line; }
-.error { background: #FCE4E4; color: #5c1a1a; border-radius: 0; padding: 10px 14px;
+#status { background: var(--bg-soft); border-radius: 0; padding: 4px 12px;
+          margin: 7px 0; font-size: 0.92rem; white-space: pre-line; }
+.error { background: #FCE4E4; color: #5c1a1a; border-radius: 0; padding: 6px 12px;
          margin: 6px 0; font-size: 0.9rem; white-space: pre-line; }
-.warn-box { background: #FFF6E0; color: #5c4a1a; border-radius: 0; padding: 10px 14px;
+.warn-box { background: #FFF6E0; color: #5c4a1a; border-radius: 0; padding: 6px 12px;
             margin: 6px 0; font-size: 0.9rem; }
 .notice { color: var(--hint); font-size: 0.88rem; }
 .ok-text { color: #15803D; font-size: 0.88rem; }
@@ -103,8 +103,8 @@ table.data { border-collapse: collapse; width: 100%; margin: 12px 0; }
 
 /* ── 가정 편집기 ── */
 nav.subtabs { display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch;
-  padding-bottom: 4px; margin: 12px 0 0; }
-nav.subtabs button { padding: 10px 13px; white-space: nowrap; font-size: 0.94rem;
+  padding-bottom: 2px; margin: 8px 0 0; }
+nav.subtabs button { padding: 5px 13px; white-space: nowrap; font-size: 0.94rem;
   font-weight: 600; border: 1px solid var(--line); border-radius: 0;
   border-bottom: none; background: var(--desk); color: var(--hint); }
 nav.subtabs button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
@@ -113,8 +113,8 @@ nav.subtabs button.on { background: var(--navy); color: #fff; border-color: var(
 .subpage.on { display: block; }
 
 /* 한 묶음 안의 표들. 접어 두면 긴 화면에서도 원하는 표로 바로 간다. */
-details.section { border: 1px solid var(--line); border-radius: 0; margin: 10px 0; }
-details.section > summary { padding: 7px 12px; font-weight: 600; cursor: pointer;
+details.section { border: 1px solid var(--line); border-radius: 0; margin: 7px 0; }
+details.section > summary { padding: 4px 12px; font-weight: 600; cursor: pointer;
   background: var(--bg-soft); border-radius: 0; list-style: none;
   display: flex; align-items: center; gap: 8px; }
 details.section[open] > summary { border-radius: 0;
@@ -285,7 +285,7 @@ details.calc-section { border: 1px solid var(--line); border-radius: 0;
   margin: 0 0 12px; background: transparent; }
 /* 펼친 채로 둔다. 접는 삼각형도 없애 '눌러서 접는 것' 으로 보이지 않게 한다.
    (details.section 쪽 규칙이 [open] 때문에 더 세므로 여기서도 [open] 을 쓴다.) */
-details.calc-section[open] > summary { padding: 10px 14px 2px; font-weight: bold;
+details.calc-section[open] > summary { padding: 6px 12px 1px; font-weight: bold;
   color: var(--navy); cursor: default; pointer-events: none;
   border: none; background: transparent; }
 details.calc-section[open] > summary::before { content: none; }
