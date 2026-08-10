@@ -95,24 +95,13 @@ jobs:
       # 프로그램을 남에게 건네면 같이 들어 있는 자료도 건네진다. 웹앱 쪽은
       # 원래 걸러 내고 있었는데 윈도우 꾸러미에는 그 방어가 없어, 실제 명부가
       # 그대로 실려 나간 적이 있다. 이제 양쪽 다 여기서 막는다.
+      #
+      # 검사 자체는 tools/check_release.py 에 있다. 이 잡은 PowerShell 로 도는데
+      # 거기에는 bash 의 heredoc 이 없어, 파이썬 코드를 인라인으로 끼워 넣으면
+      # `<<` 가 리디렉션으로 해석되어 죽는다.
       - name: 개인정보 미포함 확인
         shell: pwsh
-        run: |
-          $pack = "dist/연금계리산출"
-          $csv = Get-ChildItem -Recurse -Filter *.csv $pack
-          if ($csv) { throw "꾸러미에 CSV 가 실렸다: $($csv.FullName -join ', ')" }
-
-          # 난수 명부는 씨앗에서 만들어 낸다. 원자료가 실행 파일 안에 있으면
-          # 실제 명부를 되살릴 수 있다는 뜻이다.
-          python - <<'CHECK'
-          import pathlib, sys
-          for exe in pathlib.Path("dist/연금계리산출").glob("*.exe"):
-              blob = exe.read_bytes()
-              for mark in (b"\xea\xb8\xb0\xeb\xb3\xb8\xeb\xaa\x85\xeb\xb6\x80_",):
-                  if mark in blob:
-                      sys.exit(f"{exe.name} 안에 기본명부 원자료가 남아 있다")
-          print("확인: 실행 파일에 명부 원자료 없음")
-          CHECK
+        run: python tools/check_release.py "dist/연금계리산출"
 
       - name: 아티팩트 업로드
         uses: actions/upload-artifact@v4

@@ -150,3 +150,52 @@ class TestTheBuiltWheel:
                     if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
                                          ast.AsyncFunctionDef)):
                         assert ast.get_docstring(node) is None, f"{name}: {node}"
+
+
+class TestReleaseCheckScript:
+    """빌드가 부르는 개인정보 확인 스크립트.
+
+    윈도우 잡에서만 도는 검사라 손으로 확인하기 어렵다. 검사 자체는 평범한
+    파이썬이므로 여기서 못 박아 둔다 — **잡아야 할 것을 못 잡으면 검사가
+    있으나 마나** 다.
+    """
+
+    def _check(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "check_release", ROOT / "tools" / "check_release.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_a_clean_package_passes(self, tmp_path) -> None:
+        (tmp_path / "연금계리산출.exe").write_bytes(b"MZ" + b"\0" * 100)
+        (tmp_path / "기본자료").mkdir()
+        (tmp_path / "기본자료" / "명부_기본.xlsx").write_bytes(b"PK\x03\x04")
+        assert self._check().problems(tmp_path) == []
+
+    def test_a_stray_csv_is_caught(self, tmp_path) -> None:
+        (tmp_path / "기본자료").mkdir()
+        (tmp_path / "기본자료" / "명부.csv").write_text("사번,생년월일\n", encoding="utf-8")
+        found = self._check().problems(tmp_path)
+        assert len(found) == 1 and "명부.csv" in found[0]
+
+    def test_raw_data_inside_the_exe_is_caught(self, tmp_path) -> None:
+        """원자료를 다시 실어 나르면 실행 파일 안에 파일명이 남는다."""
+        module = self._check()
+        (tmp_path / "연금계리산출.exe").write_bytes(
+            b"MZ" + b"\0" * 50 + module.ROSTER_MARK + "재직자.csv".encode("utf-8"))
+        found = module.problems(tmp_path)
+        assert len(found) == 1 and "명부 원자료" in found[0]
+
+    def test_a_missing_folder_is_not_silently_a_pass(self, tmp_path) -> None:
+        """폴더 이름이 바뀌었는데 조용히 통과하면 검사가 사라진 줄도 모른다."""
+        assert self._check().main([str(tmp_path / "없는폴더")]) == 2
+
+    def test_exit_codes(self, tmp_path) -> None:
+        module = self._check()
+        (tmp_path / "연금계리산출.exe").write_bytes(b"MZ")
+        assert module.main([str(tmp_path)]) == 0
+        (tmp_path / "명부.csv").write_text("x", encoding="utf-8")
+        assert module.main([str(tmp_path)]) == 1
