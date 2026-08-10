@@ -141,7 +141,10 @@ class TestStablePort:
             second.server_close()
 
     def test_steps_aside_when_the_port_is_taken(self, fake_app) -> None:
-        """이미 쓰이고 있으면 다음 칸으로. 아예 못 여는 것보다 낫다."""
+        """이미 쓰이고 있으면 다음 칸으로. 두 창이 같은 포트를 잡으면 요청을
+        서로 가로챈다 — 윈도우의 ``SO_REUSEADDR`` 이 실제로 그렇게 동작해서
+        여기서 걸린 적이 있다.
+        """
         held = localapp.serve(fake_app)
         try:
             other = localapp.serve(fake_app)
@@ -150,6 +153,19 @@ class TestStablePort:
                 assert other.server_address[1] != held.server_address[1]
             finally:
                 other.server_close()
+        finally:
+            held.server_close()
+
+    def test_a_second_bind_on_the_same_port_is_refused(self, fake_app) -> None:
+        """포트를 콕 집어 달라고 했는데 이미 쓰이고 있으면 거절되어야 한다.
+
+        여기서 조용히 성공하면 두 창이 같은 포트를 나눠 갖는다.
+        """
+        held = localapp.serve(fake_app)
+        port = held.server_address[1]
+        try:
+            with pytest.raises(OSError):
+                localapp.serve(fake_app, port=port).server_close()
         finally:
             held.server_close()
 
