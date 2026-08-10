@@ -717,3 +717,29 @@ def test_the_pc_local_server_boots_the_engine(browser) -> None:
         page.close()
         server.shutdown()
         server.server_close()
+
+
+def test_storage_persistence_is_requested_and_reported(page) -> None:
+    """자료가 지워질 수 있는지를 화면이 말해 줘야 한다.
+
+    이 앱의 산출 내역은 브라우저 저장소에 있고, 브라우저는 공간이 모자라면
+    **말없이 지운다.** 영구 저장을 요청해 두면 그 대상에서 빠지는데, 받아들여
+    졌는지는 기기가 정한다. 보장되지 않는데 보장된 줄 알고 내보내기를 건너
+    뛰는 것이 제일 나쁘므로, 결과를 그대로 적어 둔다.
+    """
+    page.click("#tab-lib")
+    open_section(page, "#lib-backup")
+    note = page.locator("#storage-note")
+    page.wait_for_function(
+        "() => document.querySelector('#storage-note').textContent.trim().length > 0",
+        timeout=30_000)
+
+    # 허용됐든 아니든 **내보내기를 권해야** 한다. 허용은 이 기기에서만이고,
+    # 기기를 바꾸면 어차피 파일이 있어야 되살릴 수 있다.
+    text = note.inner_text()
+    assert "내보내" in text, text
+    assert note.get_attribute("class") in ("hint ok-text", "hint bad-text", "hint")
+
+    # 허용되지 않았으면 눈에 띄어야 한다. 회색 안내문에 섞이면 아무도 안 읽는다.
+    if "허용되지 않" in text:
+        assert note.get_attribute("class") == "hint bad-text"
