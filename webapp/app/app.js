@@ -14,8 +14,35 @@ const $ = (id) => document.getElementById(id);
 const status = (msg) => { $("status").textContent = msg; };
 const EDITOR_STORE = "pension.editor.state.v1";
 
+// 새 판을 올려도 휴대폰·아이패드가 옛 화면을 계속 띄우는 일이 있었다.
+// 두 군데를 막는다.
+//
+// `updateViaCache: "none"` — sw.js 자체가 브라우저 HTTP 캐시에 갇히면 새 일꾼을
+// 아예 찾지 못한다(최대 24시간). 이 파일만은 늘 새로 받게 한다.
+//
+// `controllerchange` — 새 일꾼이 자리를 넘겨받았다는 뜻이다. 그때 화면을 한 번
+// 새로 고쳐야 새 app.js·app.css 가 실제로 돈다. 안 그러면 파일은 바뀌었는데
+// 돌고 있는 것은 옛것인, 가장 알아채기 어려운 상태가 된다.
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+    .then((registration) => {
+      registration.update();
+      // 앱을 다시 열 때(홈 화면 앱은 이때가 사실상 유일한 기회다)도 확인한다.
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) registration.update();
+      });
+    })
+    .catch(() => {});
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    // 처음 설치되는 순간에도 이 사건이 온다. 그때는 새로 고칠 옛 화면이 없다.
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
 }
 
 let pyodide = null;

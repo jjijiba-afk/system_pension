@@ -821,3 +821,66 @@ def test_both_screens_have_the_same_tabs(page) -> None:
     block = source.split("self._pages = {", 1)[1].split("}", 1)[0]
     desk = re.findall(r'"([^"]+)":', block)
     assert desk == web
+
+
+def test_a_new_build_reaches_a_device_that_already_installed_the_app(
+    browser, app_url, tmp_path
+) -> None:
+    """앱을 이미 깔아 둔 기기에 **새 판이 실제로 닿는지.**
+
+    이것이 안 되면 화면을 아무리 고쳐도 쓰는 사람에게는 아무 일도 일어나지
+    않는다. 실제로 휴대폰이 옛 화면을 계속 띄웠고, 원인은 화면 파일
+    (index.html·app.js·app.css)에 빌드 값이 붙어 있지 않은 채 캐시 우선으로
+    나가고 있었던 것이다 — 한 번 캐시에 들어가면 그 뒤로 네트워크를 보지 않는다.
+
+    여기서는 서비스워커를 등록한 기기(=브라우저 컨텍스트)를 만들어 두고,
+    서버가 내주는 app.css 를 바꾼 뒤 다시 열어 **바뀐 것이 보이는지** 본다.
+    """
+    import functools
+    import http.server
+    import shutil
+    import threading
+
+    # dist 를 복사해 서버로 띄운다. 원본을 건드리지 않고 '새 배포' 를 흉내낸다.
+    served = tmp_path / "배포본"
+    shutil.copytree(DIST, served)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=str(served))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+
+    context = browser.new_context()
+    try:
+        first = context.new_page()
+        first.goto(url)
+        first.wait_for_selector("#run:not([disabled])", timeout=120_000)
+        # 서비스워커가 자리를 잡을 때까지 기다린다 — 여기서부터가 '설치된 기기'다.
+        first.wait_for_function(
+            "() => navigator.serviceWorker.controller !== null", timeout=60_000)
+        before = first.evaluate(
+            "() => getComputedStyle(document.querySelector('nav.tabs button')).paddingTop")
+        first.close()
+
+        # 새 판을 올린다 — 탭 위 여백만 눈에 띄게 바꾼다.
+        css = served / "app.css"
+        css.write_text(css.read_text(encoding="utf-8")
+                       + "\nnav.tabs button { padding-top: 41px; }\n",
+                       encoding="utf-8")
+
+        second = context.new_page()
+        second.goto(url)
+        second.wait_for_selector("#run:not([disabled])", timeout=120_000)
+        after = second.evaluate(
+            "() => getComputedStyle(document.querySelector('nav.tabs button')).paddingTop")
+        second.close()
+    finally:
+        context.close()
+        server.shutdown()
+        server.server_close()
+
+    assert before != "41px", "시작부터 41px 이면 이 시험이 아무것도 못 본다"
+    assert after == "41px", (
+        f"새로 올린 app.css 가 기기에 닿지 않았습니다 (그대로 {after}). "
+        "화면 파일은 네트워크를 먼저 봐야 합니다."
+    )
