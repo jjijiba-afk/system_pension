@@ -382,6 +382,40 @@ class TestPagesDeploy:
         assert "홈 화면에 추가" in page
         assert "%APPDATA%" not in page
 
+    def test_the_first_visit_points_at_the_library(self) -> None:
+        """받은 명부가 없는 사람은 첫 화면에서 더 갈 곳이 없다.
+
+        양식·시험명부·금리표가 [자료실] 에 이미 들어 있다는 것은 눌러 보기
+        전에는 알 수 없다. 그래서 한 번 알려 주고, 끄면 다시 뜨지 않는다.
+        """
+        page = (ROOT / "webapp/app/index.html").read_text(encoding="utf-8")
+        assert 'id="intro-dialog"' in page
+        assert 'id="intro-hide"' in page          # 다시 보지 않기
+        assert "다시 보지 않기" in page
+        for word in ("자료실", "명부 양식", "시험명부", "금리표", "표준률"):
+            assert word in page, word
+
+        script = (ROOT / "webapp/app/app.js").read_text(encoding="utf-8")
+        assert "INTRO_SEEN" in script
+        assert "showModal()" in script
+
+        # 같은 내용이 물음표(사용설명서) 안에도 있어야 한다.
+        manual = (ROOT / "docs/웹앱-사용설명서.md").read_text(encoding="utf-8")
+        assert "받은 명부가 없어도" in manual
+        assert "다시 보지 않기" in manual
+
+    def test_the_current_year_column_is_named_for_what_it_holds(self) -> None:
+        """'당기 1년치' 는 무엇의 1년치인지 말해 주지 않는다.
+
+        확률·할인 **전** 금액이라 당기근무원가 자체도 아니다. 귀속액이 누적인지
+        올해 몫인지가 이름에서 갈려야 한다.
+        """
+        script = (ROOT / "webapp/app/app.js").read_text(encoding="utf-8")
+        assert "당기 1년치" not in script
+        assert "귀속액 (누적)" in script
+        assert "당기 귀속액" in script
+        assert "당기근무원가 기여" in script
+
     def test_touch_inputs_do_not_trigger_zoom(self) -> None:
         """아이폰은 16px 미만 입력칸에 포커스가 가면 화면을 확대한다.
 

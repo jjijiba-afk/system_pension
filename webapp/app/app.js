@@ -1415,7 +1415,7 @@ $("lib-preset-add").addEventListener("click", () =>
 $("roster-saved").addEventListener("change", () => {
   const name = $("roster-saved").value;
   if (!name) {
-    $("roster-hint").textContent = "Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서";
+    $("roster-hint").textContent = "기본정보 · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서";
     $("general-filled").style.display = "none";
     return;
   }
@@ -1425,7 +1425,7 @@ $("roster-saved").addEventListener("change", () => {
   fillFromGeneralSheet();
 });
 
-// 명부를 고르면 '1)일반사항' 에 담당자가 채워 보낸 것을 입력칸에 옮겨 넣는다.
+// 명부를 고르면 [기본정보]·[사외적립자산] 에 담당자가 채워 보낸 것을 입력칸에 옮긴다.
 // 산출 엔진은 칸이 비어도 그 표를 알아서 쓰지만, 화면에 보이지 않으면
 // 담당자는 아무것도 읽히지 않은 줄 알고 손으로 다시 적는다.
 $("roster").addEventListener("change", () => {
@@ -1802,7 +1802,7 @@ function refreshDashBadges() {
     const box = $(id); if (box) box.querySelector("summary .count").textContent = text;
   };
   mark("sec-dash-member", `${d.profile.사번} · ${won(d.scenarios[0].dbo)}원`);
-  mark("sec-dash-group", `${d.groups.length}개 직군`);
+  mark("sec-dash-group", `${d.groups.length}개 직군 · 급부 ${(d.causes || []).length}종`);
   mark("sec-dash-roll", d.rollforward.length ? "전기 연결됨" : "전기 미연결");
   mark("sec-dash-sens", d.sensitivity.length ? `${d.sensitivity.length}건` : "끄고 산출");
   mark("sec-dash-mat", `${d.maturity.length}구간`);
@@ -2011,6 +2011,19 @@ function drawDashGroups() {
     ? `<p class="hint" style="margin-top:8px">산출 제외 — ${
         ex.map(([k, v]) => `<b>${v}명</b> ${k}`).join(" / ")}</p>`
     : "";
+
+  const causes = d.causes || [];
+  dataTable($("dash-causes"),
+    ["급부 (퇴직사유)", "확정급여채무", "당기근무원가", "급여 현가", "채무 비중"],
+    causes.map((c) => [c.name, won(c.dbo), won(c.sc), won(c.pv),
+                       pctOf(t.dbo ? c.dbo / t.dbo : 0, 1)]),
+    causes.length
+      ? `<tr class="total"><td>합계</td>
+         <td class="num">${won(causes.reduce((s, c) => s + c.dbo, 0))}</td>
+         <td class="num">${won(causes.reduce((s, c) => s + c.sc, 0))}</td>
+         <td class="num">${won(causes.reduce((s, c) => s + c.pv, 0))}</td>
+         <td class="num">100.0%</td></tr>`
+      : "");
 }
 
 function drawDashRoll() {
@@ -2279,9 +2292,13 @@ function kvTable(pairs) {
 }
 
 function traceTable(trace) {
+  // '귀속액' 은 기준일까지 쌓인 몫, '당기 귀속액' 은 그중 올해 한 해가 더한
+  // 몫이다. 둘 다 확률·할인 **전** 금액이라 당기근무원가 자체가 아니다 —
+  // 확률과 할인계수를 곱한 것이 오른쪽 끝의 '당기근무원가 기여' 다.
   const head = ["연차", "시점", "연령", "근속", "월평균임금", "중도퇴직률", "사망률",
                 "연초 재직확률", "퇴직사유", "그 해 퇴직확률", "지급액",
-                "귀속액", "당기 1년치", "할인계수", "DBO 기여", "근무원가 기여"];
+                "귀속액 (누적)", "당기 귀속액", "할인계수", "DBO 기여",
+                "당기근무원가 기여"];
   const rows = trace.map((r) => [
     r.t, r.timing, r.age.toFixed(1), r.service.toFixed(2), won(r.wage),
     pctOf(r.withdrawal), pctOf(r.mortality, 3), pctOf(r.survival),
@@ -2657,7 +2674,7 @@ function restoreRun(name) {
 $("loaded-run-clear").addEventListener("click", () => {
   loadedRun = null;
   $("loaded-run-banner").style.display = "none";
-  $("roster-hint").textContent = "Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서";
+  $("roster-hint").textContent = "기본정보 · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서";
   $("asrc-saved").disabled = true;
   $("saved-asrc-hint").textContent = "— [산출 내역] 탭에서 불러오면 열립니다";
   if ($("asrc-saved").checked) $("asrc-file").checked = true;
@@ -2910,6 +2927,39 @@ function findInHelp(needle) {
     text.replaceWith(holder);
   }
   if (first) first.scrollIntoView({ block: "center" });
+}
+
+// ── 첫 인사 ──────────────────────────────────────────────────
+// 자료실에 양식·시험명부·금리표가 들어 있다는 것은 눌러 보기 전에는 모른다.
+// 엔진을 기다리지 않고 바로 띄운다 — 뜨는 데 20초가 걸리면 그 사이에 사람은
+// 이미 다른 데를 보고 있다.
+const INTRO_SEEN = "intro-seen";
+
+function showIntro() {
+  const box = document.getElementById("intro-dialog");
+  if (!box || box.open) return;
+  document.getElementById("intro-hide").checked = false;
+  box.showModal();
+}
+
+function closeIntro() {
+  const box = document.getElementById("intro-dialog");
+  if (document.getElementById("intro-hide").checked) {
+    try { localStorage.setItem(INTRO_SEEN, "1"); } catch (err) { /* 사설 모드 */ }
+  }
+  box.close();
+}
+
+document.getElementById("intro-close").addEventListener("click", closeIntro);
+document.getElementById("intro-go").addEventListener("click", () => {
+  closeIntro();
+  document.getElementById("tab-lib").click();
+});
+
+try {
+  if (localStorage.getItem(INTRO_SEEN) !== "1") showIntro();
+} catch (err) {
+  showIntro();      // 저장을 못 하는 브라우저에서도 안내는 보여야 한다
 }
 
 document.getElementById("help-open").addEventListener("click", openHelp);

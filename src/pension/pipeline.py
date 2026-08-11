@@ -307,7 +307,7 @@ def _check_general_sheet(general, log: IssueLog) -> None:
             "사외적립자산 변동내역이 맞지 않습니다 "
             f"(기초+유입−유출−기말 = {difference:,.0f}원). "
             "회사가 보내온 표를 확인하세요",
-            sheet="1)일반사항",
+            sheet="사외적립자산",
             value=round(difference),
         )
 

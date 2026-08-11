@@ -55,6 +55,9 @@ def page(browser, app_url):
     """엔진 부팅이 오래 걸리므로 한 번 띄운 페이지를 모듈 전체가 나눠 쓴다."""
     page = browser.new_page()
     page.goto(app_url)
+    # 첫 인사가 모달로 떠 있으면 뒤 화면이 통째로 눌리지 않는다. 여기서 한 번
+    # 치우고 시작한다 — 이 창의 동작 자체는 test_intro_dialog 가 따로 본다.
+    dismiss_intro(page)
     page.wait_for_selector("#run:not([disabled])", timeout=120_000)
     yield page
     page.close()
@@ -89,6 +92,18 @@ def grid(page, sheet: str):
 def grid_row(page, sheet: str, row: int = 1):
     """그 표의 ``row`` 번째 **값** 줄. 머리글과 열 머리 패널은 건너뛴다."""
     return grid(page, sheet).locator("tr[data-row]").nth(row - 1).locator("input")
+
+
+def dismiss_intro(page) -> None:
+    """첫 인사 창을 치운다.
+
+    모달이라 떠 있는 동안에는 뒤 화면이 통째로 눌리지 않는다. 저장소가 빈
+    컨텍스트(=새 기기)를 여는 시험은 어디서든 이것을 먼저 거쳐야 한다.
+    """
+    page.wait_for_selector("#intro-dialog[open]", timeout=30_000)
+    page.check("#intro-hide")
+    page.click("#intro-close")
+    page.wait_for_selector("#intro-dialog", state="hidden", timeout=10_000)
 
 
 def open_section(page, selector: str):
@@ -128,7 +143,7 @@ def test_upload_run_download(page, tmp_path) -> None:
 
 
 def test_roster_fills_the_asset_boxes(page, tmp_path) -> None:
-    """명부를 고르면 '1)일반사항' 의 사외적립자산이 입력칸에 들어가야 한다.
+    """명부를 고르면 [사외적립자산] 시트의 값이 입력칸에 들어가야 한다.
 
     엔진이 알아서 읽는 것만으로는 부족하다. 칸이 비어 있으면 담당자는
     아무것도 읽히지 않은 줄 알고 신탁 명세서를 보고 손으로 다시 적는다.
@@ -328,6 +343,7 @@ def test_backup_restores_on_a_clean_device(browser, app_url, shared_dir) -> None
     context = browser.new_context()   # 저장소가 비어 있는 '다른 기기'
     fresh = context.new_page()
     fresh.goto(app_url)
+    dismiss_intro(fresh)
     fresh.wait_for_selector("#run:not([disabled])", timeout=120_000)
 
     fresh.click("#tab-runs")
@@ -617,6 +633,13 @@ def test_dashboard_tab_follows_each_run(page, tmp_path) -> None:
     page.locator("#dash-chart rect.hit").nth(1).click()
     assert "귀속액" in page.inner_text("#dash-readout")
 
+    # 급부별(정년·중도·사망) 채무. 사유별 지급률이 다른 규정에서는 총액만으로
+    # 검산이 안 되므로 갈라 보여야 한다.
+    open_section(page, "#sec-dash-group")
+    causes = page.inner_text("#dash-causes")
+    for word in ("정년", "중도", "사망", "합계"):
+        assert word in causes, f"급부별 표에 '{word}' 이(가) 없다"
+
     # 가정을 흔들면 채무가 움직인다.
     base = page.inner_text("#dash-readout .big")
     page.locator("#dash-chips .chip").nth(1).click()
@@ -805,6 +828,46 @@ def test_prior_roster_comparison_runs_before_the_valuation(page, tmp_path) -> No
     result = page.inner_text("#prior-check-result")
     assert "생년월일" in result
     assert "1955-01-01" in result
+
+
+def test_intro_dialog_points_at_the_library(browser, app_url) -> None:
+    """앱을 처음 열면 [자료실] 안내가 뜨고, 끄면 다시 뜨지 않아야 한다.
+
+    받은 명부가 없는 사람은 첫 화면에서 더 갈 곳이 없다. 양식·시험명부·금리표가
+    이미 들어 있다는 것을 눌러 보기 전에는 알 수 없기 때문이다.
+    """
+    fresh = browser.new_context()
+    page = fresh.new_page()
+    page.goto(app_url)
+
+    page.wait_for_selector("#intro-dialog[open]", timeout=30_000)
+    text = page.inner_text("#intro-dialog")
+    for word in ("자료실", "명부 양식", "시험명부", "금리표", "표준률"):
+        assert word in text, f"안내에 '{word}' 가 없다"
+
+    # [자료실 열기] 는 그 탭으로 데려가야 한다.
+    page.click("#intro-go")
+    page.wait_for_selector("#intro-dialog", state="hidden", timeout=10_000)
+    assert page.locator("#page-lib").is_visible()
+
+    # 체크하지 않고 껐으니 다시 열면 또 떠야 한다.
+    page.reload()
+    page.wait_for_selector("#intro-dialog[open]", timeout=30_000)
+    page.check("#intro-hide")
+    page.click("#intro-close")
+    page.reload()
+    page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+    assert not page.locator("#intro-dialog[open]").count()
+
+    # 같은 내용이 물음표(사용설명서) 안에도 있어야 한다.
+    page.click("#help-open")
+    page.wait_for_function(
+        "() => document.getElementById('help-body').textContent.includes('자료실')",
+        timeout=30_000)
+    assert "받은 명부가 없어도" in page.inner_text("#help-body")
+
+    page.close()
+    fresh.close()
 
 
 def test_both_screens_have_the_same_tabs(page) -> None:

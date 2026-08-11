@@ -483,9 +483,30 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
                    '분해(이자비용·재측정요소)는 제공되지 않습니다. 산출 화면의 '
                    '[전기 산출 결과] 를 채우면 완성됩니다.</p>')
 
+    # 급부별(퇴직사유별) 몫. 사유마다 지급률이 다른 규정에서는 총액만으로
+    # 검산이 안 된다 — 지급률 한 칸을 잘못 넣어도 총액은 조금 움직일 뿐이다.
+    causes = val.by_cause()
+    cause_block = ""
+    if causes:
+        cause_block = (
+            "<h3>급부별 확정급여채무 (정년·중도·사망)</h3>"
+            + _bar_chart([(name, share["dbo"]) for name, share in causes.items()],
+                         caption="급부별 확정급여채무")
+            + _table(
+                ["급부 (퇴직사유)", "확정급여채무", "당기근무원가", "급여 현가",
+                 "채무 비중"],
+                [[name, _won(share["dbo"]), _won(share["service_cost"]),
+                  _won(share["benefit_pv"]),
+                  f"{share['dbo'] / val.dbo:.1%}" if val.dbo else "-"]
+                 for name, share in causes.items()])
+            + '<p class="note">확정급여채무를 퇴직사유별로 나눈 것입니다. 합계는 위 '
+              '확정급여채무와 원 단위까지 같습니다 — 나눈 것이지 다시 계산한 것이 '
+              '아닙니다. 사유별 지급률은 [첨부 자료] 의 퇴직급여 지급률과 퇴직사유별 '
+              '지급 차등에 있습니다.</p>')
+
     sections.append(("평가 결과 요약", f"""
 <h3>재무상태표의 순확정급여부채(자산) 현황</h3>{summary}
-<h3>손익계산서</h3>{_kv_table(pl_rows)}{pl_note}"""))
+<h3>손익계산서</h3>{_kv_table(pl_rows)}{pl_note}{cause_block}"""))
 
     # 공시사항
     parts = []

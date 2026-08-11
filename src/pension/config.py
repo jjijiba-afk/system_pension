@@ -514,14 +514,16 @@ def infer_config(workbook, *, base_date: _dt.date | None = None) -> CalculationC
     ws = find_sheet(workbook, "재직자명부", "2)재직자명부", "재직자")
     if ws is None:
         raise ValueError(
-            "Input 시트도 재직자명부도 없어 산출기준일을 정할 수 없습니다"
+            "[기본정보](옛 Input) 시트도 재직자명부도 없어 "
+            "산출기준일을 정할 수 없습니다"
         )
 
     base_date = _find_base_date(ws) or base_date
     if base_date is None:
         raise ValueError(
             "산출기준일을 찾지 못했습니다. 화면의 [산출 기준일] 칸에 날짜를 넣거나, "
-            "Input 시트 C3 또는 재직자명부의 '작성기준일' 칸을 채우세요"
+            "[기본정보] 시트의 산출기준일 칸이나 "
+            "재직자명부의 '작성기준일' 칸을 채우세요"
         )
 
     header_row = find_header_row(ws, ACTIVE_HEADER_ALIASES)

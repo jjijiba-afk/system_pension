@@ -42,6 +42,33 @@
   </div>
 </div>
 
+<!-- 첫 인사. [자료실] 에 양식·시험명부·금리표가 이미 들어 있다는 것을 모르면,
+     받은 명부가 없는 사람은 첫 화면에서 더 갈 곳이 없다. 한 번 보고 끄면
+     다시 뜨지 않고, 같은 내용은 물음표(사용설명서) 안에도 있다. -->
+<dialog id="intro-dialog" style="width:92vw;max-width:620px">
+  <h1 style="font-size:1.1rem">시작하기 전에 — [자료실] 을 먼저 보세요</h1>
+  <p class="hint">받은 명부가 없어도 지금 바로 두드려 볼 수 있습니다.
+  맨 오른쪽 <b>자료실</b> 탭에 아래가 이미 들어 있습니다.</p>
+  <ul id="intro-list">
+    <li><b>명부 양식</b> — 회사에 그대로 보내면 되는 서식.
+      작성요령·기본정보·퇴직급여규정·사외적립자산·재직자명부·퇴직자명부</li>
+    <li><b>시험명부</b> — 같은 양식에 난수 자료를 채운 것. 실제 명부 없이 연습할 때</li>
+    <li><b>기초율 양식·기본값</b> — 산출가정 워크북. 기본값에서 시작하면 빠릅니다</li>
+    <li><b>금리표</b> — 최근 결산일 곡선이 <b>이미 등록</b>되어 있습니다.
+      산출기준일과 다르면 화면이 알려 줍니다</li>
+    <li><b>표준률 원표</b> — 퇴직률·승급률·사망률. 사업장 규모별로 나뉘어 있습니다</li>
+  </ul>
+  <p class="hint">올린 명부와 등록한 자료는 <b>이 기기 안에만</b> 남습니다.
+  어디로도 전송되지 않습니다.</p>
+  <div class="row" style="margin-top:10px">
+    <label style="display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="intro-hide"> 다시 보지 않기
+    </label>
+  </div>
+  <button class="big" type="button" id="intro-go">자료실 열기</button>
+  <button class="big secondary" type="button" id="intro-close">닫기</button>
+</dialog>
+
 <div id="status">엔진을 준비하는 중… (처음 한 번만 오래 걸립니다)</div>
 
 <!-- 탭 순서는 일하는 순서다. 자료를 걸고(산출) → 가정을 맞추고 → 결과를 보고
@@ -75,7 +102,7 @@
     <span class="label">명부 파일</span>
     <input type="file" id="roster" accept=".xls,.xlsx,.xlsm">
   </div>
-  <div class="hint" id="roster-hint">Input · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서</div>
+  <div class="hint" id="roster-hint">기본정보 · 재직자명부 · 퇴직자명부 시트가 들어 있는 통합문서</div>
   <div class="hint" id="general-filled" style="display:none"></div>
 </fieldset>
 <fieldset><legend>2. 기초율(산출가정)</legend>
@@ -102,7 +129,7 @@
     <input type="date" id="base_date">
     <button class="small" type="button" id="base-date-clear">명부 값 사용</button>
   </div>
-  <div class="hint">비우면 명부 Input 시트의 산출기준일을 씁니다. 여기에 넣으면
+  <div class="hint">비우면 명부 [기본정보] 시트의 산출기준일을 씁니다. 여기에 넣으면
   명부를 고치지 않고 기준일만 바꿔 산출합니다(가결산·시산).</div>
   <div class="field">
     <span class="label">산출 시작일</span>
@@ -323,10 +350,17 @@
   </details>
 
   <details class="section" id="sec-dash-group">
-    <summary>직군별 집계<span class="count"></span></summary>
+    <summary>직군별 · 급부별 집계<span class="count"></span></summary>
     <div class="section-body">
+      <h4>직군별</h4>
       <div class="scroll-x"><table class="data" id="dash-groups"></table></div>
       <div id="dash-excluded"></div>
+      <h4>급부별 (정년 · 중도 · 사망)</h4>
+      <div class="scroll-x"><table class="data" id="dash-causes"></table></div>
+      <p class="hint">확정급여채무를 퇴직사유별로 나눈 것입니다. 합은 위 확정급여채무와
+      원 단위까지 같습니다 — 나눈 것이지 다시 계산한 것이 아닙니다. 사유마다 지급률이
+      다른 규정에서는 지급률 한 칸을 잘못 넣어도 총액은 조금 움직일 뿐이라, 여기서
+      갈라 봐야 눈에 띕니다.</p>
     </div>
   </details>
 

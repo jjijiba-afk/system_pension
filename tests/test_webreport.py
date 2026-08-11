@@ -61,6 +61,24 @@ class TestSeveranceReport:
         assert f"{full_run.valuation.duration:.2f}년" in page
         assert f"{full_run.sensitivity.base_dbo:,.0f}" in page
 
+    def test_the_obligation_is_split_by_benefit(self, full_run) -> None:
+        """급부별(정년·중도·사망) 채무가 실려야 한다.
+
+        사유마다 지급률이 다른 규정에서는 총액만으로 검산이 되지 않는다 —
+        지급률 한 칸을 잘못 넣어도 총액은 조금 움직일 뿐이다.
+        """
+        page = render_html(full_run, kind="severance")
+        assert "급부별 확정급여채무" in page
+
+        causes = full_run.valuation.by_cause()
+        assert causes, "퇴직사유별 몫이 산출되지 않았다"
+        for name, share in causes.items():
+            assert name in page
+            assert f"{share['dbo']:,.0f}" in page
+        # 나눈 것이므로 합은 전체 채무와 같아야 한다.
+        assert sum(s["dbo"] for s in causes.values()) == pytest.approx(
+            full_run.valuation.dbo, rel=1e-9)
+
     def test_maturity_buckets_add_up(self, full_run) -> None:
         """만기분석 구간 합 = 전체 기대지급액. 구간을 빠뜨리면 합이 깨진다."""
         from pension.webreport import maturity_buckets
