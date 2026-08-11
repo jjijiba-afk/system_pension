@@ -2824,7 +2824,8 @@ let helpLoaded = false;
 async function openHelp() {
   const box = document.getElementById("help");
   box.hidden = false;
-  document.getElementById("help-find").focus();
+  // 찾기 칸을 자동으로 잡지 않는다. 손가락 기기에서 입력칸에 포커스가 가면
+  // 화면이 확대되는데, 설명서를 **읽으려고** 연 사람에게는 그것이 방해다.
   if (helpLoaded) return;
   const body = document.getElementById("help-body");
   try {

@@ -382,6 +382,18 @@ class TestPagesDeploy:
         assert "홈 화면에 추가" in page
         assert "%APPDATA%" not in page
 
+    def test_touch_inputs_do_not_trigger_zoom(self) -> None:
+        """아이폰은 16px 미만 입력칸에 포커스가 가면 화면을 확대한다.
+
+        확대된 채로 스스로 돌아오지 않아 글자가 잘린다. 본문 글씨는 그대로 두고
+        손가락 기기의 입력칸만 키운다.
+        """
+        css = (ROOT / "webapp/app/app.css").read_text(encoding="utf-8")
+        block = css[css.index("@media (pointer: coarse)"):]
+        assert "font-size: 16px" in block[:200]
+        for tag in ("input", "select", "textarea"):
+            assert tag in block[:200], tag
+
     def test_the_app_survives_a_subfolder(self) -> None:
         """Pages 주소는 /저장소이름/ 아래다. 절대경로가 하나라도 있으면 깨진다."""
         page = (ROOT / "webapp/app/index.html").read_text(encoding="utf-8")

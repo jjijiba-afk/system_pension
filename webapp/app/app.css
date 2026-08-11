@@ -406,3 +406,10 @@ input[type=date] { -webkit-appearance: none; appearance: none; }
 #update-bar button { padding: 2px 10px; font-size: 0.86rem; font-weight: 600;
   color: var(--navy); border: 1px solid #FFFFFF; border-radius: 0;
   background: #FFFFFF; }
+
+/* iOS 는 **16px 미만** 입력칸에 포커스가 가면 화면을 확대한다. 그러고는 스스로
+   되돌리지 않아서, 글자가 잘린 채로 남고 좌우로 밀어야 한다. 손가락으로 쓰는
+   기기에서만 키운다 — 마우스 쓰는 화면은 지금 크기가 알맞다. */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}

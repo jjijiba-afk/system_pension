@@ -899,6 +899,10 @@ def test_help_opens_over_the_screen(page) -> None:
     assert page.locator("#help-body table").count() >= 3   # 표가 살아 있다
     assert "홈 화면에 추가" in page.inner_text("#help-body")   # 웹앱용 문서다
 
+    # 열자마자 입력칸을 잡으면 아이폰이 화면을 확대해 버린다. 읽으러 연
+    # 사람에게는 그것이 방해라 자동 포커스를 두지 않는다.
+    assert page.evaluate("document.activeElement.id") != "help-find"
+
     page.fill("#help-find", "확정급여채무")
     page.wait_for_selector("#help-body mark", timeout=5_000)
     assert page.locator("#help-body mark").count() > 0
