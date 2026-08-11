@@ -398,3 +398,11 @@ input[type=date] { -webkit-appearance: none; appearance: none; }
   text-align: left; vertical-align: top; }
 #help-body th { background: var(--bg-soft); color: var(--navy); }
 #help-body mark { background: #FFF2CC; }
+
+/* 새 판 알림 띠. 자동으로 넘어가면 뜨지 않는다 — 못 넘어갈 때만 보인다. */
+#update-bar { position: sticky; top: 0; z-index: 60; display: flex; gap: 10px;
+  align-items: center; padding: 6px 12px; font-size: 0.9rem; font-weight: 600;
+  color: #FFFFFF; background: var(--navy); }
+#update-bar button { padding: 2px 10px; font-size: 0.86rem; font-weight: 600;
+  color: var(--navy); border: 1px solid #FFFFFF; border-radius: 0;
+  background: #FFFFFF; }

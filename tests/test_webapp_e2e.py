@@ -906,3 +906,65 @@ def test_help_opens_over_the_screen(page) -> None:
     page.click("#help-close")
     assert page.locator("#help").is_hidden()
     assert page.input_value("#base_date") == "2025-12-31"
+
+
+def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
+    """새 판을 올렸을 때 실제로 그 판이 뜨는지.
+
+    실제로 겪은 일이다 — 두 판을 올렸는데 휴대폰은 그 전 판을 계속 띄웠다.
+    원인은 서비스워커가 설치 때 런타임까지(14MB) 한꺼번에 받게 되어 있어서,
+    그중 하나만 실패하면 새 일꾼이 통째로 설치되지 않고 옛 일꾼이 그대로 남는
+    것이었다. 여기서는 **새 판을 올린 상황을 그대로 만들어** 확인한다.
+    """
+    import http.server
+    import re
+    import shutil
+    import threading
+
+    site = tmp_path / "site"
+    shutil.copytree(DIST, site)
+
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(site))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+    try:
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(url)
+        page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
+        page.wait_for_function(
+            "() => navigator.serviceWorker.controller !== null", timeout=30_000)
+        before = page.inner_text("#build-stamp").strip()
+
+        # 새 판을 올린 셈 친다 — 화면 파일이 바뀌고 캐시 이름이 갈린다.
+        after = "f" * 12
+        for name in ("index.html", "sw.js"):
+            target = site / name
+            target.write_text(
+                target.read_text(encoding="utf-8").replace(before, after),
+                encoding="utf-8")
+        app = site / "app.js"
+        app.write_text(app.read_text(encoding="utf-8") + "\n// 새 판\n",
+                       encoding="utf-8")
+
+        # 다시 열면 새 일꾼이 들어와 자리를 넘겨받아야 한다.
+        for _ in range(3):
+            page.goto(url)
+            page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
+            if page.inner_text("#build-stamp").strip() == after:
+                break
+            page.wait_for_timeout(1_000)
+        assert page.inner_text("#build-stamp").strip() == after, (
+            f"옛 판이 그대로 뜬다: {page.inner_text('#build-stamp')}")
+
+        # 새 일꾼이 무거운 것을 설치 때 받지 않는지 — 여기가 막히면 되풀이된다.
+        worker = (site / "sw.js").read_text(encoding="utf-8")
+        precache = re.search(r"const PRECACHE = (\[.*?\]);", worker, re.S).group(1)
+        assert "pyodide/" not in precache
+        assert "wheels/" not in precache
+        context.close()
+    finally:
+        server.shutdown()
+        server.server_close()

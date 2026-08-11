@@ -31,6 +31,10 @@ function isShell(request) {
   return SHELL.some((name) => path.endsWith("/" + name) || path === "/" + name);
 }
 
+// 설치 때는 **화면 파일만** 받는다. 예전에는 런타임과 휠까지 한꺼번에 받았는데
+// (14MB), 그중 하나라도 실패하면 `addAll` 이 통째로 실패해 새 일꾼이 아예 설치
+// 되지 않는다 — 그러면 옛 일꾼이 그대로 남아 **새 판이 영영 안 뜬다.** 휴대폰
+// 회선에서는 이것이 드물지 않다. 무거운 것은 처음 쓸 때 받아 두면 된다.
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE)
@@ -71,8 +75,18 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // 런타임·휠·아이콘. 캐시에 있으면 그대로, 없으면 받아서 넣어 둔다. 설치 때
+  // 미리 받지 않으므로 여기서 채워야 다음부터 네트워크 없이 돈다.
   event.respondWith(
-    caches.match(event.request, { ignoreSearch: true })
-      .then((hit) => hit || fetch(event.request))
+    caches.match(event.request, { ignoreSearch: true }).then((hit) => {
+      if (hit) return hit;
+      return fetch(event.request).then((response) => {
+        if (response.ok && response.type === "basic") {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      });
+    })
   );
 });

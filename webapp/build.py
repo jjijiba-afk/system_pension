@@ -333,12 +333,20 @@ def build() -> Path:
     page = page.replace("__WHEELS__", json.dumps(wheels, ensure_ascii=False))
     (DIST / "index.html").write_text(page, encoding="utf-8")
 
-    # 서비스워커 — dist 의 모든 파일을 사전 캐시 목록으로 심고, 내용 해시를
-    # 캐시 이름에 넣어 앱을 고치면 캐시가 자연히 갈리게 한다.
+    # 서비스워커 — 내용 해시를 캐시 이름에 넣어 앱을 고치면 캐시가 자연히 갈린다.
+    #
+    # 사전 캐시 목록에는 **화면 파일만** 넣는다. 런타임(파이오다이드)과 휠은
+    # 합쳐 14MB 인데, 설치 때 그것까지 받게 하면 그중 하나만 실패해도 새 일꾼이
+    # 설치되지 않고 옛 판이 계속 돈다. 무거운 것은 처음 쓸 때 받아 캐시에
+    # 넣으므로(서비스워커의 fetch 처리), 오프라인 동작은 그대로다.
     stamp = _hash_dir(DIST)
+    heavy = ("pyodide/", "wheels/")
     files = sorted(
         "./" + p.relative_to(DIST).as_posix()
-        for p in DIST.rglob("*") if p.is_file()
+        for p in DIST.rglob("*")
+        if p.is_file()
+        and p.name != "sw.js"
+        and not p.relative_to(DIST).as_posix().startswith(heavy)
     )
     worker = (APP / "sw.js").read_text(encoding="utf-8")
     worker = worker.replace("__VERSION__", stamp)

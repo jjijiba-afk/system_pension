@@ -34,8 +34,32 @@ if ("serviceWorker" in navigator) {
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) registration.update();
       });
+      // 새 일꾼이 들어왔는데 자리를 못 넘겨받는 경우가 있다(iOS 에서 겪었다).
+      // 그러면 화면은 옛것인 채로 조용히 남는다. 눈에 보이게 알리고 누르면
+      // 넘어가게 한다 — 자동으로 되면 이 띠는 뜨지도 않는다.
+      registration.addEventListener("updatefound", () => {
+        const fresh = registration.installing;
+        if (!fresh) return;
+        fresh.addEventListener("statechange", () => {
+          if (fresh.state === "installed" && navigator.serviceWorker.controller) {
+            showUpdateBar();
+          }
+        });
+      });
     })
     .catch(() => {});
+
+  function showUpdateBar() {
+    if (document.getElementById("update-bar")) return;
+    const bar = document.createElement("div");
+    bar.id = "update-bar";
+    bar.innerHTML = "새 판이 준비됐습니다. " +
+      "<button type=\"button\" id=\"update-now\">지금 새로고침</button>";
+    document.body.prepend(bar);
+    document.getElementById("update-now").addEventListener("click", () => {
+      location.reload();
+    });
+  }
 
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     // 처음 설치되는 순간에도 이 사건이 온다. 그때는 새로 고칠 옛 화면이 없다.
