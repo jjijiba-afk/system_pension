@@ -413,3 +413,19 @@ input[type=date] { -webkit-appearance: none; appearance: none; }
 @media (pointer: coarse) {
   input, select, textarea { font-size: 16px; }
 }
+
+/* ── 좁은 화면의 표 ──
+   표를 억지로 화면 폭에 맞추면 칸이 좁아지다 못해 글자가 한 자씩 세로로 접힌다
+   ("입/력/불/러/오/기"). 그 상태로는 숫자도 못 읽는다. 폭은 내용대로 두고
+   옆으로 밀어 보게 한다 — 표 하나만 밀리고 화면 전체는 가만히 있는다. */
+@media (max-width: 900px) {
+  table.data, table.grid {
+    display: block; width: 100%; overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .data th, .grid th { white-space: nowrap; }
+  .data td.num, .grid td.num { white-space: nowrap; }
+  .data td button, .grid td button, .data td a, .data td .badge {
+    white-space: nowrap;
+  }
+}

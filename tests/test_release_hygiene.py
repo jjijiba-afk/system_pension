@@ -394,6 +394,16 @@ class TestPagesDeploy:
         for tag in ("input", "select", "textarea"):
             assert tag in block[:200], tag
 
+    def test_wide_tables_scroll_instead_of_collapsing(self) -> None:
+        """좁은 화면에서 표를 화면 폭에 억지로 맞추면 글자가 한 자씩 세로로
+        접힌다("입/력/불/러/오/기"). 폭은 내용대로 두고 옆으로 밀게 한다."""
+        css = (ROOT / "webapp/app/app.css").read_text(encoding="utf-8")
+        block = css[css.index("@media (max-width: 900px)"):]
+        head = block[:400]
+        assert "table.data" in head and "table.grid" in head
+        assert "display: block" in head and "overflow-x: auto" in head
+        assert "white-space: nowrap" in head
+
     def test_the_app_survives_a_subfolder(self) -> None:
         """Pages 주소는 /저장소이름/ 아래다. 절대경로가 하나라도 있으면 깨진다."""
         page = (ROOT / "webapp/app/index.html").read_text(encoding="utf-8")
