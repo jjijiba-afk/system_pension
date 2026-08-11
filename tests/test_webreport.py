@@ -49,7 +49,6 @@ class TestSeveranceReport:
             "경과기간별 예상 확정급여채무",         # 문단 147(c)
             "차년도 예상 기여금",                   # 문단 147(b)
             "임직원 분포 현황",
-            "용어 정리",
         ):
             assert required in page, f"보고서에 '{required}' 이(가) 없다"
 

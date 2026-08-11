@@ -2,7 +2,7 @@
 
 계리법인이 회사에 주는 평가보고서 서식을 따른다: 표지 → 인사말 → 목차 →
 평가개요 → 평가 결과 요약 → 공시사항 → 민감도 분석 → 주석 사항 → 첨부
-자료(기초율 표 전체) → 용어 정리 → 지급률표. 퇴직급여와 장기종업원급여는
+자료(기초율 표 전체) → 지급률표. 퇴직급여와 장기종업원급여는
 별도 보고서다(장기급여는 문단 153~158 의 간이 공시를 따른다).
 
 PDF 를 파이썬으로 직접 쓰려면 한글 폰트 몇 MB 를 실어야 한다. 대신 인쇄용
@@ -134,12 +134,13 @@ def render_html(
         _longterm_sections(run, sections, period)
     _shared_sections(run, sections, kind)
 
-    toc = "".join(
-        f"<li>{i + 1}. {_esc(name)}</li>" for i, (name, _) in enumerate(sections)
-    )
+    # 장에 번호를 붙이지 않는다. 자료요청서 항목번호를 그대로 이어받은 것이라
+    # 이 보고서 안에서는 가리키는 것이 없고, 장을 하나 넣고 뺄 때마다 본문의
+    # '3.1' 같은 표시와 어긋난다.
+    toc = "".join(f"<li>{_esc(name)}</li>" for name, _ in sections)
     body = "".join(
-        f'<section class="chapter"><h2>{i + 1}. {_esc(name)}</h2>{content}</section>'
-        for i, (name, content) in enumerate(sections)
+        f'<section class="chapter"><h2>{_esc(name)}</h2>{content}</section>'
+        for name, content in sections
     )
 
     return f"""<!DOCTYPE html>
@@ -149,29 +150,43 @@ def render_html(
 <title>{_esc(title)}</title>
 <style>
 @page {{ size: A4; margin: 18mm 16mm; }}
-* {{ box-sizing: border-box; }}
+* {{ box-sizing: border-box; border-radius: 0 !important; }}
 body {{ font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
        color: #1A1D23; line-height: 1.6; font-size: 10.5pt; margin: 0; }}
 .cover {{ text-align: center; padding-top: 30vh; page-break-after: always; }}
 .cover h1 {{ font-size: 20pt; color: #1F3864; margin-bottom: 40px; }}
 .cover .meta {{ font-size: 12pt; line-height: 2.2; }}
 .cover .client {{ font-size: 16pt; font-weight: bold; margin-top: 60px; }}
-.letter, .toc {{ page-break-after: always; }}
-.letter p {{ margin: 12px 0; }}
-h2 {{ color: #1F3864; border-bottom: 2px solid #1F3864; padding-bottom: 4px;
-     font-size: 13pt; margin: 26px 0 12px; }}
-h3 {{ color: #44546A; font-size: 11pt; margin: 18px 0 6px; }}
-.chapter {{ page-break-before: always; }}
-.chapter:first-of-type {{ page-break-before: auto; }}
+.letter p {{ margin: 8px 0; }}
+.toc {{ page-break-after: always; margin-top: 18px; }}
+h2 {{ color: #1F3864; border-bottom: 2px solid #1F3864; padding-bottom: 3px;
+     font-size: 12.5pt; margin: 0 0 10px;
+     page-break-after: avoid; break-after: avoid; }}
+h3 {{ color: #44546A; font-size: 10.5pt; margin: 14px 0 4px;
+     page-break-after: avoid; break-after: avoid; }}
+/* 장마다 쪽을 새로 시작하면 표 하나짜리 장 아래가 통째로 빈다. 이어서 흐르게
+   두고, 제목이 쪽 끝에 혼자 남거나 표가 두 쪽에 걸치는 것만 막는다. */
+.chapter {{ margin: 0 0 20px; }}
 table.t {{ border-collapse: collapse; width: 100%; margin: 6px 0 14px;
           font-size: 9.5pt; page-break-inside: avoid; }}
-.t th, .t td {{ border: 1px solid #8894AB; padding: 4px 8px; }}
+.t th, .t td {{ border: 1px solid #D6DCE8; padding: 3px 7px; }}
 .t th {{ background: #EEF3F8; color: #1F3864; }}
 .t td.n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 .t.wide {{ font-size: 8.5pt; }}
 .unit {{ text-align: right; color: #5B6478; font-size: 8.5pt; }}
 .note {{ color: #5B6478; font-size: 9pt; margin: 4px 0 12px; }}
-ol.toc-list {{ font-size: 12pt; line-height: 2.4; list-style: none; }}
+ol.toc-list {{ font-size: 11pt; line-height: 1.9; list-style: none;
+               padding: 0; columns: 2; }}
+.headline {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }}
+.headline div {{ border: 1px solid #D6DCE8; background: #F4F6FA;
+                padding: 8px 12px; min-width: 150px; flex: 1 1 150px; }}
+.headline .k {{ font-size: 8.5pt; color: #5B6478; }}
+.headline .v {{ font-size: 13pt; font-weight: bold; color: #1F3864;
+               font-variant-numeric: tabular-nums; }}
+figure.fig {{ margin: 6px 0 12px; padding: 6px 8px; border: 1px solid #D6DCE8;
+             background: #FCFDFF; page-break-inside: avoid; break-inside: avoid; }}
+figure.fig svg {{ display: block; }}
+figure.fig figcaption {{ color: #5B6478; font-size: 8.5pt; margin-top: 3px; }}
 dl dt {{ font-weight: bold; margin-top: 10px; }}
 dl dd {{ margin: 2px 0 8px 12px; color: #333; }}
 @media screen {{ body {{ max-width: 800px; margin: 0 auto; padding: 24px; }} }}
@@ -211,6 +226,155 @@ dl dd {{ margin: 2px 0 8px 12px; color: #333; }}
 </html>"""
 
 
+# ── 그림 ────────────────────────────────────────────────────────
+# 표만으로는 "어느 직군이 큰가", "무엇이 채무를 밀어 올렸나" 가 눈에 들어오지
+# 않는다. 외부 라이브러리를 쓰면 보고서 파일 하나로 돌아다니지 못하므로 SVG 를
+# 직접 그린다 — 인쇄에서도 그대로 나온다.
+
+_INK = "#1F3864"
+_UP = "#C0504D"
+_DOWN = "#4F81BD"
+_GRID = "#D6DCE8"
+_GREY = "#5B6478"
+
+
+def _short(value: float) -> str:
+    """금액을 억·만 단위로. 막대 끝에 붙일 짧은 표시."""
+    if abs(value) >= 1e8:
+        return f"{value / 1e8:,.0f}억"
+    if abs(value) >= 1e4:
+        return f"{value / 1e4:,.0f}만"
+    return f"{value:,.0f}"
+
+
+def _figure(inner: str, width: int, height: int, caption: str = "") -> str:
+    note = f'<figcaption>{_esc(caption)}</figcaption>' if caption else ""
+    return (f'<figure class="fig"><svg viewBox="0 0 {width} {height}" width="100%" '
+            f'height="{height}" xmlns="http://www.w3.org/2000/svg">{inner}</svg>'
+            f"{note}</figure>")
+
+
+def _bar_chart(items: list, *, label_w: int = 96, width: int = 640,
+               caption: str = "") -> str:
+    """가로 막대. 항목이 적고 이름이 긴 것(직군·퇴직사유)에 쓴다."""
+    items = [(name, float(value)) for name, value in items if value]
+    if not items:
+        return ""
+    step, pad = 24, 8
+    height = pad * 2 + step * len(items)
+    top = max(abs(v) for _n, v in items) or 1
+    span = width - label_w - 74
+    out = []
+    for index, (name, value) in enumerate(items):
+        y = pad + index * step
+        length = max(1.0, abs(value) / top * span)
+        out.append(f'<text x="{label_w - 6}" y="{y + 15}" text-anchor="end" '
+                   f'font-size="11" fill="{_GREY}">{_esc(name)}</text>')
+        out.append(f'<rect x="{label_w}" y="{y + 4}" width="{length:.1f}" '
+                   f'height="15" fill="{_INK if value >= 0 else _UP}"/>')
+        out.append(f'<text x="{label_w + length + 6:.1f}" y="{y + 15}" '
+                   f'font-size="10" fill="{_GREY}">{_short(value)}</text>')
+    return _figure("".join(out), width, height, caption)
+
+
+def _column_chart(items: list, *, width: int = 640, height: int = 190,
+                  caption: str = "") -> str:
+    """세로 막대. 시점처럼 순서가 있는 것에 쓴다."""
+    items = [(name, float(value)) for name, value in items]
+    if not any(v for _n, v in items):
+        return ""
+    left, bottom, topgap = 8, 34, 22
+    plot = height - bottom - topgap
+    top = max(abs(v) for _n, v in items) or 1
+    slot = (width - left * 2) / len(items)
+    out = [f'<line x1="{left}" y1="{height - bottom}" x2="{width - left}" '
+           f'y2="{height - bottom}" stroke="{_GRID}"/>']
+    for index, (name, value) in enumerate(items):
+        bar = slot * 0.56
+        x = left + slot * index + (slot - bar) / 2
+        tall = max(1.0, abs(value) / top * plot)
+        y = height - bottom - tall
+        out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar:.1f}" '
+                   f'height="{tall:.1f}" fill="{_INK}"/>')
+        out.append(f'<text x="{x + bar / 2:.1f}" y="{y - 4:.1f}" '
+                   f'text-anchor="middle" font-size="9" fill="{_GREY}">'
+                   f"{_short(value)}</text>")
+        out.append(f'<text x="{x + bar / 2:.1f}" y="{height - bottom + 14:.1f}" '
+                   f'text-anchor="middle" font-size="9" fill="{_GREY}">'
+                   f"{_esc(name)}</text>")
+    return _figure("".join(out), width, height, caption)
+
+
+def _waterfall(rows: list, *, opening: float, closing: float,
+               width: int = 640, caption: str = "") -> str:
+    """폭포 그림. 기초에서 기말까지 무엇이 얼마나 밀어 올렸는지."""
+    steps = [(name, float(value)) for name, value in rows if value]
+    if not steps:
+        return ""
+    bars = [("기초", opening, 0.0)]
+    running = opening
+    for name, value in steps:
+        bars.append((name, value, running))
+        running += value
+    bars.append(("기말", closing, 0.0))
+
+    height, bottom, topgap = 235, 62, 24
+    plot = height - bottom - topgap
+    top = max(max(opening, closing, running), 1.0)
+    slot = width / len(bars)
+    out = []
+    for index, (name, value, base) in enumerate(bars):
+        anchor = index in (0, len(bars) - 1)
+        bar = slot * 0.54
+        x = slot * index + (slot - bar) / 2
+        low, high = ((0.0, value) if anchor
+                     else (min(base, base + value), max(base, base + value)))
+        y = height - bottom - high / top * plot
+        tall = max(1.5, (high - low) / top * plot)
+        colour = _INK if anchor else (_UP if value > 0 else _DOWN)
+        out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar:.1f}" '
+                   f'height="{tall:.1f}" fill="{colour}"/>')
+        out.append(f'<text x="{x + bar / 2:.1f}" y="{y - 4:.1f}" '
+                   f'text-anchor="middle" font-size="9" fill="{_GREY}">'
+                   f"{_short(value)}</text>")
+        short = _esc(name.replace("보험수리적손익 - ", "").replace("확정급여채무", ""))
+        middle = x + bar / 2
+        out.append(f'<text x="{middle:.1f}" y="{height - bottom + 13:.1f}" '
+                   f'text-anchor="middle" font-size="8" fill="{_GREY}" '
+                   f'transform="rotate(-30 {middle:.1f} {height - bottom + 13:.1f})">'
+                   f"{short}</text>")
+    out.append(f'<line x1="0" y1="{height - bottom}" x2="{width}" '
+               f'y2="{height - bottom}" stroke="{_GRID}"/>')
+    return _figure("".join(out), width, height, caption)
+
+
+def _diverging(items: list, *, width: int = 640, caption: str = "") -> str:
+    """0 을 가운데 두고 좌우로 뻗는 막대. 민감도에 쓴다."""
+    items = [(name, float(value)) for name, value in items]
+    if not any(v for _n, v in items):
+        return ""
+    step, pad, label_w = 22, 8, 134
+    height = pad * 2 + step * len(items)
+    half = (width - label_w - 66) / 2
+    mid = label_w + half
+    top = max(abs(v) for _n, v in items) or 1
+    out = [f'<line x1="{mid}" y1="{pad}" x2="{mid}" y2="{height - pad}" '
+           f'stroke="{_GRID}"/>']
+    for index, (name, value) in enumerate(items):
+        y = pad + index * step
+        length = abs(value) / top * half
+        x = mid if value >= 0 else mid - length
+        out.append(f'<text x="{label_w - 6}" y="{y + 14}" text-anchor="end" '
+                   f'font-size="10" fill="{_GREY}">{_esc(name)}</text>')
+        out.append(f'<rect x="{x:.1f}" y="{y + 4}" width="{max(1.0, length):.1f}" '
+                   f'height="13" fill="{_UP if value >= 0 else _DOWN}"/>')
+        # 값은 늘 오른쪽 끝 같은 자리에. 막대 끝에 붙이면 왼쪽으로 길게 뻗은
+        # 막대에서 항목 이름과 글자가 겹친다.
+        out.append(f'<text x="{width - 58}" y="{y + 14}" font-size="9" '
+                   f'fill="{_GREY}">{value:+.2%}</text>')
+    return _figure("".join(out), width, height, caption)
+
+
 # ── 퇴직급여 장 ──────────────────────────────────────────────────
 
 def _severance_sections(run: Any, sections: list, period: str) -> None:
@@ -227,7 +391,29 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
               if run.assumptions.discount.flat is not None
               else val.single_discount_rate())
 
-    # 1. 평가개요
+    # 한 장 요약 — 담당자가 제일 먼저 찾는 세 숫자가 표지 뒤 넉 장을 지나야
+    # 나오면 안 된다.
+    cards = [("확정급여채무", val.dbo),
+             ("당기근무원가", roll.service_cost if roll else val.service_cost),
+             ("차기 이자원가", val.interest_cost)]
+    if assets is not None:
+        cards += [("사외적립자산", assets.closing_fair_value),
+                  ("순확정급여부채", assets.net_liability)]
+    if run.longterm is not None:
+        cards.append(("장기급여채무", run.longterm.dbo))
+    headline = "".join(
+        f'<div><div class="k">{_esc(name)}</div>'
+        f'<div class="v">{_won(amount)}</div></div>' for name, amount in cards)
+    sections.append(("한 장 요약", f"""
+<div class="headline">{headline}</div>
+{_kv_table([("산출기준일", str(run.config.base_date)),
+            ("대상 인원", f"{val.headcount:,}명"),
+            ("적용 할인율", f"{single:.3%}"),
+            ("가중평균 잔존만기", f"{val.duration:.2f}년"),
+            ("평가 방법", "예측단위적립방식 (PUC)")])}
+<p class="note">단위는 원입니다. 근거는 뒤 장에 있습니다.</p>"""))
+
+    # 평가개요
     sections.append(("평가개요", f"""
 <p>본 퇴직급여 보고서는 {_esc(period)} 회사의 퇴직급여에 대한 보고서로서
 {_STANDARD}에 따라 수행되었습니다.</p>
@@ -242,7 +428,7 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
 <li>본 보고서는 회계처리 및 재무제표 공시 목적 이외에는 사용할 수 없습니다.</li>
 </ul>"""))
 
-    # 2. 평가 결과 요약
+    # 평가 결과 요약
     national = info.assets.national_pension if info is not None else 0.0
     net_rows: list[tuple[str, Any]] = [
         ("1. 기말 확정급여채무의 현재가치", _won(val.dbo))]
@@ -298,14 +484,20 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
                    '[전기 산출 결과] 를 채우면 완성됩니다.</p>')
 
     sections.append(("평가 결과 요약", f"""
-<h3>2.1 재무상태표의 순확정급여부채(자산) 현황</h3>{summary}
-<h3>2.2 손익계산서</h3>{_kv_table(pl_rows)}{pl_note}"""))
+<h3>재무상태표의 순확정급여부채(자산) 현황</h3>{summary}
+<h3>손익계산서</h3>{_kv_table(pl_rows)}{pl_note}"""))
 
-    # 3. 공시사항
+    # 공시사항
     parts = []
-    parts.append(f"<h3>3.1 확정급여채무의 변동내역</h3>"
+    parts.append(f"<h3>확정급여채무의 변동내역</h3>"
                  f'<p class="note">확정급여채무의 가중평균만기(듀레이션)는 '
                  f"{val.duration:.2f}년 입니다.</p>")
+    if roll is not None:
+        moves = [(name, amount) for name, amount in roll.as_rows()
+                 if not name.startswith(("기초", "기말"))]
+        parts.append(_waterfall(
+            moves, opening=roll.opening_dbo, closing=roll.closing_dbo,
+            caption="기초에서 기말까지 — 붉은색은 채무를 늘린 것, 푸른색은 줄인 것"))
     if roll is not None:
         parts.append(_kv_table([(label, _won(amount))
                                 for label, amount in roll.as_rows()]))
@@ -314,7 +506,7 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
         parts.append('<p class="note">전기 연결이 없어 당기 변동 분해는 생략'
                      '되었습니다.</p>')
 
-    parts.append("<h3>3.2 사외적립자산의 변동내역</h3>")
+    parts.append("<h3>사외적립자산의 변동내역</h3>")
     if assets is not None:
         parts.append(_kv_table([(label, _won(amount))
                                 for label, amount in assets.as_rows()]))
@@ -328,14 +520,14 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
         parts.append('<p class="note">사외적립자산 입력이 없어 전액 미적립으로 '
                      '보았습니다.</p>')
 
-    parts.append("<h3>3.3 순확정급여부채(자산)</h3>")
+    parts.append("<h3>순확정급여부채(자산)</h3>")
     if assets is not None:
         parts.append(_kv_table([(label, _won(amount))
                                 for label, amount in assets.net_rows()]))
         parts.append(f'<p class="note">적립비율은 {assets.funded_ratio:.1%} 입니다. '
                      "당기 변동의 세부는 3.1과 3.2로 갈음합니다.</p>")
 
-    parts.append("<h3>3.4 재측정요소 분석 (기타포괄손익 인식 금액)</h3>")
+    parts.append("<h3>재측정요소 분석 (기타포괄손익 인식 금액)</h3>")
     if roll is not None:
         re_rows = [
             ("1. 확정급여채무의 재측정요소 손실(이익)", _won(roll.actuarial_gain_loss)),
@@ -366,26 +558,29 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
                      '않았습니다.</p>')
 
     projection = run.projection
-    parts.append("<h3>3.5 차년도 예상 퇴직급여 비용</h3>")
+    parts.append("<h3>차년도 예상 퇴직급여 비용</h3>")
     if projection is not None:
         parts.append(_kv_table([(label, _won(amount))
                                 for label, amount in projection.expense_rows()]))
-        parts.append("<h3>3.6 차년도 확정급여채무 예측</h3>")
+        parts.append("<h3>차년도 확정급여채무 예측</h3>")
         parts.append(_kv_table([(label, _won(amount))
                                 for label, amount in projection.dbo_rows()]))
         if projection.has_assets:
-            parts.append("<h3>3.7 차년도 사외적립자산 예측</h3>")
+            parts.append("<h3>차년도 사외적립자산 예측</h3>")
             parts.append(_kv_table([(label, _won(amount))
                                     for label, amount in projection.asset_rows()]))
         parts.append('<p class="note">예측이므로 보험수리적손익은 0 으로 두었습니다 '
                      '— 가정이 그대로 실현된다고 본 값입니다.</p>')
     sections.append(("공시사항", "".join(parts)))
 
-    # 4. 민감도 분석
+    # 민감도 분석
     parts = []
     if run.sensitivity is not None:
         rows = [[case.name, _won(case.dbo), _won(case.change),
                  f"{case.change_ratio:+.2%}"] for case in run.sensitivity.cases]
+        parts.append(_diverging([(case.name, case.change_ratio)
+                                 for case in run.sensitivity.cases],
+                                caption="가정별 확정급여채무 증감률"))
         parts.append(_table(["가정 변동", "확정급여채무", "증감액", "변화율"], rows))
         parts.append(
             f'<p class="note">기준 확정급여채무는 {_won(run.sensitivity.base_dbo)}원, '
@@ -394,12 +589,12 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
     else:
         parts.append('<p class="note">민감도분석을 끄고 산출했습니다. 산출 옵션에서 '
                      '켠 뒤 다시 실행하십시오.</p>')
-    sections.append(("민감도 분석 (Sensitivity Test)", "".join(parts)))
+    sections.append(("민감도 분석", "".join(parts)))
 
-    # 5. 주석 사항
+    # 주석 사항
     sections.append(("주석 사항", _notes_section(run, single)))
 
-    # 6. 첨부 자료
+    # 첨부 자료
     sections.append(("첨부 자료", _attachment_section(run)))
 
 
@@ -407,7 +602,7 @@ def _notes_section(run: Any, single: float) -> str:
     val = run.valuation
     a = run.assumptions
     parts = ["""
-<h3>5.1 제도의 일반사항과 위험 (문단 139)</h3>
+<h3>제도의 일반사항과 위험 (문단 139)</h3>
 <p>회사의 규정에 정한 바에 따라 퇴직급여는 퇴직 당시 평균임금과 근속기간을
 기초로 산출되며, 지급액은 일시금으로 지급됩니다. 제도는 확정급여형(DB)이며,
 회사는 할인율 변동 위험(우량회사채 수익률 하락 시 채무 증가), 임금 상승 위험,
@@ -416,7 +611,7 @@ def _notes_section(run: Any, single: float) -> str:
     base_up = sorted(a.salary.base_up.points.items())
     base_up_text = ", ".join(f"{k}년차 {v:.3%}" for k, v in base_up) or "0%"
     parts.append(f"""
-<h3>5.2 기본적인 보험수리적 가정 (문단 144)</h3>
+<h3>기본적인 보험수리적 가정 (문단 144)</h3>
 {_table(["구분", "값"], [
     ["1. 할인율", _pct(single)],
     ["2. 임금인상률 (Base-up)", base_up_text],
@@ -424,7 +619,7 @@ def _notes_section(run: Any, single: float) -> str:
     ["4. 사망률", "기초율 표 적용 — 첨부 6.5"],
     ["5. 중도퇴직률", f"기초율 표 적용 (기준: {a.withdrawal.basis}) — 첨부 6.4"],
 ], unit="")}
-<h3>5.3 평가방법</h3>
+<h3>평가방법</h3>
 <p>종업원급여의 확정급여채무 및 당기근무원가의 현재가치는 {_STANDARD} 기준에서
 정한 예측단위적립방식(Projected Unit Credit Method)에 의거하여 산출하였습니다.
 급여는 급여산정식에 따라 근무기간에 귀속했으며(문단 70), 추가 근무가 유의적인
@@ -432,7 +627,7 @@ def _notes_section(run: Any, single: float) -> str:
 
     rules = run.config.job_group_rules
     if rules:
-        parts.append("<h3>5.4 퇴직급여 규정 요약</h3>")
+        parts.append("<h3>퇴직급여 규정 요약</h3>")
         parts.append(_table(
             ["직군", "정년", "가입자격(년)", "근속 산정", "단수처리",
              "지급률 규정 방식"],
@@ -446,7 +641,7 @@ def _notes_section(run: Any, single: float) -> str:
     attributed = maturity_buckets(val.cash_flows())
     paid = dict(maturity_buckets(val.benefit_cash_flows()))
     parts.append("""
-<h3>5.5 경과기간별 예상 확정급여채무 및 퇴직급여 지급 예상액 (문단 147(c))</h3>""")
+<h3>경과기간별 예상 확정급여채무 및 퇴직급여 지급 예상액 (문단 147(c))</h3>""")
     parts.append(_table(
         ["구분", "확정급여채무 (가득반영, 할인 미적용)", "퇴직급여 지급 예상액 (할인 미적용)"],
         [[label, _won(amount), _won(paid.get(label, 0.0))]
@@ -456,7 +651,7 @@ def _notes_section(run: Any, single: float) -> str:
     contributions = (run.plan_assets.contributions
                      if run.plan_assets is not None else 0.0)
     parts.append(f"""
-<h3>5.6 차년도 예상 기여금 (문단 147(b))</h3>
+<h3>차년도 예상 기여금 (문단 147(b))</h3>
 <p>회사의 적립정책에 따라 결정될 사항입니다. 참고로 당기 부담금 납입액은
 {_won(contributions)}원입니다.</p>""")
     return "".join(parts)
@@ -478,7 +673,7 @@ def _attachment_section(run: Any) -> str:
     ]
     services = [m.past_service for m in included]
 
-    parts = ["<h3>6.1 임직원 분포 현황</h3>"]
+    parts = ["<h3>임직원 분포 현황</h3>"]
     parts.append(_table(["구분", "값"], [
         ["1) 임직원 인원수", f"{count:,}명"],
         ["2) 기준임금 합계", f"{_won(wage_total)}원"],
@@ -504,7 +699,7 @@ def _attachment_section(run: Any) -> str:
             f"{_pct(val.single_discount_rate())} 역산"
             + (f" (신용등급 {grade})" if grade else ""))
     parts.append(f"""
-<h3>6.2 보험수리적 가정 산출 정보</h3>
+<h3>보험수리적 가정 산출 정보</h3>
 <p>1) 할인율 — {_esc(discount_note)}. 문단 83에 따라 보고기간 말 현재 우량회사채의
 시장수익률을 참조하였습니다.</p>
 <p>2) 총 임금상승률 — 임금인상률(Base-up)과 승급률을 결합한 동태적 임금상승률을
@@ -515,7 +710,7 @@ def _attachment_section(run: Any) -> str:
 
     def attach(title: str, headers: list, rows: list) -> None:
         nonlocal number
-        parts.append(f"<h3>6.{number} {_esc(title)}</h3>")
+        parts.append(f"<h3>{_esc(title)}</h3>")
         parts.append(_table(headers, rows, cls="t wide", unit=""))
         number += 1
 
@@ -577,11 +772,11 @@ def _longterm_sections(run: Any, sections: list, period: str) -> None:
 
     paid = info.longterm_paid if info is not None else 0.0
     sections.append(("평가 결과 요약", f"""
-<h3>2.1 재무상태표의 부채 현황</h3>
+<h3>재무상태표의 부채 현황</h3>
 {_kv_table([("1. 기말 확정급여채무의 현재가치", _won(lt.dbo)),
             ("2. 사외적립자산의 공정가치", "0"),
             ("3. 재무상태표에 인식된 순부채", _won(lt.dbo))])}
-<h3>2.2 손익계산서</h3>
+<h3>손익계산서</h3>
 {_kv_table([("1. 당기근무원가", _won(lt.service_cost)),
             ("2. 확정급여채무의 이자비용",
              _won(run.longterm_rollforward.interest_cost
@@ -612,10 +807,10 @@ def _longterm_sections(run: Any, sections: list, period: str) -> None:
         move_note = ("기시 채무는 산출 화면에 전기 장기급여채무를 넣으면 채워집니다. "
                      "장기급여 지급액은 명부의 1)일반사항에서 읽었습니다.")
     sections.append(("공시사항", f"""
-<h3>3.1 확정급여채무의 변동내역</h3>
+<h3>확정급여채무의 변동내역</h3>
 {_kv_table(move_rows)}
 <p class="note">{move_note}</p>
-<h3>3.2 차년도 예상 장기급여 비용</h3>
+<h3>차년도 예상 장기급여 비용</h3>
 {_kv_table([("1. 당기근무원가", _won(lt.service_cost)),
             ("2. 확정급여채무의 이자비용", _won(lt.interest_cost)),
             ("3. 합계", _won(lt.service_cost + lt.interest_cost))])}"""))
@@ -629,10 +824,10 @@ def _longterm_sections(run: Any, sections: list, period: str) -> None:
     kinds = sorted({m.benefit_kind for m in included if m.benefit_kind})
     daily = [m.daily_base_pay for m in included if m.daily_base_pay]
     parts = [f"""
-<h3>5.1 제도의 일반사항</h3>
+<h3>제도의 일반사항</h3>
 <p>회사의 규정에 따라 장기근속 종업원에게 {"、".join(kinds) or "장기근속 급여"}
 를 지급합니다. 산출 대상 인원은 {count:,}명입니다.</p>
-<h3>5.2 기본적인 보험수리적 가정</h3>
+<h3>기본적인 보험수리적 가정</h3>
 {_table(["구분", "값"], [
     ["1. 할인율", _pct(single)],
     ["2. 임금인상률 (Base-up)",
@@ -642,7 +837,7 @@ def _longterm_sections(run: Any, sections: list, period: str) -> None:
 ], unit="")}"""]
 
     if a.longterm_rules:
-        parts.append("<h3>5.3 장기급여 지급 항목</h3>")
+        parts.append("<h3>장기급여 지급 항목</h3>")
         parts.append(_table(
             ["규정명", "항목", "지급유형", "현물 상승률", "지급시점",
              "반복 주기(년)", "누적", "지급일"],
@@ -655,50 +850,24 @@ def _longterm_sections(run: Any, sections: list, period: str) -> None:
 
     names, rows = _curve_rows(a.longterm_benefit.curves, fmt=lambda v: f"{v:g}")
     if names:
-        parts.append("<h3>5.4 장기급여 지급률</h3>")
+        parts.append("<h3>장기급여 지급률</h3>")
         parts.append(_table(["근속연수", *names], rows, cls="t wide", unit=""))
     sections.append(("주석 사항", "".join(parts)))
 
 
 # ── 공통 꼬리 ────────────────────────────────────────────────────
 
-_GLOSSARY = (
-    ("퇴직급여 (Severance Benefit)",
-     "종업원이 퇴직한 이후에 지급하는 종업원급여. 퇴직 일시금·퇴직연금과 그 밖의 "
-     "퇴직후급여를 말한다."),
-    ("확정급여채무 (Defined Benefit Obligation)",
-     "예측단위적립방식으로 평가한 종업원의 퇴직급여 채무의 현재가치."),
-    ("당기근무원가 (Service Cost)",
-     "당기에 종업원이 근무용역을 제공함에 따라 늘어나는 확정급여채무의 현재가치 "
-     "증가액."),
-    ("이자비용 (Interest Cost)",
-     "확정급여채무가 기초에서 기말로 이동하면서 발생하는 시간가치의 증가분."),
-    ("재측정요소 / 보험수리적손익 (Remeasurements / Actuarial Gain·Loss)",
-     "가정으로 추정한 채무(또는 자산)가 실제와 다르거나 가정 자체를 바꿀 때 "
-     "생기는 차액. 확정급여채무·사외적립자산의 재측정은 기타포괄손익으로, "
-     "기타장기종업원급여의 재측정은 당기손익으로 인식한다."),
-    ("과거근무원가 (Past Service Cost)",
-     "제도를 새로 도입하거나 개정할 때 과거 근무용역분 채무의 현재가치가 변동하는 "
-     "금액. 당기손익으로 즉시 인식한다 (문단 103)."),
-    ("예측단위적립방식 (Projected Unit Credit)",
-     "장래급여를 근무기간의 단위로 분할·귀속하고 그 단위의 현재가치를 쌓아 "
-     "채무를 재는 방식 (문단 67~68)."),
-    ("정산 (Settlement)",
-     "확정급여제도에 따라 생긴 급여의 전부나 일부에 대한 의무를 더 이상 부담하지 "
-     "않기로 하는 거래 (문단 109~112)."),
-    ("듀레이션 (가중평균만기)",
-     "채무 현금흐름의 현재가치로 가중한 평균 지급시점. 할인율의 회사채 만기 선택 "
-     "근거가 된다."),
-)
-
-
 def _shared_sections(run: Any, sections: list, kind: str) -> None:
-    glossary = "".join(f"<dt>■ {_esc(term)}</dt><dd>{_esc(desc)}</dd>"
-                       for term, desc in _GLOSSARY)
+    """보고서 끝에 붙는 것.
+
+    용어 풀이는 뺐다. 받는 사람은 계리 용어를 아는 회계 담당자와 감사인이고,
+    본문에서 처음 나올 때 한 번 풀어 쓰는 것으로 족하다. 장 하나가 통째로
+    풀이표이면 정작 볼 것을 찾는 데 방해가 된다.
+    """
     issues = run.issues
     footer = (f'<p class="note">검증 결과: 오류 {len(issues.errors)}건, '
               f"경고 {len(issues.warnings)}건 — 상세는 산출 결과 파일의 "
               "검증리포트 시트를 참조하십시오. 본 보고서의 수치는 산출 엔진 "
               "결과를 그대로 옮긴 것으로, 화면 요약·결과 엑셀과 원 단위까지 "
               "일치합니다.</p>")
-    sections.append(("용어 정리", f"<dl>{glossary}</dl>{footer}"))
+    sections.append(("검증 결과", footer))
