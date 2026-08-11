@@ -404,6 +404,24 @@ class TestPagesDeploy:
         assert "display: block" in head and "overflow-x: auto" in head
         assert "white-space: nowrap" in head
 
+    def test_a_custom_domain_survives_every_deploy(self) -> None:
+        """맞춤 도메인은 배포본 안의 CNAME 이 잡는다.
+
+        설정 화면에서 한 번 넣어 두어도, 올리는 판에 이 파일이 없으면 배포할
+        때마다 도메인이 풀리는 일이 있다. 저장소에 적어 두면 그럴 일이 없다.
+        """
+        source = (ROOT / "webapp/build.py").read_text(encoding="utf-8")
+        assert "_write_cname" in source
+        assert 'DIST / "CNAME"' in source
+
+        domain = ROOT / "webapp/CNAME"
+        if domain.exists():
+            name = domain.read_text(encoding="utf-8").strip()
+            # 도메인 이름표에는 밑줄을 쓸 수 없다. 넣어 두면 인증서가 발급되지
+            # 않아 주소가 열리지 않는다.
+            assert "_" not in name, name
+            assert " " not in name and name.count(".") >= 1, name
+
     def test_the_app_survives_a_subfolder(self) -> None:
         """Pages 주소는 /저장소이름/ 아래다. 절대경로가 하나라도 있으면 깨진다."""
         page = (ROOT / "webapp/app/index.html").read_text(encoding="utf-8")

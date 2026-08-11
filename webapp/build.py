@@ -311,6 +311,27 @@ def _write_help(target: Path) -> None:
     target.write_text(_markdown(source.read_text(encoding="utf-8")), encoding="utf-8")
 
 
+
+def _write_cname(target: Path) -> None:
+    """맞춤 도메인을 배포본에 넣는다.
+
+    GitHub Pages 는 배포된 파일 안의 ``CNAME`` 을 보고 도메인을 잡는다. 설정
+    화면에서 한 번 넣어 두어도, 워크플로가 올린 판에 이 파일이 없으면 배포할
+    때마다 도메인이 풀리는 일이 있다. 저장소에 적어 두면 그럴 일이 없다.
+
+    ``webapp/CNAME`` 이 없으면 아무것도 하지 않는다 — 도메인을 안 쓰는 동안에는
+    ``github.io`` 주소로 그냥 열린다.
+    """
+    source = Path(__file__).parent / "CNAME"
+    if not source.exists():
+        return
+    domain = source.read_text(encoding="utf-8").strip()
+    if not domain:
+        return
+    target.write_text(domain + "\n", encoding="utf-8")
+    print(f"  맞춤 도메인 {domain}")
+
+
 def build() -> Path:
     if DIST.exists():
         shutil.rmtree(DIST)
@@ -324,6 +345,7 @@ def build() -> Path:
     for name in ("index.html", "app.css", "app.js", "manifest.webmanifest"):
         shutil.copy2(APP / name, DIST / name)
     _write_help(DIST / "help.html")
+    _write_cname(DIST / "CNAME")
     (DIST / "icon-180.png").write_bytes(_png(180))
     (DIST / "icon-512.png").write_bytes(_png(512))
 
