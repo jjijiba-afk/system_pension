@@ -868,18 +868,39 @@ def _gen_features(request: dict) -> dict[str, Any]:
     걸린다. 기준 명부와의 채무 차이가 곧 그 특이사항이 만든 차이라, "이 숫자가
     왜 이렇게 나왔나" 에 답할 수 있는 유일한 시험 자료다.
     """
-    from .featurecases import BASE_SPEC, FEATURES, write_feature_pack
+    from .featurecases import (
+        BASE_DATE,
+        BASE_SPEC,
+        FEATURES,
+        measure_feature_pack,
+        report_text,
+        write_feature_rosters,
+    )
 
     seed = int(request.get("seed") or 20251231)
     base_date = _as_date(request.get("base_date"))
-    measure = request.get("measure", True)
+    measure = bool(request.get("measure", True))
     work = Path(request.get("work", "/work"))
     folder = work / "특이사항명부"
     if folder.exists():
         shutil.rmtree(folder)
-    made = write_feature_pack(
-        folder, seed=seed, base_date=base_date, measure=bool(measure)
+    made = write_feature_rosters(folder, seed=seed, base_date=base_date)
+
+    # 잰 값을 화면에도 **표로** 내보낸다. 안내문 글자를 그대로 띄우면 자릿수를
+    # 맞춘 고정폭 표라 좁은 화면에서 줄이 끊겨 읽을 수 없다.
+    rows: list[dict[str, Any]] = []
+    measured = measure_feature_pack(folder, base_date=base_date) if measure else []
+    for item in measured:
+        rows.append({
+            "name": item.name, "scope": item.scope, "dbo": item.dbo,
+            "change": item.change, "ratio": item.ratio,
+            "expect": item.expect, "moved": item.moved, "verdict": item.verdict,
+        })
+    report = folder / "특이사항_한가지씩_안내.txt"
+    report.write_text(
+        report_text(measured, base_date or BASE_DATE, seed), encoding="utf-8"
     )
+    made.append(report)
 
     target = work / f"특이사항명부_{seed}.zip"
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -889,7 +910,9 @@ def _gen_features(request: dict) -> dict[str, Any]:
     assumptions = str(folder / "기초율.xlsx")
     cases = [{
         "key": "기준", "title": BASE_SPEC.title, "scope": "—",
-        "summary": BASE_SPEC.summary,
+        "heading": "기준 (특이사항 없음)",
+        "detail": "아래 명부들은 모두 이 명부와 같은 사람이며 한 가지씩만 다릅니다.",
+        "expect": "", "why": "",
         "roster": str(folder / f"{BASE_SPEC.title}.xlsx"),
         "assumptions": assumptions, "force": False,
     }]
@@ -897,8 +920,8 @@ def _gen_features(request: dict) -> dict[str, Any]:
         name = f"{index}_{feature.key}"
         cases.append({
             "key": feature.key, "title": name, "scope": feature.scope,
-            "summary": f"{feature.title} — {feature.detail} "
-                       f"(적용: {feature.scope}, 기준 대비 {feature.expect})",
+            "heading": feature.title, "detail": feature.detail,
+            "expect": feature.expect, "why": feature.why,
             "roster": str(folder / f"{name}.xlsx"),
             "assumptions": assumptions,
             # 임금 단위 오류 명부만 검증에 걸린다.
@@ -909,8 +932,9 @@ def _gen_features(request: dict) -> dict[str, Any]:
         "path": str(target), "filename": target.name,
         "size": target.stat().st_size,
         "files": [path.name for path in made],
-        "base_date": str(base_date or ""),
-        "report": (folder / "특이사항_한가지씩_안내.txt").read_text(encoding="utf-8"),
+        "base_date": str(base_date or BASE_DATE),
+        "seed": seed,
+        "rows": rows,
         "cases": cases,
     }
 

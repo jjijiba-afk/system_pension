@@ -47,7 +47,7 @@ from .assumptions import (
 )
 from .config import CalculationConfig
 from .models import ActiveMember, Roster
-from .normalize import BenefitPlan
+from .normalize import BenefitPlan, text
 
 #: 사유별 규정이 없을 때 쓰는 빈 규정. 기본 지급률을 그대로 쓴다는 뜻이다.
 _NO_CAUSE: Final = CauseBenefit()
@@ -473,6 +473,23 @@ def value_member(
         )
         return frozen_service * frozen_rate + max(0.0, after)
 
+    def personal_factor(rule_name: str) -> float:
+        """명부의 개인 지급배수. 임원 2배수·3배수 규정이 이렇게 온다.
+
+        규정이 **수식 방식이고 식이 이미 `배수` 를 쓰고 있으면 1 을 돌려준다.**
+        식 안에서 한 번 곱한 것을 밖에서 또 곱하면 두 배수가 세 번 곱해진다.
+
+        기본 급여에만 건다. 가산(정액 위로금 등)은 배수와 무관한 별도 금액이고,
+        귀속비율은 배수를 곱해도 분자·분모가 같이 커져 변하지 않는다.
+        """
+        multiple = member.payout_multiple
+        if multiple == 1.0:
+            return 1.0
+        formula = assumptions.severance_benefit.formulas.get(text(rule_name or rule))
+        if formula is not None and "배수" in getattr(formula, "source", ""):
+            return 1.0
+        return multiple
+
     def parts_at(
         cause: CauseBenefit, service: float, age: float, wage: float
     ) -> tuple[float, float]:
@@ -482,7 +499,8 @@ def value_member(
         내는 배수를 따라 쌓이고, 가산은 사유에 따라 즉시 귀속될 수 있다.
         """
         service = max(service, cause.min_service)
-        base = multiple_at(service, age, cause.benefit_rule) * wage
+        base = (multiple_at(service, age, cause.benefit_rule) * wage
+                * personal_factor(cause.benefit_rule))
         extra = cause.extra_amount
         if cause.extra_rule:
             extra += multiple_at(service, age, cause.extra_rule) * wage

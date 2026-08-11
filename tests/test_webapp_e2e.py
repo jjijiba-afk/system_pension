@@ -887,6 +887,34 @@ def test_intro_dialog_points_at_the_library(browser, app_url) -> None:
     fresh.close()
 
 
+def test_feature_pack_shows_a_table_not_a_wall_of_text(page) -> None:
+    """특이사항 한 벌의 결과는 **표** 로 나와야 한다.
+
+    자릿수를 맞춘 고정폭 글자표를 그대로 띄우면 좁은 화면에서 한 줄이 세 줄로
+    끊겨, 어느 숫자가 어느 명부 것인지 알 수 없다.
+    """
+    page.click("#tab-lib")
+    open_section(page, "#lib-gen")
+    # 채무까지 재면 명부 열한 벌을 산출해야 해서 브라우저에서 몇 분 걸린다.
+    # 화면이 표로 그려지는지만 보면 되므로 여기서는 끄고 만든다.
+    page.uncheck("#feat-measure")
+    page.click("#feat-run")
+    page.wait_for_selector("#feat-cases fieldset", timeout=180_000)
+
+    page.click("#feat-report")
+    page.wait_for_selector("#feat-dialog[open]", timeout=10_000)
+    body = page.inner_text("#feat-body")
+    assert "특이사항 하나" in body
+    for word in ("가산근속", "중간정산", "DC전환"):
+        assert word in body, word
+    # 명부마다 카드가 하나씩. 기준 + 특이사항들.
+    assert page.locator("#feat-dialog .feat-card").count() >= 11
+
+    page.click("#feat-dialog button")
+    page.wait_for_selector("#feat-dialog", state="hidden", timeout=10_000)
+    page.click("#tab-calc")     # 다음 시험이 산출 화면에서 시작하도록 돌려 놓는다
+
+
 def test_both_screens_have_the_same_tabs(page) -> None:
     """아이패드 화면과 PC 본 화면의 탭이 같아야 한다.
 
@@ -979,6 +1007,7 @@ def test_help_opens_over_the_screen(page) -> None:
     산출 도중에 물어볼 것이 생기는데 다른 창으로 나가면 입력하던 것을 잃는다.
     겹쳐 뜨는지, 닫으면 하던 화면으로 그대로 돌아오는지 본다.
     """
+    page.click("#tab-calc")     # 앞 시험이 어느 탭에 있었든 여기서 시작한다
     page.fill("#base_date", "2025-12-31")          # 하던 입력
     page.click("#help-open")
     page.wait_for_selector("#help-body h1", timeout=15_000)

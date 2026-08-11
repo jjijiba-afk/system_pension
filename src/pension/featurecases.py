@@ -42,7 +42,9 @@ __all__ = [
     "FeatureSpec",
     "Measured",
     "measure_feature_pack",
+    "report_text",
     "write_feature_pack",
+    "write_feature_rosters",
 ]
 
 #: 방향 표시. 기준 명부보다 채무가 어느 쪽으로 움직여야 하는가.
@@ -213,12 +215,11 @@ FEATURES: Final[tuple[FeatureSpec, ...]] = (
     FeatureSpec(
         key="지급배수", title="임원 개인 지급배수 2.0",
         detail="임원 전원에게 개인 지급배수 2.0 을 건다.",
-        scope="임원", expect=FLAT,
-        why="이 칸은 지급률 규정이 **수식 방식** 이고 식에 `배수` 가 들어 있을 때만 "
-            "쓰인다. 이 벌의 규정은 표(누적) 방식이라 값이 있어도 산출에 닿지 "
-            "않는다 — 그래서 채무는 그대로여야 하고, 대신 검증이 "
-            "JAE_PAYOUT_MULTIPLE_FORMULA_ONLY 경고를 임원 수만큼 띄워야 한다. "
-            "채무가 움직였다면 표 방식에서도 배수를 먹었다는 뜻이다.",
+        scope="임원", expect=UP,
+        why="지급률 규정이 내는 배수에 명부의 배수가 곱해진다. 임원 몫이 정확히 "
+            "두 배가 되므로, 늘어난 금액은 기준 명부의 임원 채무와 같아야 한다 — "
+            "그것이 이 명부의 검산이다. 규정이 수식 방식이고 식이 이미 `배수` 를 "
+            "쓰고 있으면 밖에서 다시 곱하지 않는다(두 번 먹지 않게).",
     ),
     FeatureSpec(
         key="정년연장", title="임원 정년 68세 (명부가 직군 규칙을 덮음)",
@@ -398,7 +399,7 @@ def measure_feature_pack(
     return rows
 
 
-def _report(rows: list[Measured], base: _dt.date, seed: int) -> str:
+def report_text(rows: list[Measured], base: _dt.date, seed: int) -> str:
     lines = [
         "특이사항 한 가지씩 — 시험 명부 한 벌",
         "=" * 66,
@@ -486,10 +487,10 @@ def write_feature_pack(
     report = directory / "특이사항_한가지씩_안내.txt"
     rows = measure_feature_pack(directory, base_date=base) if measure else []
     if rows:
-        report.write_text(_report(rows, base, seed), encoding="utf-8")
+        report.write_text(report_text(rows, base, seed), encoding="utf-8")
     else:
         report.write_text(
-            _report(
+            report_text(
                 [Measured(name=BASE_SPEC.title, title="기준", scope="—",
                           dbo=0.0, service_cost=0.0, headcount=0, errors=0)],
                 base, seed,

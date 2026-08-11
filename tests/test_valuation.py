@@ -120,6 +120,45 @@ class TestSingleDecrementCase:
         expected = total * 1_000_000 * (1.03**10) * (past / total) / (1.05**10)
         assert result.dbo == pytest.approx(expected, rel=1e-9)
 
+    def test_a_personal_multiple_scales_the_benefit(
+        self, config: CalculationConfig
+    ) -> None:
+        """명부의 개인 지급배수는 규정이 내는 배수에 곱해진다.
+
+        임원 퇴직금 규정이 '평균임금 × 근속 × 2배' 인 회사가 명부에 배수만 적어
+        보낸다. 곱하지 않으면 그 사람 채무가 절반으로 잡히는데, 검증에도 안
+        걸리고 총액만 조금 작아져 눈에 띄지 않는다.
+        """
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        plain = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+
+        member.payout_multiple = 2.0
+        doubled = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+
+        assert doubled.dbo == pytest.approx(plain.dbo * 2, rel=1e-9)
+        assert doubled.service_cost == pytest.approx(plain.service_cost * 2, rel=1e-9)
+        # 배수는 급여만 키운다. 귀속비율은 분자·분모가 같이 커져 그대로다.
+        assert doubled.past_service == plain.past_service
+
+    def test_a_formula_that_already_uses_the_multiple_is_not_scaled_twice(
+        self, config: CalculationConfig
+    ) -> None:
+        """식이 `배수` 를 직접 쓰면 밖에서 다시 곱하지 않는다 — 두 번 먹는다."""
+        from pension.assumptions import Formula
+
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        member.rules.severance_benefit = "임원"
+        member.payout_multiple = 2.0
+
+        assumptions = make_assumptions(discount=0.05, salary=0.0)
+        assumptions.severance_benefit.formulas["임원"] = Formula("t * 배수")
+        result = value_member(member, config, assumptions)
+
+        past = result.past_service
+        total = past + 10
+        expected = total * 2 * 1_000_000 * (past / total) / (1.05**10)
+        assert result.dbo == pytest.approx(expected, rel=1e-9)
+
     def test_interest_cost_is_dbo_times_discount_rate(self, config: CalculationConfig) -> None:
         member = make_member()
         result = value_member(member, config, make_assumptions(discount=0.05))

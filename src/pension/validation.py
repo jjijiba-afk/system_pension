@@ -402,10 +402,11 @@ def validate_active(
 
         if member.payout_multiple and member.payout_multiple != 1.0:
             log.warning(
-                "JAE_PAYOUT_MULTIPLE_FORMULA_ONLY",
-                f"개인 지급배수 {member.payout_multiple:g} 는 지급률 규정이 "
-                "**수식 방식** 이고 식에 `배수` 가 들어 있을 때만 쓰입니다. "
-                "표(누적·누진) 방식 규정에서는 무시되어 산출에 반영되지 않습니다",
+                "JAE_PAYOUT_MULTIPLE_APPLIED",
+                f"개인 지급배수 {member.payout_multiple:g} 가 지급률 규정이 내는 "
+                "배수에 **곱해집니다.** 규정 자체에 이미 배수가 들어 있으면 두 번 "
+                "곱해지니, 규정과 맞는지 확인하세요 (수식 방식 규정이 식에서 "
+                "`배수` 를 직접 쓰고 있으면 밖에서 다시 곱하지 않습니다)",
                 column=_col(sheet, "payout_multiple"),
                 value=member.payout_multiple, **kw,
             )

@@ -2905,17 +2905,72 @@ $("feat-download").addEventListener("click", () => {
 });
 
 $("feat-report").addEventListener("click", () => {
-  if (!features) return;
-  $("report-title").textContent = "특이사항 한 가지씩 — 안내문";
-  $("report-body").textContent = features.report;
-  $("report-dialog").showModal();
+  if (features) $("feat-dialog").showModal();
 });
 
+// 잰 값은 **표로** 그린다. 자릿수를 맞춘 고정폭 글자표를 그대로 띄우면 좁은
+// 화면에서 한 줄이 세 줄로 끊겨, 어느 숫자가 어느 명부 것인지 알 수 없다.
+function featureTable() {
+  const rows = features.rows || [];
+  if (!rows.length) {
+    return el("p", { class: "hint" },
+      "[확정급여채무까지 재기] 를 켜고 다시 만들면 여기에 채무 표가 나옵니다.");
+  }
+  const head = el("tr", {},
+    ...["명부", "범위", "확정급여채무", "기준 대비", "판정"]
+      .map((h) => el("th", {}, h)));
+  const body = rows.map((r) => {
+    const diff = r.change
+      ? `${r.change > 0 ? "+" : "−"}${won(Math.abs(r.change))}` +
+        `\n(${(r.ratio * 100).toFixed(2)}%)`
+      : (r.name === rows[0].name ? "" : "±0");
+    const mark = r.verdict === "어긋남" ? "✕ 어긋남"
+      : r.verdict === "맞음" ? "✓ 맞음" : "—";
+    return el("tr", { class: r.verdict === "어긋남" ? "bad" : "" },
+      el("td", {}, r.name),
+      el("td", {}, r.scope),
+      el("td", { class: "num" }, won(r.dbo)),
+      el("td", { class: "num", style: "white-space:pre-line" }, diff),
+      el("td", {}, `${r.expect || "—"}\n${mark}`));
+  });
+  const table = el("table", { class: "data" }, head, ...body);
+  table.querySelectorAll("td:last-child").forEach((cell) => {
+    cell.style.whiteSpace = "pre-line";
+  });
+  return el("div", { class: "scroll-x" }, table);
+}
+
 function renderFeatures() {
+  // 창 안 — 표 하나와 명부별 설명 카드.
+  const parts = [
+    el("p", { class: "hint" },
+      `산출기준일 ${features.base_date} · 난수 씨앗 ${features.seed}. ` +
+      "명부 하나에 특이사항 하나만 담았고, 사람과 기초율은 모두 같습니다. " +
+      "그래서 기준 명부와의 차이가 곧 그 특이사항이 만든 차이입니다."),
+    featureTable(),
+    el("p", { class: "hint" },
+      "확정급여채무는 이 프로그램이 낸 값입니다 — 손으로 검산한 '정답' 이 아니라 " +
+      "기준값입니다. 실제로 검산이 되는 것은 [판정] 입니다. 사람도 가정도 같고 한 " +
+      "칸만 달라졌으므로 어느 쪽으로 움직여야 하는지는 계산 없이도 알 수 있습니다. " +
+      "✕ 가 하나라도 있으면 그 명부부터 보십시오."),
+  ];
+  for (const item of features.cases) {
+    const card = el("div", { class: "feat-card" },
+      el("b", {}, `${item.title} — ${item.heading}`),
+      el("div", { class: "hint" }, item.detail));
+    if (item.expect) {
+      card.append(el("div", { class: "hint" },
+        `적용 범위 ${item.scope} · 기대 ${item.expect} — ${item.why}`));
+    }
+    parts.push(card);
+  }
+  $("feat-body").replaceChildren(...parts);
+
+  // 화면 아래 — 바로 산출로 넘길 수 있게.
   $("feat-cases").replaceChildren(...features.cases.map((item) => {
     const box = el("fieldset", {},
       el("legend", {}, `${item.title}  ·  ${item.scope}`),
-      el("div", { class: "hint" }, item.summary),
+      el("div", { class: "hint" }, `${item.heading} — ${item.detail}`),
       el("div", { class: "toolbar" },
         el("button", { class: "small primary", type: "button",
           onclick: () => useGenerated(item) }, "이 명부로 산출 준비")));

@@ -610,6 +610,15 @@
 <div id="runs-list"></div>
 </section>
 
+<!-- 특이사항 한 벌의 결과. 안내문 글자를 그대로 띄우면 자릿수를 맞춘 고정폭
+     표라 좁은 화면에서 줄이 끊긴다 — 표는 표로 그린다. -->
+<dialog id="feat-dialog" style="width:94vw;max-width:980px">
+  <h1 style="font-size:1.05rem">특이사항 한 가지씩 — 결과</h1>
+  <div id="feat-body"></div>
+  <button class="big secondary" type="button"
+    onclick="this.closest('dialog').close()">닫기</button>
+</dialog>
+
 <dialog id="report-dialog">
   <h1 style="font-size:1.05rem" id="report-title"></h1>
   <pre id="report-body" style="white-space:pre-wrap;font-size:0.86rem;line-height:1.5"></pre>
