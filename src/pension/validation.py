@@ -2,12 +2,12 @@
 
 두 갈래의 검증을 하나로 합쳤다.
 
-* 종전 규칙 ``모듈``/``모듈`` 가 ``메시지`` + ``check = 1`` 로 처리하던 치명적
+* 종전 규칙이 메시지를 띄우고 산출을 멈추던 치명적
   오류(사번 중복, 직군 미매칭, 연령 범위, 평균임금 하한, 입사일 > 기준일 등).
 * ``검증요약`` 시트가 수식으로 집계하던 항목(필수값 누락, 날짜 선후관계,
   사외자산 지급액 > 총지급액 등).
 
-종전 규칙 는 첫 오류에서 멈추지만 여기서는 전부 모아 한 번에 돌려준다. 담당자가
+종전 규칙은 첫 오류에서 멈추지만 여기서는 전부 모아 한 번에 돌려준다. 담당자가
 명부를 한 번만 손보면 되도록 하는 것이 목적이다.
 """
 
@@ -104,9 +104,9 @@ def _check_names(members, sheet: str, log: IssueLog, code: str) -> bool:
 def _check_duplicate_ids(members, sheet: str, log: IssueLog, code: str) -> None:
     """사번 중복 검사.
 
-    종전 규칙 는 이중 루프로 O(n²) 비교를 한 뒤 첫 중복에서 멈춘다. 여기서는 사번별로
+    종전 규칙은 첫 중복에서 멈춘다. 여기서는 사번별로
     묶어 한 번에 훑고, 중복된 사번을 모두 보고한다. 사번이 비어 있는 행은
-    종전 규칙 와 같이 중복 검사에서 제외한다(뒤에서 자동 생성하기 때문).
+    중복 검사에서 제외한다(뒤에서 자동 생성하기 때문).
     """
     buckets: dict[str, list] = defaultdict(list)
     for member in members:
@@ -279,7 +279,7 @@ def validate_active(
     for member in members:
         kw = dict(sheet=sheet, row=member.row, seq=member.seq, employee_id=member.employee_id)
 
-        # ── 직군 매칭 (종전 규칙: 미매칭이면 산출 중단) ──────────────────
+        # ── 직군 매칭 (미매칭이면 산출 중단) ───────────────────────
         rule = None
         if member.job_group_index is None:
             if not config.job_group_rules:
@@ -320,7 +320,7 @@ def validate_active(
                         column=_col(sheet, "transfer_in_date"),
                         value=member.transfer_in_date, **kw)
 
-        # ── 연령 (종전 규칙: 15세 미만 / 100세 초과는 산출 중단) ─────────
+        # ── 연령 (15세 미만 / 100세 초과는 산출 중단) ──────────────
         if member.birth_date:
             member.age = attained_age(member.birth_date, config.base_date)
             if not config.min_age <= member.age <= config.max_age:
@@ -340,7 +340,7 @@ def validate_active(
                         column=_col(sheet, "hire_date"), value=member.hire_date, **kw,
                     )
 
-        # ── 임금 (종전 규칙: 체크금액 미만이거나 0 이면 산출 중단) ───────
+        # ── 임금 (체크금액 미만이거나 0 이면 산출 중단) ────────────
         if member.monthly_wage <= 0:
             if longterm_only:
                 # 장기급여 전용 명부라 임금·제도구분이 비는 것이 정상이다.
@@ -366,7 +366,7 @@ def validate_active(
                 column=_col(sheet, "monthly_wage"), value=member.monthly_wage, **kw,
             )
 
-        # ── 제도구분 (종전 규칙: 공란이면 산출 중단) ─────────────────────
+        # ── 제도구분 (공란이면 산출 중단) ──────────────────────────
         if member.plan is None and not longterm_only:
             detail = (
                 f"'{member.plan_raw}' 은(는) 해석할 수 없는 값입니다"
@@ -378,7 +378,7 @@ def validate_active(
                       column=_col(sheet, "plan"), value=member.plan_raw, **kw)
 
         # 추가지급 기본급은 '기본급' 인데 산출은 이것을 **정액 지급액** 으로
-        # 급여에 더한다. 원본 종전 규칙 의 배수 규칙을 알 수 없어 그대로 두었으므로,
+        # 급여에 더한다. 종전 배수 규칙을 알 수 없어 그대로 두었으므로,
         # 값이 있는 사람은 담당자가 의도를 확인해야 한다.
         if member.extra_pay_base_wage:
             log.warning(

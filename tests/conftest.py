@@ -34,7 +34,7 @@ RETIRED_ROWS = [
 
 
 def _write_input(ws) -> None:
-    ws["A1"] = "■ 명부 vba작업 Input 사항"
+    ws["A1"] = "■ 명부 작성 Input 사항"
     ws["B3"], ws["C3"] = "산출기준일", BASE_DATE
     ws["B5"], ws["C5"] = "평균임금 첵크금액", 1_000_000
 

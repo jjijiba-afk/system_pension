@@ -1,6 +1,6 @@
 """업로드 명부(``UpLoad_Jae``/``UpLoad_Toi``) 생성.
 
-종전 규칙 의 "Upload 명부 Write" 구간을 옮긴 것이다. 열 순서는 원본 시트 헤더와
+정리된 명부를 쓰는 구간이다. 열 순서는 종전 시트 헤더와
 1:1 로 맞춰 두었으므로, 기존 업로드 절차를 그대로 쓸 수 있다.
 """
 
@@ -49,14 +49,14 @@ RETIRED_UPLOAD_HEADERS: Final[tuple[str, ...]] = (
 def _generated_id(member: ActiveMember | RetiredMember) -> str:
     """사번이 비어 있을 때 쓰는 대체 키.
 
-    종전 규칙: ``c_sabeon(jc) = c_sex(jc) & c_jumin(jc) & c_nm(jc)`` (성별+생년월일+성명).
+    성별+생년월일+성명을 이어 붙인다.
     """
     birth = member.birth_date.strftime("%Y%m%d") if member.birth_date else "00000000"
     return f"{member.gender.value}{birth}{member.name}"
 
 
 def _date_cell(value: _dt.date | None) -> _dt.date | str:
-    """빈 날짜는 종전 규칙 와 같이 빈 문자열로 쓴다(0 또는 1900-01-00 방지)."""
+    """빈 날짜는 빈 문자열로 쓴다(0 또는 1900-01-00 방지)."""
     return value if value is not None else ""
 
 
@@ -68,7 +68,7 @@ def build_active_upload(
 ) -> list[list[Any]]:
     """재직자 업로드 행 목록을 만든다.
 
-    종전 규칙 와 같이 입사일이 산출기준일보다 늦은 사람은 제외한다.
+    입사일이 산출기준일보다 늦은 사람은 제외한다.
 
     :param fill_missing_ids: 사번이 비면 성별+생년월일+성명으로 채운다.
         ``UpLoad_Jae`` 시트 안내문("사번 공란 시 시스템 업로드 사번도 공란
@@ -132,7 +132,7 @@ def build_retired_upload(
 ) -> list[list[Any]]:
     """퇴직자 업로드 행 목록을 만든다.
 
-    종전 규칙 와 같이 퇴사일이 산출기준일보다 늦은 사람은 제외한다.
+    퇴사일이 산출기준일보다 늦은 사람은 제외한다.
     """
     rows: list[list[Any]] = []
     for member in members:

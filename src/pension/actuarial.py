@@ -1,6 +1,6 @@
 """연령·근속·정년연령 계산.
 
-종전 규칙 가 명부 읽기 루프 안에 인라인으로 흩어 놓은 계산식을 함수로 분리했다.
+명부 읽기 루프 안에 흩어져 있던 계산식을 함수로 분리했다.
 """
 
 from __future__ import annotations
@@ -189,7 +189,7 @@ def normal_retirement_age(
 def longterm_retirement_age(age: int, rule: JobGroupRule) -> int:
     """장기급여 정년연령.
 
-    퇴직급여와 달리 임금피크 연령을 보지 않는다(종전 규칙 동일).
+    퇴직급여와 달리 임금피크 연령을 보지 않는다.
     """
     if age >= rule.longterm_nra:
         return age + rule.over_nra_add_age

@@ -1,6 +1,6 @@
 """``Input`` 시트에서 산출 기준을 읽어온다.
 
-종전 규칙 는 이 값들을 규칙 실행 때마다 ``Cells(3, 3).Value`` 처럼 직접 읽는다.
+종전 규칙은 이 값들을 시트 좌표로 직접 읽었다.
 여기서는 한 번 읽어 :class:`CalculationConfig` 로 고정한 뒤 파이프라인 전체에
 넘긴다.
 """
@@ -20,7 +20,7 @@ INPUT_SHEET = "Input"
 #: 직군 규칙 테이블의 첫 데이터 행(``Input`` B12).
 _RULE_FIRST_ROW = 12
 
-#: 종전 규칙 가 훑는 직군 행 수 상한(``직군수`` 배열이 1 To 25 로 선언되어 있다).
+#: 훑는 직군 행 수 상한.
 _RULE_MAX_ROWS = 25
 
 
@@ -133,9 +133,9 @@ class CalculationConfig:
     """``Input`` 시트 없이 명부에서 끌어낸 설정인지. 참이면 직군 규칙이 잠정값이다."""
 
     min_age: int = 15
-    """허용 최소 만 연령. 종전 규칙 하드코딩 값."""
+    """허용 최소 만 연령. 한계값."""
     max_age: int = 100
-    """허용 최대 만 연령. 종전 규칙 하드코딩 값."""
+    """허용 최대 만 연령. 한계값."""
 
     _by_source: dict[str, tuple[int, JobGroupRule]] = field(
         default_factory=dict, init=False, repr=False
@@ -227,7 +227,7 @@ class CalculationConfig:
         규칙 없이 남는다. 직군이라도 맞는 규칙을 쓰는 편이 기본값으로 떨어지는
         것보다 낫다.
 
-        종전 규칙 는 직군 완전일치 하나만 보았다. 임원의 직군이 '정규직' 으로 적혀
+        종전 규칙은 직군 완전일치 하나만 보았다. 임원의 직군이 '정규직' 으로 적혀
         오는 명부가 있어 임원을 갈라낼 수 없었다.
 
         원문까지 보는 이유는 정규화가 `임원`/`직원` 둘로만 줄이기 때문이다.
@@ -362,7 +362,7 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET, *,
     rules: list[JobGroupRule] = []
     for offset in range(_RULE_MAX_ROWS):
         row = _RULE_FIRST_ROW + offset
-        # 종전 규칙 는 CountA(C12:C26) 으로 행 수를 세지만, 중간에 빈 행이 있으면
+        # 행 수를 세어 읽으면 중간에 빈 행이 있을 때
         # 뒤쪽 직군을 통째로 놓친다. 여기서는 전 구간을 훑고 빈 행만 건너뛴다.
         source_name = text(ws.cell(row, 2).value)
         mapped_name = text(ws.cell(row, 3).value)

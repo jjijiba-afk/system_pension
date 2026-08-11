@@ -1,6 +1,6 @@
 """실제 명부에서 드러난 사례들.
 
-290명 재직·28명 퇴직 규모의 실제 명부를 돌려 보고 고친 것들이다. 샘플 명부로는
+규모가 큰 명부를 돌려 보고 고친 것들이다. 샘플 명부로는
 나오지 않던 형태라, 같은 오탐이 되살아나지 않도록 여기에 고정해 둔다.
 """
 
@@ -182,7 +182,7 @@ class TestPayoutMultiple:
 
 
 class TestWagePeakRetirementAge:
-    """임금피크 연령이 정년보다 앞서면 그 나이를 정년으로 본다(종전 규칙 동일)."""
+    """임금피크 연령이 정년보다 앞서면 그 나이를 정년으로 본다."""
 
     def test_wage_peak_age_wins_when_it_is_ahead(self, config) -> None:
         log = IssueLog()

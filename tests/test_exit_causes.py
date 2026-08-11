@@ -3,10 +3,10 @@
 자료요청서 6번에는 사유가 세 줄로 갈려 있고, 실제로 다르게 적어 보내는 회사가
 많다. 스터디 자료에서 확인한 것들::
 
-    6번 케이스   사망시   '동일, 정액 가산금 5,000만원'
+    사망 정액 가산   사망시   '동일, 정액 가산 있음'
     15번 케이스  사망시   '근속10년 미만 기본급 3개월분, 10년 이상 5개월분 가산'
                           '재직 중 사망으로 퇴직 시 1년 미만도 1년으로 계산'
-    12번 케이스  정년시   '임원 배수 별도'
+    임원 배수 별도   정년시   '임원은 배수 별도'
     21번 케이스  정년시   기본급 추가지급
 
 사유를 뭉뚱그리면 어느 규정을 적용할지 정할 수 없다. 여기서는 **갈라 놓아도
@@ -98,7 +98,7 @@ class TestNoCauseRulesChangesNothing:
 
 
 class TestDeathGrant:
-    """6번 케이스 — '동일, 정액 가산금 5,000만원'."""
+    """사망 정액 가산 — '동일, 정액 가산 있음'."""
 
     def test_flat_grant_raises_the_obligation(self, config: CalculationConfig) -> None:
         plain = make_assumptions(discount=0.045, withdrawal=0.05, mortality=0.01)

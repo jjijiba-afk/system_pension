@@ -569,7 +569,7 @@ def value_member(
         if extra:
             if cause.attribution_basis(cause_name) == ATTRIB_IMMEDIATE:
                 # 근속을 더 쌓아도 늘지 않는 급여다. **오늘 근속으로 재어** 그만큼
-                # 전액 귀속한다. 정액 가산금 5,000만원처럼 근속과 무관하면 언제나
+                # 전액 귀속한다. 근속과 무관한 정액이면 언제나
                 # 전액이고, '10년 미만 3개월분 / 이상 5개월분' 처럼 근속에 따라
                 # 계단이 있으면 지금 올라선 칸까지만 잡힌다.
                 _, earned = parts_at(cause, past_service, exit_age, wage)

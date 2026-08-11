@@ -101,6 +101,55 @@ class TestStripping:
                 assert archive.namelist() == ["pension/engine.py"]
 
 
+class TestNothingIdentifiesAClient:
+    """받은 명부·회사 자료의 특징이 저장소 어디에도 남아 있지 않은지.
+
+    지우는 것만으로는 다시 들어오는 것을 막지 못한다. 예시를 하나 적을 때마다
+    손에 있는 실제 자료에서 가져오게 되므로, **여기서 못 박아 두어야** 다음에
+    같은 일이 되풀이되지 않는다.
+    """
+
+    #: 특정 단체가 떠오르게 하는 말. 예시는 모양만 남기고 금액·직위를 뺀다.
+    FORBIDDEN = (
+        "정액 가산금", "현물", "기념품", "별정", "정규사원",
+        "임원 배수 별도", "임원 배수 별도", "명부 통합문서 "xlsm)가",
+        "종전 규칙", "규칙 이식", "메시지", "산출중단", "직군수",
+    )
+
+    def _files(self):
+        for folder, patterns in (
+            ("src/pension", ("*.py", "*/*.py")),
+            ("tests", ("*.py",)),
+            ("docs", ("*.md",)),
+            ("webapp/app", ("*.js", "*.html", "*.css")),
+            (".", ("README.md",)),
+        ):
+            for pattern in patterns:
+                yield from (ROOT / folder).glob(pattern)
+
+    def test_no_client_specific_wording(self) -> None:
+        found = []
+        for path in self._files():
+            if path.name == "test_release_hygiene.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            for word in self.FORBIDDEN:
+                if word in text:
+                    found.append(f"{path.relative_to(ROOT)}: {word}")
+        assert found == [], found
+
+    def test_no_original_macro_sources(self) -> None:
+        """받은 통합문서에서 뽑아낸 모듈은 저장소에 두지 않는다."""
+        assert not list(ROOT.glob("vba/*"))
+        assert not list(ROOT.glob("**/*.bas"))
+
+    def test_no_raw_rosters(self) -> None:
+        for pattern in ("**/*.csv", "**/*.xlsm", "**/*.xls"):
+            stray = [p for p in ROOT.glob(pattern)
+                     if ".git" not in p.parts and "node_modules" not in p.parts]
+            assert stray == [], stray
+
+
 class TestPackagingLeavesNoTrail:
     """꾸러미 설정이 출처를 실어 나르지 않는지."""
 
@@ -115,12 +164,11 @@ class TestPackagingLeavesNoTrail:
         assert "optimize=2" in spec
 
     def test_only_user_facing_docs_are_shipped(self) -> None:
-        """개발 메모는 종전 규칙의 파일명과 구조가 적힌 것이다."""
+        """개발 메모를 통째로 실어 나르지 않는지."""
         flow = (ROOT / ".github/workflows/build-exe.yml").read_text(encoding="utf-8")
         copied = "".join(
             line for line in flow.splitlines() if "Copy-Item" in line or "docs/" in line)
         assert "docs/*.md" not in copied
-        assert "docs/vba-mapping.md" not in copied
         for name in ("사용설명서", "계리방법론", "지급률규정-작성법"):
             assert f"docs/{name}.md" in copied
 

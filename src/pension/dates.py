@@ -1,6 +1,6 @@
 """명부 날짜 문자열 정규화.
 
-원본 종전 규칙(``모듈``/``모듈``)는 생년월일·입사일·중간정산일·전입일·추가지급
+종전 규칙은 생년월일·입사일·중간정산일·전입일·추가지급
 기준일·퇴사일·사외자산 지급일마다 동일한 ``Select Case Len(datetr)`` 블록을
 복사해 두었다(모듈당 4~5회, 총 900줄 이상). 이 모듈은 그 판정 규칙을 한 곳으로
 모은 것이다.
@@ -15,7 +15,6 @@
    즉 기준일이 2025-12-31이면 ``25`` 는 2025년, ``26`` 은 1926년이다.
 
 원본 대비 수정한 점은 :func:`parse_roster_date` 의 docstring 과
-``docs/vba-mapping.md`` 에 정리했다.
 """
 
 from __future__ import annotations
@@ -80,10 +79,10 @@ def parse_roster_date(value: object, base_year: int) -> _dt.date | None:
     :returns: 해석된 날짜. 빈 값이면 ``None``.
     :raises DateParseError: 어떤 형식으로도 해석할 수 없을 때.
 
-    지원 형식은 원본 종전 규칙 주석에 열거된 것과 같다(``mdd``, ``mmdd``, ``ymmdd``,
+    지원 형식은 다음과 같다(``mdd``, ``mmdd``, ``ymmdd``,
     ``yymmdd``, ``yy.m.d``, ``yyyy.mm.dd``, ``yyyy.mm.dd일`` 등 길이 3~11).
 
-    원본과 달라지는 부분이 하나 있다. 길이 8의 ``yy.mm.d일`` 형식에서 종전 규칙 는
+    종전 규칙과 달라지는 부분이 하나 있다. 길이 8의 ``yy.mm.d일`` 형식에서 종전 규칙은
     생년월일·중간정산일·전입일·추가지급기준일 블록이 일자를 ``Mid(s, 6, 1)``
     (구분자 ``.``)에서 읽어 항상 실패하고, 입사일 블록만 ``Mid(s, 7, 1)`` 로 옳게
     읽는다. 여기서는 올바른 ``7`` 번째 위치로 통일했다.
@@ -105,7 +104,7 @@ def parse_roster_date(value: object, base_year: int) -> _dt.date | None:
         # 오류가 225건 났다. 엑셀 일련번호 0(1899-12-30)일 리도 없다.
         if value == 0:
             return None
-        # 종전 규칙 는 셀 값을 String 변수(datetr)로 받으므로 숫자 셀은 자릿수 기반
+        # 셀 값을 글자로 받으면 숫자 셀은 자릿수 기반
         # 판정을 탄다(19801231 → yyyymmdd, 801231 → yymmdd). 날짜 서식이 잡힌
         # 셀은 openpyxl 이 이미 datetime 으로 넘겨주므로 위에서 처리된다.
         if value != int(value):
@@ -121,7 +120,7 @@ def parse_roster_date(value: object, base_year: int) -> _dt.date | None:
 
 
 def _parse_text(s: str, base_year: int, raw: str) -> _dt.date:
-    """길이 기반 형식 판정. 종전 규칙 ``Select Case leng`` 의 이식."""
+    """길이 기반 형식 판정."""
     leng = len(s)
 
     if leng == 3:  # mdd (2000년 기준)
@@ -170,7 +169,7 @@ def _parse_text(s: str, base_year: int, raw: str) -> _dt.date:
         if _is_digit(s, 5):
             if _is_digit(s, 8):  # yy.mm.dd
                 return _ymd(year, _num(s, 4, 2, raw), _num(s, 7, 2, raw), raw)
-            # yy.mm.d일 — 종전 규칙 는 여기서 Mid(s, 6, 1)(구분자)을 읽는 버그가 있다.
+            # yy.mm.d일 — 종전 규칙은 여기서 구분자를 읽는 버그가 있다.
             return _ymd(year, _num(s, 4, 2, raw), _num(s, 7, 1, raw), raw)
         # yy.m.dd일
         return _ymd(year, _num(s, 4, 1, raw), _num(s, 6, 2, raw), raw)

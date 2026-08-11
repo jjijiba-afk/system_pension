@@ -1,6 +1,6 @@
 """명부 코드값 정규화.
 
-종전 규칙 는 임직원구분·성별·퇴직사유를 여러 표기로 받아 표준값으로 바꾼다. 여기서는
+임직원구분·성별·퇴직사유는 여러 표기로 들어온다. 여기서는
 그 매핑을 한 곳에 모으고, 워크시트 수식으로만 존재하던 제도구분 변환
 (``퇴직자명부`` M14/M15 셀 주석)까지 코드로 옮겼다.
 """
@@ -86,19 +86,19 @@ _REASON_LABELS: Final[dict[RetirementReason, str]] = {
     RetirementReason.DISPOSAL: "사업처분/분할",
 }
 
-# 종전 규칙: rvar = "Y"/"y"/"임원"/"임"/2 이면 임원, 그 외 전부 직원.
+# "Y"/"y"/"임원"/"임"/2 이면 임원, 그 외 전부 직원.
 _EXECUTIVE_TOKENS: Final[frozenset[str]] = frozenset({"y", "임원", "임", "2"})
 
-# 종전 규칙: rvar = "녀"/"여"/"여자"/"여성"/2/4/6/8 이면 여자, 그 외 전부 남자.
+# "녀"/"여"/"여자"/"여성"/2/4/6/8 이면 여자, 그 외 전부 남자.
 # 숫자 코드는 주민등록번호 뒤 첫 자리 규약(짝수=여자)을 따른다.
 _FEMALE_TOKENS: Final[frozenset[str]] = frozenset({"녀", "여", "여자", "여성", "f", "2", "4", "6", "8"})
 
 
 def normalize_employee_type(value: object) -> EmployeeType:
-    """임직원구분 정규화. 판정되지 않는 값은 종전 규칙 와 같이 '직원' 으로 본다.
+    """임직원구분 정규화. 판정되지 않는 값은 '직원' 으로 본다.
 
     실제 명부에는 ``임원(별정)``, ``정규사원``, ``촉탁사원`` 처럼 회사 나름의
-    표기가 들어온다. 종전 규칙 는 완전일치만 보아 ``임원(별정)`` 을 직원으로
+    표기가 들어온다. 완전일치만 보면 ``임원(별정)`` 이 직원으로
     분류했는데, 임원은 정년·지급배수가 달라 그대로 두면 채무가 어긋난다.
     그래서 ``임원`` 으로 **시작하는** 값도 임원으로 본다.
     """
@@ -112,7 +112,7 @@ def normalize_employee_type(value: object) -> EmployeeType:
 
 
 def normalize_gender(value: object) -> Gender:
-    """성별 정규화. 판정되지 않는 값은 종전 규칙 와 같이 '남자' 로 본다."""
+    """성별 정규화. 판정되지 않는 값은 '남자' 로 본다."""
     token = text(value).lower()
     return Gender.FEMALE if token in _FEMALE_TOKENS else Gender.MALE
 
@@ -144,11 +144,11 @@ def normalize_benefit_plan(value: object) -> BenefitPlan | None:
 def normalize_retirement_reason(value: object) -> RetirementReason | None:
     """지급(퇴직)사유 정규화.
 
-    종전 규칙 는 셀 앞 두 글자만 잘라(``Left(cell, 2)``) 판정한다. 그래서 '중도퇴직'은
+    앞 두 글자만 잘라 판정한다. 그래서 '중도퇴직'은
     '중도', '사업처분/분할'은 '사업' 으로 매칭된다. 같은 규칙을 유지하되
     '계약만료'(→ 중도퇴직) 처럼 시트 수식에만 있던 대응도 함께 처리한다.
 
-    ``'임금'``(임금피크제도에 따른 중간정산)은 종전 규칙 를 따라 4(정년퇴직)로 본다.
+    ``'임금'``(임금피크제도에 따른 중간정산)은 4(정년퇴직)로 본다.
     :func:`is_ambiguous_reason` 도 함께 참고할 것.
     """
     token = text(value)
@@ -171,9 +171,9 @@ def normalize_retirement_reason(value: object) -> RetirementReason | None:
 
 
 def is_ambiguous_reason(value: object) -> bool:
-    """종전 규칙 규칙과 시트 수식의 분류가 어긋나는 지급사유인지.
+    """앞 두 글자 규칙과 시트 수식의 분류가 어긋나는 지급사유인지.
 
-    '임금피크제도에 따른 중간정산'은 종전 규칙 ``Case "4", "정년", "임금"`` 에 따라
+    '임금피크제도에 따른 중간정산'은 앞 두 글자 규칙에 따라
     4(정년퇴직)로 분류되지만, 같은 통합문서 ``퇴직자명부`` AC18 수식은 3(DC전환/
     당기 중간정산 후 퇴직)으로 분류한다. 어느 쪽이 맞는지는 규정에 달렸으므로
     자동으로 고르지 않고 검증 단계에서 경고로 알린다.
