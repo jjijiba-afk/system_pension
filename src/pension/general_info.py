@@ -43,6 +43,9 @@ __all__ = [
 ]
 
 GENERAL_SHEET = "일반사항"
+#: 같은 내용을 담은 다른 시트 이름들. 새 양식은 규정과 자산을 갈라 두었다 —
+#: 한 시트에 규정·자산·기간이 섞여 있어 어디를 채울지 보이지 않았기 때문이다.
+GENERAL_SHEET_ALIASES: tuple[str, ...] = (GENERAL_SHEET, "사외적립자산", "퇴직급여규정")
 
 #: 6번 항목의 행 배치. 자료요청서 서식이 고정되어 있어 행 번호로 찾는다.
 _ROWS = {
@@ -368,9 +371,16 @@ def _find_item_row(ws, needle: str, start: int = 1, limit: int = 200) -> int:
 
 
 def _row_label(ws, row: int) -> str:
-    """그 행의 항목 이름. 구분 열(B~D) 중 글자가 있는 마지막 칸을 쓴다."""
+    """그 행의 항목 이름. 구분 열(B~D) 중 글자가 있는 마지막 칸을 쓴다.
+
+    **숫자 칸은 이름이 아니다.** 새 서식은 이름 바로 옆에 금액이 붙어 있어,
+    숫자를 걸러내지 않으면 금액이 항목 이름 자리에 들어와 어느 줄도 맞지 않는다.
+    """
     for col in (4, 3, 2):
-        label = text(ws.cell(row, col).value)
+        raw = ws.cell(row, col).value
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            continue
+        label = text(raw)
         if label and not label.startswith(("(+)", "(-)")):
             return label
     return ""
@@ -385,11 +395,21 @@ def _row_amount(ws, row: int, columns: tuple[int, ...]) -> float:
     return 0.0
 
 
+def _amount_column(ws, header: int, *names: str) -> int:
+    """머리글에서 금액 열을 찾는다. 못 찾으면 0."""
+    for col in range(2, min(ws.max_column, 12) + 1):
+        label = text(ws.cell(header, col).value)
+        if any(name in label for name in names):
+            return col
+    return 0
+
+
 def _read_obligation(ws) -> ObligationMovement:
     head = _find_row(ws, "퇴직급여추계액 변동내역")
     result = ObligationMovement()
     if not head:
         return result
+    money = _amount_column(ws, head + 1, "금액") or 5
 
     # 바로 다음 표(사외적립자산)에서 멈춘다. 회사가 줄을 하나만 끼워 넣어도
     # 고정 길이로 훑으면 그 표까지 넘어가는데, 거기에도 '계열사 전입' 같은
@@ -404,7 +424,8 @@ def _read_obligation(ws) -> ObligationMovement:
                 if not getattr(result, field_name):
                     # 방향은 항목 이름이 정한다 — '(-)감소' 를 음수로 적어 온
                     # 표를 그대로 빼면 지급액이 전입으로 뒤집힌다.
-                    setattr(result, field_name, abs(_row_amount(ws, row, (5,))))
+                    setattr(result, field_name,
+                            abs(_row_amount(ws, row, (money, 5))))
                 break
     return result
 
@@ -425,7 +446,9 @@ def _asset_columns(ws, header: int) -> _AssetColumns:
     if not header:
         return _AssetColumns()
     db = pension = total = 0
-    for col in range(4, min(ws.max_column, 12) + 1):
+    # 2열부터 훑는다. 새 서식은 이름 바로 옆(3열)에 금액이 붙는다 — 사이에 빈
+    # 칸을 두면 화면에서 표가 한 칸 밀린 것처럼 보이기 때문이다.
+    for col in range(2, min(ws.max_column, 12) + 1):
         label = text(ws.cell(header, col).value)
         if not db and ("DB퇴직연금" in label or "퇴직보험" in label):
             db = col
@@ -495,11 +518,12 @@ def _read_assets(ws) -> AssetMovement:
 
     detail = _find_row(ws, "사외적립자산 세부내역")
     if detail:
+        name_col = 2 if text(ws.cell(detail + 1, 2).value).startswith("자산") else 3
         for row in range(detail + 1, detail + 14):
-            label = text(ws.cell(row, 3).value)
+            label = text(ws.cell(row, name_col).value)
             if not label or "합계" in label:
                 continue
-            amount = _row_amount(ws, row, (5, 6, 7))
+            amount = _row_amount(ws, row, (name_col + 1, 5, 6, 7))
             if amount:
                 # '⑴ 현금 및 현금등가물' → '현금 및 현금등가물'
                 clean = re.sub(r"^[^가-힣A-Za-z]+", "", label)
@@ -525,6 +549,43 @@ def _read_period(ws) -> tuple[_dt.date | None, _dt.date | None]:
     return None, None
 
 
+
+#: 새 [퇴직급여규정] 시트의 항목 이름 → 저장할 열쇠.
+_RULE_LABELS: Final = {
+    "가입자격": "eligibility",
+    "근속기간산정": "service_period",
+    "계산구조": "formula",
+    "기준임금": "base_wage",
+    "정년직원": "staff_nra",
+    "정년임원": "executive_nra",
+    "중도퇴직지급률": "voluntary_rate",
+    "사망퇴직지급률": "death_rate",
+    "정년퇴직지급률": "normal_rate",
+    "지급방법": "payment_method",
+}
+
+
+def _rules_by_label(ws) -> dict[str, str]:
+    """지급규정을 **이름으로** 읽는다.
+
+    옛 양식은 행 번호를 못박아 두었다(110~119행). 회사가 줄을 하나만 끼워 넣어도
+    전부 어긋나는데, 어긋난 채로 초안이 만들어지면 담당자는 왜 엉뚱한 값이
+    나왔는지 알 수 없다.
+    """
+    found: dict[str, str] = {}
+    for row in range(1, min(ws.max_row, 60) + 1):
+        for column in (1, 2):
+            label = text(ws.cell(row, column).value).replace(" ", "")
+            label = label.replace("(", "").replace(")", "")
+            key = _RULE_LABELS.get(label)
+            if not key:
+                continue
+            value = text(ws.cell(row, column + 1).value)
+            if value:
+                found.setdefault(key, value.replace("\n", " "))
+    return found
+
+
 def read_general_info(workbook) -> GeneralInfo:
     """``1)일반사항`` 시트를 읽어 지급규정 초안을 만든다.
 
@@ -534,14 +595,21 @@ def read_general_info(workbook) -> GeneralInfo:
     from .workbook import find_sheet
 
     info = GeneralInfo()
-    ws = find_sheet(workbook, GENERAL_SHEET, "1)일반사항")
-    if ws is None:
-        info.draft.unread.append("1)일반사항 시트가 없습니다")
+    # 옛 양식은 규정·자산·기간이 한 시트에 섞여 있었고, 새 양식은 뜻이 다른
+    # 것을 갈라 두 시트로 나눴다. 어느 쪽이든 읽는다.
+    general = find_sheet(workbook, GENERAL_SHEET, "1)일반사항")
+    money_ws = find_sheet(workbook, "사외적립자산") or general
+    rules_ws = find_sheet(workbook, "퇴직급여규정") or general
+    basics_ws = find_sheet(workbook, "기본정보") or general
+    if general is None and money_ws is None and rules_ws is None:
+        info.draft.unread.append("일반사항 시트가 없습니다")
         return info
 
-    info.period_start, info.period_end = _read_period(ws)
-    info.obligation = _read_obligation(ws)
-    info.assets = _read_assets(ws)
+    ws = money_ws or rules_ws or basics_ws
+    if money_ws is not None:
+        info.period_start, info.period_end = _read_period(money_ws)
+        info.obligation = _read_obligation(money_ws)
+        info.assets = _read_assets(money_ws)
 
     grade_row = _find_row(ws, "회사채 신용등급")
     if grade_row:
@@ -557,19 +625,21 @@ def read_general_info(workbook) -> GeneralInfo:
 
     paid_row = _find_item_row(ws, "장기근속 지급액")
     if paid_row:
-        info.longterm_paid = abs(_row_amount(ws, paid_row, (5, 4)))
+        info.longterm_paid = abs(_row_amount(ws, paid_row, (3, 5, 4)))
     received_row = _find_item_row(ws, "장기근속 받은금액")
     if received_row:
         info.longterm_received = abs(_row_amount(ws, received_row, (5, 4)))
 
+    by_label = _rules_by_label(rules_ws) if rules_ws is not None else {}
     for key, row in _ROWS.items():
-        value = ""
-        for col in _VALUE_COLUMNS:
-            if col <= ws.max_column:
-                candidate = text(ws.cell(row, col).value)
-                if candidate:
-                    value = candidate.replace("\n", " ")
-                    break
+        value = by_label.get(key, "")
+        if not value and rules_ws is not None:
+            for col in _VALUE_COLUMNS:
+                if col <= rules_ws.max_column:
+                    candidate = text(rules_ws.cell(row, col).value)
+                    if candidate:
+                        value = candidate.replace("\n", " ")
+                        break
         info.raw[key] = value
 
     draft = info.draft

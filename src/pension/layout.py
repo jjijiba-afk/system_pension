@@ -63,27 +63,27 @@ ACTIVE_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "hire_date": ("입사일자", "입사일"),
     "settlement_date": ("중간정산일", "중간정산일자"),
     "monthly_wage": ("30일평균임금", "월평균임금", "평균임금"),
-    "honorary_wage": ("명예퇴직산정용임금", "명예퇴직임금"),
-    "accrued_benefit": ("퇴직급여추계액", "추계액"),
-    "daily_base_pay": ("1일기본급", "일기본급"),
+    "honorary_wage": ("명예퇴직산정용임금", "명예퇴직임금", "명예퇴직기준임금"),
+    "accrued_benefit": ("퇴직급여추계액", "추계액", "회사추계액"),
+    "daily_base_pay": ("1일기본급", "일기본급", "1일통상임금"),
     "added_service_years": ("군경력등가산근속연수", "가산근속연수"),
     "deducted_service_years": ("차감근속연수",),
     "plan": ("퇴직급여제도구분", "제도구분"),
     "settlement_amount": ("중간정산지급금액", "중간정산금액"),
-    "longterm_target": ("장기급여산출대상여부", "장기급여대상여부"),
+    "longterm_target": ("장기급여산출대상여부", "장기급여대상여부", "장기급여대상"),
     "wage_peak_age": ("임금피크연령", "임금피크"),
     "transfer_in_date": ("전입일", "전입일자"),
     "declared_nra": ("정년연령", "정년연령세"),
-    "longterm_amount": ("장기종업원급여지급금액", "장기급여지급액"),
-    "transfer_in_amount": ("전입액", "전입받은금액"),
-    "payout_multiple": ("퇴직금지급배수", "지급배수"),
+    "longterm_amount": ("장기종업원급여지급금액", "장기급여지급액", "장기급여기지급액"),
+    "transfer_in_amount": ("전입액", "전입받은금액", "전입인수액"),
+    "payout_multiple": ("퇴직금지급배수", "지급배수", "개인지급배수"),
     "note": ("비고",),
     "extra_rate": ("가산감소지급률", "가산지급률"),
-    "severance_benefit": ("퇴직급여지급률규정",),
+    "severance_benefit": ("퇴직급여지급률규정", "지급률규정"),
     "longterm_benefit": ("장기급여지급률규정",),
-    "severance_withdrawal": ("퇴직급여중도사망퇴직률산출규정", "퇴직급여중도퇴직률규정"),
-    "severance_salary_increase": ("퇴직급여승급률산출규정", "퇴직급여승급률규정"),
-    "longterm_withdrawal": ("장기급여중도사망퇴직률산출규정", "장기급여중도퇴직률규정"),
+    "severance_withdrawal": ("퇴직급여중도사망퇴직률산출규정", "퇴직급여중도퇴직률규정", "퇴직률규정"),
+    "severance_salary_increase": ("퇴직급여승급률산출규정", "퇴직급여승급률규정", "승급률규정"),
+    "longterm_withdrawal": ("장기급여중도사망퇴직률산출규정", "장기급여중도퇴직률규정", "장기급여퇴직률규정"),
     "longterm_salary_increase": ("장기급여승급률산출규정", "장기급여승급률규정"),
     "extra_pay_base_date": ("추가지급기준일", "추가지급기산일"),
     "extra_pay_base_wage": ("추가지급기본급",),
@@ -109,16 +109,16 @@ RETIRED_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "fund_payment_date": ("사외적립자산지급일", "사외자산지급일"),
     "reason": ("지급퇴직사유구분", "지급사유구분", "퇴직사유구분", "퇴직사유"),
     "plan": ("퇴직급여제도구분", "제도구분"),
-    "total_payment": ("퇴직급여총지급금액", "총지급금액"),
-    "fund_payment": ("퇴직급여사외자산지급금액", "사외자산지급금액"),
-    "national_pension_payment": ("퇴직급여국민연금전환금지급금액", "국민연금전환금지급금액"),
-    "longterm_payment": ("장기종업원급여지급금액", "장기급여지급금액"),
-    "other_payment": ("퇴직금이외의지급금액", "퇴직위로금등지급금액", "퇴직금이외지급금액"),
-    "transfer_out_payment": ("전출분할사업처분지급금액", "전출지급금액"),
-    "longterm_target": ("장기급여산출대상여부", "장기급여대상여부"),
+    "total_payment": ("퇴직급여총지급금액", "총지급금액", "퇴직급여총지급액"),
+    "fund_payment": ("퇴직급여사외자산지급금액", "사외자산지급금액", "사외자산지급액"),
+    "national_pension_payment": ("퇴직급여국민연금전환금지급금액", "국민연금전환금지급금액", "국민연금전환금"),
+    "longterm_payment": ("장기종업원급여지급금액", "장기급여지급금액", "장기급여지급액"),
+    "other_payment": ("퇴직금이외의지급금액", "퇴직위로금등지급금액", "퇴직금이외지급금액", "퇴직위로금등"),
+    "transfer_out_payment": ("전출분할사업처분지급금액", "전출지급금액", "전출지급액"),
+    "longterm_target": ("장기급여산출대상여부", "장기급여대상여부", "장기급여대상"),
     "note": ("비고", "비고당기전입자가당기퇴직시전입액"),
-    "severance_withdrawal": ("퇴직급여중도사망퇴직률산출규정", "퇴직급여중도퇴직률규정"),
-    "longterm_withdrawal": ("장기급여중도사망퇴직률산출규정", "장기급여중도퇴직률규정"),
+    "severance_withdrawal": ("퇴직급여중도사망퇴직률산출규정", "퇴직급여중도퇴직률규정", "퇴직률규정"),
+    "longterm_withdrawal": ("장기급여중도사망퇴직률산출규정", "장기급여중도퇴직률규정", "장기급여퇴직률규정"),
     "cost_code": ("원가코드", "원가구분", "원가구분코드"),
 }
 
@@ -188,14 +188,19 @@ def find_data_start(sheet, header_row: int, *, limit: int = 12) -> int:
     """데이터가 시작하는 행.
 
     머리글 아래에는 ``TYPE`` 행과 ``작성 샘플`` 행이 한두 줄 끼어 있고, 그 수가
-    통합문서마다 다르다. 순번(B열)이 숫자인 첫 행을 데이터 시작으로 본다.
+    통합문서마다 다르다. **순번이 숫자인 첫 행** 을 데이터 시작으로 본다.
+
+    순번이 어느 열인지는 서식마다 다르다 — 첫 열을 비워 두고 둘째 열에 순번을
+    적는 것이 있고, 첫 열이 곧 순번인 것이 있다. 앞 세 열을 함께 보아 어느 쪽이든
+    잡는다. 여기서 한 줄을 잘못 잡으면 그만큼의 사람이 조용히 빠진다.
     """
     for row in range(header_row + 1, min(sheet.max_row, header_row + limit) + 1):
-        value = sheet.cell(row, 2).value
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, (int, float)) and value >= 1:
-            return row
+        for column in (1, 2, 3):
+            value = sheet.cell(row, column).value
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)) and value >= 1:
+                return row
     return header_row + 3
 
 

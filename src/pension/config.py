@@ -13,9 +13,14 @@ from dataclasses import dataclass, field
 from .dates import to_date
 from .normalize import text
 
-__all__ = ["INPUT_SHEET", "CalculationConfig", "JobGroupRule", "read_config"]
+__all__ = ["INPUT_SHEET", "INPUT_SHEET_ALIASES", "CalculationConfig",
+           "JobGroupRule", "read_config"]
 
 INPUT_SHEET = "Input"
+#: 같은 시트의 다른 이름. 새 양식은 ``기본정보`` 로 부른다 — 영어 시트명이
+#: 하나만 남아 있어 담당자가 어디를 채워야 할지 알기 어려웠다. 옛 양식도 계속
+#: 읽어야 하므로 둘 다 본다.
+INPUT_SHEET_ALIASES: tuple[str, ...] = (INPUT_SHEET, "기본정보")
 
 #: 직군 규칙 테이블의 첫 데이터 행(``Input`` B12).
 _RULE_FIRST_ROW = 12
@@ -328,6 +333,60 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
     return rules
 
 
+
+def _labelled_values(ws) -> dict[str, object]:
+    """``이름 | 값`` 으로 적힌 칸들. 새 양식의 [기본정보] 를 읽는 방법이다.
+
+    옛 양식은 ``C3 에 기준일`` 처럼 자리를 못박아 두었다. 담당자에게는 그 자리가
+    무슨 칸인지 보이지 않아 엉뚱한 곳에 적어 오는 일이 잦았고, 한 줄만 밀려도
+    통째로 어긋났다. 이름으로 찾으면 줄이 밀려도 읽힌다.
+    """
+    found: dict[str, object] = {}
+    for row in range(1, min(ws.max_row, 30) + 1):
+        label = text(ws.cell(row, 1).value)
+        if not label:
+            continue
+        value = ws.cell(row, 2).value
+        if value not in (None, ""):
+            found.setdefault(label.replace(" ", ""), value)
+    return found
+
+
+def _first_date(values: dict[str, object], *names: str) -> _dt.date | None:
+    for name in names:
+        raw = values.get(name.replace(" ", ""))
+        if raw in (None, ""):
+            continue
+        try:
+            return to_date(raw)
+        except Exception:      # noqa: BLE001 — 다음 이름으로 넘어간다
+            continue
+    return None
+
+
+def _first_number(values: dict[str, object], *names: str) -> object | None:
+    for name in names:
+        raw = values.get(name.replace(" ", ""))
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            return raw
+    return None
+
+
+def _find_rule_table(ws) -> tuple[int, int]:
+    """직군 규칙 표의 (첫 자료 행, 첫 열). 못 찾으면 옛 자리를 쓴다.
+
+    표가 어느 열에서 시작하는지는 서식마다 다르다. 한 칸 어긋나면 직군 이름
+    자리에 정년 숫자가 들어와 규칙이 통째로 틀린다.
+    """
+    for row in range(1, min(ws.max_row, 30) + 1):
+        for column in (1, 2):
+            head = text(ws.cell(row, column).value).replace(" ", "")
+            if head in ("명부직군", "직군"):
+                return row + 1, column
+    return _RULE_FIRST_ROW, 2
+
+
+
 def read_config(workbook, sheet_name: str = INPUT_SHEET, *,
                 base_date: _dt.date | None = None) -> CalculationConfig:
     """``Input`` 시트를 :class:`CalculationConfig` 로 읽는다.
@@ -344,28 +403,34 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET, *,
     """
     from .workbook import find_sheet
 
-    ws = find_sheet(workbook, sheet_name)
+    ws = find_sheet(workbook, sheet_name, *INPUT_SHEET_ALIASES)
     if ws is None:
         return infer_config(workbook, base_date=base_date)
 
-    found = to_date(ws.cell(3, 3).value) or base_date
+    labelled = _labelled_values(ws)
+    found = (_first_date(labelled, "산출기준일", "기준일", "결산일")
+             or to_date(ws.cell(3, 3).value) or base_date)
     if found is None:
         raise ValueError(
-            f"{sheet_name}!C3 산출기준일이 비어 있습니다. "
+            "산출기준일을 찾지 못했습니다. "
             "화면의 [산출 기준일] 칸에 날짜를 넣어도 됩니다"
         )
     base_date = found
 
-    raw_check = ws.cell(5, 3).value
+    raw_check = _first_number(labelled, "평균임금 하한 점검액", "체크금액")
+    if raw_check is None:
+        raw_check = ws.cell(5, 3).value
     wage_check = float(raw_check) if isinstance(raw_check, (int, float)) else 0.0
 
     rules: list[JobGroupRule] = []
+    first_rule_row, first_column = _find_rule_table(ws)
+    shift = first_column - 2          # 옛 서식은 2열에서 시작한다
     for offset in range(_RULE_MAX_ROWS):
-        row = _RULE_FIRST_ROW + offset
+        row = first_rule_row + offset
         # 행 수를 세어 읽으면 중간에 빈 행이 있을 때
         # 뒤쪽 직군을 통째로 놓친다. 여기서는 전 구간을 훑고 빈 행만 건너뛴다.
-        source_name = text(ws.cell(row, 2).value)
-        mapped_name = text(ws.cell(row, 3).value)
+        source_name = text(ws.cell(row, 2 + shift).value)
+        mapped_name = text(ws.cell(row, 3 + shift).value)
         if not source_name and not mapped_name:
             continue
 
@@ -373,26 +438,26 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET, *,
             JobGroupRule(
                 source_name=source_name,
                 mapped_name=mapped_name or source_name,
-                severance_nra=_int(ws.cell(row, 4).value),
-                longterm_nra=_int(ws.cell(row, 5).value),
-                over_nra_add_age=_int(ws.cell(row, 6).value),
-                severance_benefit=text(ws.cell(row, 7).value),
-                longterm_benefit=text(ws.cell(row, 8).value),
-                severance_withdrawal=text(ws.cell(row, 9).value),
-                severance_salary_increase=text(ws.cell(row, 10).value),
-                longterm_withdrawal=text(ws.cell(row, 11).value),
-                longterm_salary_increase=text(ws.cell(row, 12).value),
-                retired_severance_withdrawal=text(ws.cell(row, 13).value),
-                retired_longterm_withdrawal=text(ws.cell(row, 14).value),
-                min_service_years=_float(ws.cell(row, 15).value),
-                executive_nra=_int(ws.cell(row, 16).value),
-                executive_over_nra_add_age=_int(ws.cell(row, 17).value),
-                excluded=text(ws.cell(row, 18).value).upper() in ("Y", "제외", "TRUE", "1"),
-                service_basis=text(ws.cell(row, 19).value) or "일할",
-                service_fraction=text(ws.cell(row, 20).value) or "그대로",
-                benefit_rounding_unit=_int(ws.cell(row, 21).value),
-                benefit_rounding_mode=text(ws.cell(row, 22).value) or "반올림",
-                employee_type_filter=text(ws.cell(row, 23).value),
+                severance_nra=_int(ws.cell(row, 4 + shift).value),
+                longterm_nra=_int(ws.cell(row, 5 + shift).value),
+                over_nra_add_age=_int(ws.cell(row, 6 + shift).value),
+                severance_benefit=text(ws.cell(row, 7 + shift).value),
+                longterm_benefit=text(ws.cell(row, 8 + shift).value),
+                severance_withdrawal=text(ws.cell(row, 9 + shift).value),
+                severance_salary_increase=text(ws.cell(row, 10 + shift).value),
+                longterm_withdrawal=text(ws.cell(row, 11 + shift).value),
+                longterm_salary_increase=text(ws.cell(row, 12 + shift).value),
+                retired_severance_withdrawal=text(ws.cell(row, 13 + shift).value),
+                retired_longterm_withdrawal=text(ws.cell(row, 14 + shift).value),
+                min_service_years=_float(ws.cell(row, 15 + shift).value),
+                executive_nra=_int(ws.cell(row, 16 + shift).value),
+                executive_over_nra_add_age=_int(ws.cell(row, 17 + shift).value),
+                excluded=text(ws.cell(row, 18 + shift).value).upper() in ("Y", "제외", "TRUE", "1"),
+                service_basis=text(ws.cell(row, 19 + shift).value) or "일할",
+                service_fraction=text(ws.cell(row, 20 + shift).value) or "그대로",
+                benefit_rounding_unit=_int(ws.cell(row, 21 + shift).value),
+                benefit_rounding_mode=text(ws.cell(row, 22 + shift).value) or "반올림",
+                employee_type_filter=text(ws.cell(row, 23 + shift).value),
             )
         )
 

@@ -109,114 +109,14 @@ def _style():
 
 
 def write_roster_template(path: str | Path) -> Path:
-    """명부 양식을 만든다.
+    """회사에 보내는 명부 양식.
 
-    머리글은 :mod:`pension.layout` 이 인식하는 표준 표기를, 열 위치는 기존
-    통합문서와 같은 자리를 쓴다. 그래서 이 파일을 그대로 채워 넣으면 열을
-    옮기지 않아도 읽힌다. 열을 끼워 넣어도 머리글로 찾으므로 괜찮다.
+    실제 만드는 것은 :mod:`pension.rostertemplate` 이다. 여기서는 다른 양식들과
+    같은 자리에서 부를 수 있게만 해 둔다.
     """
-    import openpyxl
+    from .rostertemplate import write_roster_template as make
 
-    from .layout import ACTIVE_HEADER_ALIASES, RETIRED_HEADER_ALIASES
-
-    path = Path(path)
-    st = _style()
-    wb = openpyxl.Workbook()
-
-    def sheet(name: str, columns: dict, aliases: dict, first_row: int, samples: list[dict]):
-        ws = wb.create_sheet(name)
-        header_row = first_row - 2
-
-        ws.cell(1, 1, f"{name} — 노란 줄은 작성 예시입니다. 지우고 실제 자료를 넣으세요.")
-        ws.cell(1, 1).font = st["note_font"]
-
-        ws.cell(header_row, 2, "순번").font = st["head_font"]
-        ws.cell(header_row, 2).fill = st["head_fill"]
-        for key, col in columns.items():
-            # 머리글은 별칭 목록의 첫 번째(표준 표기)를 쓴다.
-            label = aliases.get(key, (col.label,))[0]
-            cell = ws.cell(header_row, col.index, label)
-            cell.font = st["head_font"]
-            cell.fill = st["head_fill"]
-            cell.alignment = st["center"]
-            ws.column_dimensions[cell.column_letter].width = max(10, min(22, len(label) + 4))
-
-        for offset, values in enumerate(samples):
-            row = first_row + offset
-            ws.cell(row, 2, offset + 1).fill = st["sample_fill"]
-            for key, value in values.items():
-                cell = ws.cell(row, columns[key].index, value)
-                cell.font = st["sample_font"]
-                cell.fill = st["sample_fill"]
-        ws.freeze_panes = ws.cell(first_row, 3)
-        return ws
-
-    sheet(
-        ACTIVE_SHEET, ACTIVE_COLUMNS, ACTIVE_HEADER_ALIASES, ACTIVE_FIRST_ROW,
-        [
-            {
-                "employee_id": "A0001", "employee_type": "직원", "job_group": "정규직",
-                "name": "홍길동", "gender": "남", "birth_date": "1985-05-01",
-                "hire_date": "2010-03-02", "monthly_wage": 5_000_000,
-                "daily_base_pay": 150_000, "plan": "DB", "longterm_target": "Y",
-            },
-            {
-                "employee_id": "A0002", "employee_type": "임원", "job_group": "정규직",
-                "name": "김임원", "gender": "여", "birth_date": "1972-11-20",
-                "hire_date": "1998-01-05", "monthly_wage": 12_000_000,
-                "daily_base_pay": 350_000, "plan": "DB", "longterm_target": "N",
-            },
-        ],
-    )
-    sheet(
-        RETIRED_SHEET, RETIRED_COLUMNS, RETIRED_HEADER_ALIASES, RETIRED_FIRST_ROW,
-        [
-            {
-                "employee_id": "T0001", "employee_type": "직원", "job_group": "정규직",
-                "name": "이퇴직", "gender": "남", "birth_date": "1980-02-10",
-                "hire_date": "2012-04-01", "exit_date": "2025-06-30",
-                "reason": 1, "plan": "DB", "total_payment": 45_000_000,
-                "fund_payment": 40_000_000, "longterm_target": "Y",
-            },
-            {
-                "employee_id": "T0002", "employee_type": "직원", "job_group": "계약직",
-                "name": "박정년", "gender": "여", "birth_date": "1965-09-15",
-                "hire_date": "2001-07-01", "exit_date": "2025-09-30",
-                "reason": 4, "plan": "퇴직금제도", "total_payment": 88_000_000,
-                "longterm_target": "N",
-            },
-        ],
-    )
-
-    # ── Input 시트 ────────────────────────────────────────────────
-    ws = wb.create_sheet("Input", 0)
-    ws.cell(1, 2, "산출 기준").font = st["title_font"]
-    ws.cell(3, 2, "산출기준일")
-    ws.cell(3, 3, "2025-12-31").font = st["sample_font"]
-    ws.cell(5, 2, "평균임금 체크금액")
-    ws.cell(5, 3, 0).font = st["sample_font"]
-    ws.cell(6, 2, "· 이 금액보다 낮은 평균임금은 오류로 봅니다. 쓰지 않으려면 0.").font = st["note_font"]
-
-    ws.cell(9, 2, "직군 규칙").font = st["title_font"]
-    ws.cell(10, 2, "· 직군은 '산출 가정 입력' 화면의 [직군 매핑] 탭에서 정하는 편이 쉽습니다.").font = st["note_font"]
-    headers = (
-        "명부직군", "변환직군명", "퇴직급여 정년연령", "장기급여 정년연령", "정년초과 가산연령",
-    )
-    for col, title in enumerate(headers, start=2):
-        cell = ws.cell(11, col, title)
-        cell.font = st["head_font"]
-        cell.fill = st["head_fill"]
-        cell.alignment = st["center"]
-        ws.column_dimensions[cell.column_letter].width = 18
-    for offset, group in enumerate(DEFAULT_GROUPS):
-        row = 12 + offset
-        for col, value in enumerate((group, group, 60, 60, 2), start=2):
-            ws.cell(row, col, value).font = st["sample_font"]
-            ws.cell(row, col).fill = st["sample_fill"]
-
-    del wb["Sheet"]
-    wb.save(path)
-    return path
+    return make(path)
 
 
 def write_default_roster(path: str | Path, *, seed: int = 20251231) -> Path:

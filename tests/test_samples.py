@@ -93,7 +93,8 @@ class TestOutOfTheBox:
             pack / ROSTER_TEMPLATE, pack / STANDARD_ASSUMPTIONS
         )
         assert config.mapped_names() == ["정규직", "계약직", "임원"]
-        assert {m.job_group for m in roster.active} == {"정규직"}
+        # 양식의 작성 예시는 직원 한 줄과 임원 한 줄이다.
+        assert {m.job_group for m in roster.active} == {"정규직", "임원"}
 
 
 class TestMortality:
@@ -633,7 +634,7 @@ class TestBaseDateFromTheScreen:
 
     def _roster_without_a_date(self, pack, tmp_path) -> Path:
         book = openpyxl.load_workbook(pack / ROSTER_TEMPLATE)
-        del book["Input"]           # 기준일이 적힌 유일한 자리
+        del book["기본정보"]         # 기준일이 적힌 유일한 자리
         target = tmp_path / "기준일없는명부.xlsx"
         book.save(target)
         return target
@@ -644,7 +645,7 @@ class TestBaseDateFromTheScreen:
 
         book = open_workbook(self._roster_without_a_date(pack, tmp_path))
         try:
-            with pytest.raises(ValueError, match="산출 기준일"):
+            with pytest.raises(ValueError, match="산출기준일"):
                 read_config(book)
         finally:
             book.close()
