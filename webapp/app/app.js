@@ -376,24 +376,40 @@ function buildGridTab(page, spec) {
 }
 
 function benefitGuide() {
+  // 다섯 덩어리가 줄바꿈 없이 이어 붙어 있어 어디까지가 한 이야기인지 보이지
+  // 않았다. **방식 / 사유별 차등 / 수식 쓰는 법** 셋으로 나누고, 수식은 쓸
+  // 사람만 펴 보도록 접어 둔다 — 대부분은 표만 채우고 끝난다.
   const vars = Object.entries(META.formula_variables)
-    .map(([k, v]) => `${k}=${v}`).join(" · ");
+    .map(([k, v]) => `${k} = ${v}`).join("\n");
+
+  const ways = el("div", { class: "hint", style: "white-space:pre-line" },
+    "누적 — 표의 값이 그 근속연수까지의 누적 배수입니다 (10년 → 10.0).\n" +
+    "누진 — 표의 값이 그 구간에서만 적용할 연 배수입니다.\n" +
+    "       0년 1.0 / 5년 1.5 / 10년 2.0 이면\n" +
+    "       근속 12년 = 5×1.0 + 5×1.5 + 2×2.0 = 16.5\n" +
+    "수식 — 방식을 '수식' 으로 두고 아래 칸에 직접 씁니다.");
+
+  const causes = el("div", { class: "hint", style: "white-space:pre-line" },
+    "켜면 그 직군이 " + META.exit_causes.join(" · ") + " 세 열로 갈립니다.\n" +
+    "사유마다 다른 배수만 채우면 됩니다 — 비운 열은 왼쪽의 기본 규정을 씁니다.\n" +
+    "가산액·근속 하한처럼 배수가 아닌 것은 아래 [퇴직사유별 차등] 에 적습니다.");
+
+  const formula = el("details", { class: "section" },
+    el("summary", {}, "수식 쓰는 법"),
+    el("div", { class: "section-body" },
+      el("div", { class: "hint", style: "white-space:pre-line" }, "변수\n" + vars),
+      el("div", { class: "hint", style: "white-space:pre-line" },
+         "함수\n" + META.formula_functions.join(" ")),
+      el("div", { class: "hint", style: "white-space:pre-line" },
+         "예시\n=IF(t<10, t*1.0, 10 + (t-10)*2.0)\n" +
+         '=IF(제도="DB", t*1.5, t)\n=MIN(t, 30)')));
+
   return [
-    el("div", { class: "hint", style: "white-space:pre-line" },
-       "누적  표의 값이 그 근속연수의 누적 배수입니다. (10년 → 10.0)\n" +
-       "누진  표의 값이 그 구간에서만 적용할 연 배수입니다. " +
-       "0년 1.0 / 5년 1.5 / 10년 2.0 이면 근속 12년 = 5×1.0 + 5×1.5 + 2×2.0 = 16.5\n" +
-       "수식  방식을 '수식' 으로 두고 그 아래 칸에 직접 씁니다."),
-    el("div", { class: "hint", style: "white-space:pre-line" },
-       "사유별 차등  켜면 그 직군이 " + META.exit_causes.join("·") +
-       " 세 열로 갈립니다. 자료요청서 6번의 세 줄을 그대로 옮길 때 쓰세요.\n" +
-       "             사유마다 다른 배수만 채우면 됩니다 — 비운 열은 왼쪽의 " +
-       "기본 규정을 그대로 씁니다.\n" +
-       "             가산액·근속 하한처럼 배수가 아닌 것은 아래 [퇴직사유별 차등] 에 적습니다."),
-    el("div", { class: "hint" }, "변수  " + vars),
-    el("div", { class: "hint" }, "함수  " + META.formula_functions.join(" ")),
-    el("div", { class: "hint" },
-       '예시  =IF(t<10, t*1.0, 10 + (t-10)*2.0)     =IF(제도="DB", t*1.5, t)     =MIN(t, 30)'),
+    el("div", { class: "hint" }, el("b", {}, "지급률 방식")),
+    ways,
+    el("div", { class: "hint" }, el("b", {}, "사유별 차등")),
+    causes,
+    formula,
   ];
 }
 
