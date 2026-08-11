@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import assumption_form as form
-from . import clients, runs
+from . import clients, library, runs
 from .actuarial import FRACTION_MODES, SERVICE_BASES
 from .assumptions import (
     ATTRIBUTIONS,
@@ -203,6 +203,10 @@ def _formula_preview(request: dict) -> dict[str, Any]:
 # ── 등록 자료(기본가정) ──────────────────────────────────────────
 
 def _library_list(_request: dict) -> dict[str, Any]:
+    # 금리표가 하나도 없으면 내장본을 넣어 준다. 처음 쓰는 사람이 금리표부터
+    # 구해 와야 아무것도 못 하는 일은 없어야 한다. 기준일은 화면에 뜨고,
+    # 산출기준일과 다르면 경고한다.
+    library.seed_builtin_curve()
     settings = read_settings()
     result: dict[str, Any] = {}
     for kind in (CURVE_KIND, RATES_KIND, ROSTER_KIND, PRESET_KIND):

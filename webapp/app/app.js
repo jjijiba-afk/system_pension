@@ -1168,9 +1168,27 @@ $("ed-rates-load").addEventListener("click", () => {
   }
 });
 
+// 곡선의 기준일과 산출기준일이 다르면 옛 곡선으로 조용히 산출된다. 할인율은
+// 결산일마다 달라지므로 이것이 어긋난 채로 넘어가면 채무 전체가 틀린다.
+function showCurveDate(baseDate) {
+  const box = $("ed-curve-date");
+  if (!box) return;
+  const wanted = ($("base_date") || {}).value || "";
+  if (!baseDate) { box.textContent = ""; box.className = "hint"; return; }
+  if (wanted && wanted !== baseDate) {
+    box.className = "hint bad-text";
+    box.textContent = `이 금리표는 ${baseDate} 곡선입니다. `
+      + `산출기준일 ${wanted} 과 다릅니다 — 결산일 곡선으로 바꿔 등록하십시오.`;
+  } else {
+    box.className = "hint";
+    box.textContent = `이 금리표는 ${baseDate} 곡선입니다.`;
+  }
+}
+
 $("ed-curve-apply").addEventListener("click", () => {
   try {
     const result = py("curve_rows", { name: $("ed-curve").value, grade: $("ed-grade").value });
+    showCurveDate(result.base_date);
     const state = collectState();
     state.grids["할인율"] = { key: "연차", rows: result.rows };
     renderState(state);

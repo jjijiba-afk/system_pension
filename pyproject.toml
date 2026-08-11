@@ -22,8 +22,11 @@ pension-gui = "pension.desk:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# 실을 자료 파일이 없다. 기본 명부는 난수로 만들므로, 배포물 어디에도
-# 실제 개인정보가 담기지 않는다.
+# 싣는 자료는 금리표 하나뿐이다 — 채권평가사가 공표하는 **시장 자료** 라
+# 사람을 가리키지 않는다. 명부는 난수로 만들므로 배포물 어디에도 실제
+# 개인정보가 담기지 않는다.
+[tool.setuptools.package-data]
+pension = ["data/*.xlsx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

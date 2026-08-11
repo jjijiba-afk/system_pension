@@ -270,7 +270,14 @@ class TestNoPersonalDataShips:
         import pension
 
         data = Path(pension.__file__).parent / "data"
-        assert not data.exists(), f"꾸러미에 자료 파일이 남아 있다: {list(data.iterdir())}"
+        # 자료 폴더 자체는 있어도 된다 — 금리표처럼 **시장 자료** 는 사람을
+        # 가리키지 않는다. 막아야 하는 것은 명부다.
+        if data.exists():
+            allowed = {"금리표_20251231.xlsx"}
+            stray = [p for p in data.iterdir()
+                     if p.name not in allowed and not p.name.startswith("__")]
+            assert stray == [], f"꾸러미에 개인 자료가 남아 있다: {stray}"
+            assert not list(data.glob("*.csv"))
 
     def test_the_exe_bundles_only_the_webapp(self) -> None:
         """실행 파일에 실리는 것은 전체 기능 화면뿐이어야 한다.
@@ -355,7 +362,7 @@ class TestYieldCurve:
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = "KIS_NET금리"
+        ws.title = "금리표"
         ws.append(["No", "기준일자", "구분", "등급", "1년", "1년6월", "5년", "20년"])
         ws.append([1, None, None, "국고채", 2.55, 2.747, 3.235, 3.347])
         ws.append([2, None, "공모 무보증회사채", "AA0", 3.122, 3.133, 3.62, 5.26])
@@ -510,8 +517,8 @@ class TestCurveTemplate:
         from pension.samples import write_curve_template
 
         path = write_curve_template(tmp_path / "금리표.xlsx")
-        ws = openpyxl.load_workbook(path)["KIS_NET금리"]
-        for row in range(2, 6):
+        ws = openpyxl.load_workbook(path)["금리표"]
+        for row in range(3, 7):                    # 3행부터가 자료 (2행이 머리글)
             for column in range(5, ws.max_column + 1):
                 assert ws.cell(row, column).value is None
 
@@ -522,12 +529,12 @@ class TestCurveTemplate:
         from pension.yieldcurve import INVESTMENT_GRADES
 
         path = write_curve_template(tmp_path / "금리표.xlsx")
-        ws = openpyxl.load_workbook(path)["KIS_NET금리"]
-        headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
-        assert headers[:4] == ["No", "기준일자", "구분", "등급"]
+        ws = openpyxl.load_workbook(path)["금리표"]
+        headers = [ws.cell(2, c).value for c in range(1, ws.max_column + 1)]
+        assert headers[:4] == ["순번", "기준일자", "구분", "등급"]
         assert tuple(headers[4:]) == CURVE_TENORS
 
-        grades = [ws.cell(r, 4).value for r in range(2, 2 + len(INVESTMENT_GRADES))]
+        grades = [ws.cell(r, 4).value for r in range(3, 3 + len(INVESTMENT_GRADES))]
         assert set(grades) == set(INVESTMENT_GRADES)
 
     def test_a_filled_template_is_read_back(self, tmp_path) -> None:
@@ -539,7 +546,7 @@ class TestCurveTemplate:
 
         path = write_curve_template(tmp_path / "금리표.xlsx")
         wb = openpyxl.load_workbook(path)
-        ws = wb["KIS_NET금리"]
+        ws = wb["금리표"]
         row = next(r for r in range(2, 8) if ws.cell(r, 4).value == "AA0")
         ws.cell(row, 5, 3.404)        # 3월
         ws.cell(row, 8, 3.512)        # 1년

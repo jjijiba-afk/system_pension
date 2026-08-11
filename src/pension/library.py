@@ -217,3 +217,52 @@ def resolve_default(kind: str) -> LibraryEntry | None:
         return chosen
     found = entries(kind)
     return found[0] if found else None
+
+
+def builtin_curve() -> Path | None:
+    """꾸러미에 들어 있는 금리표.
+
+    할인율은 결산일마다 달라지므로 원래는 회사가 매번 등록해야 한다. 그래도 처음
+    쓰는 사람이 금리표부터 구해 와야 아무것도 못 하는 것은 막아야 해서, 최근
+    결산일 곡선 하나를 넣어 둔다. **기준일이 화면에 크게 뜨고, 산출기준일과
+    다르면 경고한다** — 옛 곡선으로 조용히 산출되는 것이 가장 나쁘다.
+    """
+    found = Path(__file__).with_name("data") / "금리표_20251231.xlsx"
+    return found if found.exists() else None
+
+
+def builtin_curve_date() -> str:
+    """내장 금리표의 기준일. 없으면 빈 문자열."""
+    path = builtin_curve()
+    if path is None:
+        return ""
+    from .yieldcurve import read_yield_curves
+
+    for curve in read_yield_curves(path):
+        if curve.base_date:
+            return str(curve.base_date)
+    return ""
+
+
+#: 내장 금리표를 이미 한 번 넣었는지. 설정에 남긴다.
+_SEEDED: Final = "builtin_curve_seeded"
+
+
+def seed_builtin_curve() -> str:
+    """내장 금리표를 **처음 한 번만** 넣어 준다. 넣은 이름을 돌려준다.
+
+    '비어 있으면 넣는다' 로 두면 사용자가 지운 것이 다음에 열 때 되살아난다.
+    지운 것은 지운 대로 두어야 한다 — 회사 곡선을 등록하고 내장본을 치운 사람이
+    가장 먼저 겪는 일이다.
+    """
+    settings = read_settings()
+    if settings.get(_SEEDED) or entries(CURVE_KIND):
+        return ""
+    path = builtin_curve()
+    if path is None:
+        return ""
+    name = f"내장 금리표 {builtin_curve_date()}".strip()
+    register(CURVE_KIND, path, name=name)
+    settings[_SEEDED] = "1"
+    write_settings(settings)
+    return name

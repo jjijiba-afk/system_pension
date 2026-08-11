@@ -471,50 +471,90 @@ def write_curve_template(path: str | Path, *,
     받은 금리표에서 해당 등급 줄을 그대로 붙여 넣으면 된다.
 
     퍼센트(``3.404``)로 넣든 소수(``0.03404``)로 넣든 읽는 쪽이 알아서 본다.
+
+    모양은 명부 양식과 같게 맞췄다 — 작성요령이 앞에 있고, 채울 칸은 노란색,
+    블록 머리는 남색이다. 여러 양식을 함께 보내는데 저마다 생김새가 다르면
+    받는 사람이 매번 다시 익혀야 한다.
     """
     import openpyxl
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    face = "맑은 고딕"
+    ink, muted, line = "1F3864", "5B6478", "D6DCE8"
+    thin = Side(style="thin", color=line)
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    fill_head = PatternFill("solid", fgColor=ink)
+    fill_input = PatternFill("solid", fgColor="FFF2CC")
 
     path = Path(path)
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "KIS_NET금리"
 
-    headers = ["No", "기준일자", "구분", "등급", *CURVE_TENORS]
-    head_font = Font(bold=True, color="FFFFFF")
-    head_fill = PatternFill("solid", fgColor="44546A")
+    # ── 작성요령 ────────────────────────────────────────────────
+    guide = wb.active
+    guide.title = "작성요령"
+    guide.column_dimensions["A"].width = 22
+    guide.column_dimensions["B"].width = 86
+    guide["A1"] = "금리표 작성요령"
+    guide["A1"].font = Font(name=face, size=14, bold=True, color=ink)
+    guide["A2"] = ("채권평가사에서 받은 결산일 금리표를 [금리표] 시트에 옮겨 "
+                   "적으면 됩니다.")
+    guide["A2"].font = Font(name=face, size=9, color=muted)
+
+    rows = (
+        ("무엇을 넣나", "채권평가사(KIS채권평가·한국자산평가 등)가 결산일에 "
+                    "내려 주는 등급별 기간구조입니다."),
+        ("왜 비어 있나", "할인율은 그날의 시장 자료라 프로그램이 지어낼 수 "
+                     "없습니다. 지어낸 값으로 산출하면 공시 숫자가 그대로 "
+                     "틀립니다."),
+        ("기준일자", "결산일로 고치세요. 이 날짜가 산출기준일과 다르면 화면에서 "
+                  "경고합니다."),
+        ("숫자 넣는 법", "3.404 처럼 퍼센트로 넣어도 되고 0.03404 처럼 소수로 "
+                     "넣어도 됩니다."),
+        ("등급 고르기", "회사가 정한 회계정책을 따릅니다. 국내 실무는 AA- 이상을 "
+                    "우량회사채로 보고 그중 AA0 를 가장 많이 씁니다."),
+        ("안 쓰는 줄", "지워도 되고 비워 두어도 됩니다 — 빈 줄은 읽지 않습니다."),
+    )
+    for offset, (label, note) in enumerate(rows, start=4):
+        guide.cell(offset, 1, label).font = Font(name=face, size=9, bold=True)
+        cell = guide.cell(offset, 2, note)
+        cell.font = Font(name=face, size=9, color=muted)
+        cell.alignment = Alignment(vertical="top", wrap_text=True)
+        guide.row_dimensions[offset].height = 26
+
+    # ── 금리표 ──────────────────────────────────────────────────
+    ws = wb.create_sheet("금리표")
+    ws.cell(1, 1, "노란 칸에 결산일 금리표를 옮겨 적으세요. 이율 칸은 비어 "
+                  "있습니다.").font = Font(name=face, size=9, italic=True, color=muted)
+
+    headers = ["순번", "기준일자", "구분", "등급", *CURVE_TENORS]
     for column, title in enumerate(headers, start=1):
-        cell = ws.cell(1, column, title)
-        cell.font = head_font
-        cell.fill = head_fill
-        cell.alignment = Alignment(horizontal="center")
+        cell = ws.cell(2, column, title)
+        cell.font = Font(name=face, size=9, bold=True, color="FFFFFF")
+        cell.fill = fill_head
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=True)
+        cell.border = border
         ws.column_dimensions[cell.column_letter].width = max(9, len(str(title)) + 3)
+    ws.row_dimensions[2].height = 26
 
     stamp = base_date or _dt.date.today()
     for offset, grade in enumerate(INVESTMENT_GRADES + ("국고채",)):
-        row = offset + 2
-        ws.cell(row, 1, offset + 1)
-        ws.cell(row, 2, stamp).number_format = "yyyy-mm-dd"
-        ws.cell(row, 3, "국고채권" if grade == "국고채" else "공모 무보증회사채")
-        ws.cell(row, 4, grade)
+        row = offset + 3
+        ws.cell(row, 1, offset + 1).font = Font(name=face, size=9)
+        date_cell = ws.cell(row, 2, stamp)
+        date_cell.number_format = "yyyy-mm-dd"
+        date_cell.font = Font(name=face, size=9, color="9C6500")
+        date_cell.fill = fill_input
+        ws.cell(row, 3, "국고채권" if grade == "국고채" else "공모 무보증회사채"
+                ).font = Font(name=face, size=9)
+        ws.cell(row, 4, grade).font = Font(name=face, size=9, bold=True)
+        for column in range(1, len(headers) + 1):
+            ws.cell(row, column).border = border
+            if column >= 5:                      # 이율 칸 — 채우는 자리
+                ws.cell(row, column).fill = fill_input
+                ws.cell(row, column).number_format = "0.000"
 
-    note_row = len(INVESTMENT_GRADES) + 4
-    note_font = Font(italic=True, color="808080")
-    warn = Font(bold=True, color="C00000")
-    ws.cell(note_row, 1, "이 파일을 채우는 법").font = warn
-    for offset, line in enumerate((
-        "· 이율 칸이 비어 있습니다. 채권평가사(KIS채권평가·한국자산평가 등)에서 받은 "
-        "결산일 금리표의 해당 등급 줄을 그대로 옮겨 넣으세요.",
-        "· 프로그램이 값을 채워 두지 않는 이유는, 할인율이 그날의 시장 자료이기 "
-        "때문입니다. 지어낸 값으로 산출하면 공시 숫자가 그대로 틀립니다.",
-        "· 3.404 처럼 퍼센트로 넣어도 되고 0.03404 처럼 소수로 넣어도 됩니다.",
-        "· 쓰지 않는 등급 줄은 지워도 되고 비워 두어도 됩니다 — 빈 줄은 읽지 않습니다.",
-        "· 기준일자를 결산일로 고치세요. 등급은 회사가 정한 회계정책을 따릅니다 "
-        "(국내 실무는 AA- 이상을 우량회사채로 보고, 그중 AA0 를 가장 많이 씁니다).",
-    ), start=1):
-        ws.cell(note_row + offset, 1, line).font = note_font
-
-    ws.freeze_panes = "E2"
+    ws.freeze_panes = ws.cell(3, 5)
     wb.save(path)
     return path
 

@@ -479,7 +479,10 @@ class TestLibraryOps:
 
         call("library_remove", kind="금리표", name="KIS_2025")
         after = call("library_list")["library"]["금리표"]
-        assert after["entries"] == [] and after["pinned"] == ""
+        # 내장 금리표는 처음 한 번 심어 두므로 목록에 남는다. 등록해 지운 것만
+        # 사라지면 된다.
+        user_made = [e for e in after["entries"] if not e["name"].startswith("내장")]
+        assert user_made == [] and after["pinned"] == ""
 
     def test_curve_rows_from_registered(self, tmp_path) -> None:
         source = _kis_book(tmp_path / "금리.xlsx")
@@ -728,10 +731,12 @@ class TestBackup:
 
         # 저장소를 통째로 잃은 기기(=새 PENSION_HOME)에서 되살린다.
         monkeypatch.setenv("PENSION_HOME", str(tmp_path / "새기기"))
-        assert call("library_list")["library"]["금리표"]["entries"] == []
+        fresh = call("library_list")["library"]["금리표"]["entries"]
+        assert [e["name"] for e in fresh if not e["name"].startswith("내장")] == []
 
         restored = call("backup_import", path=str(archive))
-        assert [e["name"] for e in restored["library"]["금리표"]["entries"]] == ["KIS_2025"]
+        names = [e["name"] for e in restored["library"]["금리표"]["entries"]]
+        assert "KIS_2025" in names
         assert [e["name"] for e in restored["library"]["명부"]["entries"]] == ["1번단체"]
         assert [r["name"] for r in restored["runs"]] == ["2412 1번단체"]
         # 되살린 산출의 입력이 실제로 열려야 한다.
