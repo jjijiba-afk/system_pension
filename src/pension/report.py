@@ -8,15 +8,16 @@
     개인별산출      1인 1행. 검산과 원가배분에 쓴다
     장기급여        기타장기종업원급여 개인별 산출
     검증리포트      명부 검증 이슈 전체
-    UpLoad_Jae      정규화된 재직자 업로드 명부
-    UpLoad_Toi      정규화된 퇴직자 업로드 명부
+    재직자명부      산출이 읽은 형태로 정리한 재직자 명부
+    퇴직자명부      산출이 읽은 형태로 정리한 퇴직자 명부
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+import datetime as _dt
+from typing import Any, Final
 
 from .errors import Severity
 from .pipeline import PensionRun
@@ -46,6 +47,8 @@ def _styles():
         "warn_fill": PatternFill("solid", fgColor="FFF6E0"),
         "info_fill": PatternFill("solid", fgColor="EEF3F8"),
         "center": Alignment(horizontal="center", vertical="center", wrap_text=True),
+        "wrap": Alignment(vertical="top", wrap_text=True),
+        "note": Font(color="5B6478"),
         "border": Border(left=thin, right=thin, top=thin, bottom=thin),
     }
 
@@ -87,13 +90,106 @@ def _write_table(
         else:
             ws.column_dimensions[letter].width = max(12, min(34, len(str(title)) + 6))
 
-    ws.freeze_panes = ws.cell(start_row + 1, 1).coordinate
     return row + 1
+
+
+
+#: 결과 파일에 무엇이 어디 있는지. (시트, 무엇이 있나, 언제 보나)
+SHEET_GUIDE: Final = (
+    ("검증", "명부에서 잡힌 오류·경고",
+     "가장 먼저. 오류가 있으면 아래 숫자를 믿을 수 없습니다"),
+    ("요약", "채무·근무원가·순부채 등 핵심 숫자",
+     "회계팀에 넘길 숫자는 여기서 가져갑니다"),
+    ("채무 증감", "기초에서 기말까지 무엇이 채무를 얼마나 바꿨나",
+     "전기 대비 왜 늘었는지 설명할 때"),
+    ("민감도", "할인율·임금상승률을 흔들었을 때의 채무",
+     "주석 공시(문단 145)에 그대로 실립니다"),
+    ("현금흐름", "앞으로 나갈 급여의 시점별 기대액",
+     "감사인이 채무를 재계산해 볼 때"),
+    ("적용가정", "이 산출에 실제로 쓴 기초율 전부",
+     "다른 회차와 비교하거나 근거를 물었을 때"),
+    ("개인별 결과", "한 사람 한 줄", "특정 사번의 금액을 확인할 때"),
+    ("장기급여 개인별", "장기급여 대상자 한 사람 한 줄",
+     "근속포상·장기근속휴가가 있는 회사만"),
+    ("재직자명부", "받은 명부를 산출이 읽은 형태로 정리한 것",
+     "무엇을 어떻게 읽었는지 되짚을 때"),
+    ("퇴직자명부", "위와 같음 (퇴직자)", ""),
+)
+
+
+def _guide_sheet(wb, run: PensionRun) -> None:
+    """맨 앞에 두는 안내.
+
+    파일을 열면 곧바로 표 한가운데로 떨어져서, 무엇을 보고 있는 것인지도
+    어디를 봐야 하는지도 알 수 없었다. 핵심 숫자와 검증 결과를 먼저 보이고,
+    시트마다 언제 쓰는 것인지 한 줄씩 적는다.
+    """
+    st = _styles()
+    ws = wb.create_sheet("이 파일 보는 법")
+    for column, width in (("A", 3), ("B", 24), ("C", 28), ("D", 52)):
+        ws.column_dimensions[column].width = width
+
+    ws["B2"] = "확정급여채무 산출결과"
+    ws["B2"].font = st["title"]
+    ws["B3"] = (f"산출기준일 {run.config.base_date}   ·   "
+                f"대상 {run.valuation.headcount:,}명   ·   "
+                f"작성 {_dt.date.today()}")
+    ws["B3"].font = st["note"]
+
+    row = 5
+    ws.cell(row, 2, "핵심 숫자").font = st["section"]
+    row += 1
+    headline: list[tuple[str, float]] = [
+        ("확정급여채무", run.valuation.dbo),
+        ("당기근무원가", run.valuation.service_cost),
+        ("차기 이자원가 (예상)", run.valuation.interest_cost),
+        ("퇴직금 추계액", run.valuation.accrued_benefit),
+    ]
+    if run.plan_assets is not None:
+        headline += [("사외적립자산 공정가치", run.plan_assets.closing_fair_value),
+                     ("순확정급여부채", run.plan_assets.net_liability)]
+    if run.longterm is not None:
+        headline.append(("장기급여채무", run.longterm.dbo))
+    for label, amount in headline:
+        ws.cell(row, 2, label).font = st["total"]
+        cell = ws.cell(row, 3, amount)
+        cell.number_format = _MONEY
+        cell.font = st["total"]
+        cell.fill = st["total_fill"]
+        ws.cell(row, 4, "원").font = st["note"]
+        row += 1
+
+    errors = len(run.issues.errors)
+    row += 1
+    ws.cell(row, 2, "명부 검증").font = st["total"]
+    verdict = ws.cell(row, 3, "이상 없음" if errors == 0 else f"오류 {errors}건")
+    verdict.font = st["total"]
+    verdict.fill = st["error_fill"] if errors else st["total_fill"]
+    ws.cell(row, 4, f"경고 {len(run.issues.warnings)}건 — 자세한 것은 [검증] 시트"
+            ).font = st["note"]
+
+    row += 2
+    ws.cell(row, 2, "시트 안내").font = st["section"]
+    row += 1
+    for column, title in ((2, "시트"), (3, "무엇이 있나"), (4, "언제 보나")):
+        cell = ws.cell(row, column, title)
+        cell.font = st["header"]
+        cell.fill = st["header_fill"]
+        cell.border = st["border"]
+    row += 1
+    for name, what, when in SHEET_GUIDE:
+        ws.cell(row, 2, name).font = st["total"]
+        ws.cell(row, 3, what)
+        ws.cell(row, 4, when).font = st["note"]
+        for column in (2, 3, 4):
+            ws.cell(row, column).border = st["border"]
+            ws.cell(row, column).alignment = st["wrap"]
+        row += 1
 
 
 def _summary_sheet(wb, run: PensionRun) -> None:
     st = _styles()
-    ws = wb.create_sheet("산출요약")
+    ws = wb.create_sheet("요약")
     ws.column_dimensions["A"].width = 4
     ws.column_dimensions["B"].width = 38
     ws.column_dimensions["C"].width = 22
@@ -123,7 +219,7 @@ def _summary_sheet(wb, run: PensionRun) -> None:
             ws.cell(row, 4, unit)
         row += 1
 
-    section("0. 산출 기준")
+    section("산출 기준")
     line("산출기준일", run.config.base_date, _DATE)
     curve = run.assumptions.discount
     if curve.flat is None:
@@ -136,12 +232,12 @@ def _summary_sheet(wb, run: PensionRun) -> None:
     line("기초율 가정", run.assumptions.label)
     row += 1
 
-    section("1. 인원 현황")
+    section("인원 현황")
     for label, value in run.headcount_summary().items():
         line(label, value, _MONEY, "명")
     row += 1
 
-    section("2. 확정급여채무 (퇴직급여)")
+    section("확정급여채무 (퇴직급여)")
     line("확정급여채무 (DBO)", run.valuation.dbo, _MONEY, "원")
     line("당기근무원가", run.valuation.service_cost, _MONEY, "원")
     line("이자원가 (차기 예상)", run.valuation.interest_cost, _MONEY, "원")
@@ -153,16 +249,37 @@ def _summary_sheet(wb, run: PensionRun) -> None:
         # 사유마다 지급률이 다른 규정에서는 합계만으로 검산이 안 된다. 어느
         # 사유가 채무를 얼마나 만들었는지 갈라 두어야 지급률 한 칸이 틀린 것을
         # 알아챈다. 합은 위 확정급여채무와 원 단위까지 같다.
-        section("2-1. 퇴직사유별 (급부별) 금액")
-        for name, share in causes.items():
-            line(f"{name} — 확정급여채무", share["dbo"], _MONEY, "원")
-            line(f"{name} — 당기근무원가", share["service_cost"], _MONEY, "원")
-        line("합계 (= 확정급여채무)",
-             sum(share["dbo"] for share in causes.values()), _MONEY, "원")
+        section("퇴직사유별 (급부별) 금액")
+        for column, title in ((2, "퇴직사유"), (3, "확정급여채무"),
+                              (4, "당기근무원가"), (5, "비중")):
+            cell = ws.cell(row, column, title)
+            cell.font = st["header"]
+            cell.fill = st["header_fill"]
+            cell.border = st["border"]
         row += 1
+        first_cause = row
+        for name, share in causes.items():
+            ws.cell(row, 2, name)
+            ws.cell(row, 3, share["dbo"]).number_format = _MONEY
+            ws.cell(row, 4, share["service_cost"]).number_format = _MONEY
+            # 합계는 수식으로 둔다. 박아 넣은 숫자는 감사인이 눌러 봐도 무엇을
+            # 더한 것인지 알 수 없다.
+            ws.cell(row, 5, f"=C{row}/$C${first_cause + len(causes)}"
+                    ).number_format = "0.0%"
+            for column in range(2, 6):
+                ws.cell(row, column).border = st["border"]
+            row += 1
+        ws.cell(row, 2, "합계 (= 확정급여채무)").font = st["total"]
+        ws.cell(row, 3, f"=SUM(C{first_cause}:C{row - 1})").number_format = _MONEY
+        ws.cell(row, 4, f"=SUM(D{first_cause}:D{row - 1})").number_format = _MONEY
+        for column in range(2, 6):
+            ws.cell(row, column).border = st["border"]
+            ws.cell(row, column).font = st["total"]
+            ws.cell(row, column).fill = st["total_fill"]
+        row += 2
 
     if run.longterm is not None:
-        section("3. 기타장기종업원급여")
+        section("기타장기종업원급여")
         line("장기급여채무", run.longterm.dbo, _MONEY, "원")
         line("당기근무원가", run.longterm.service_cost, _MONEY, "원")
         line("이자원가 (차기 예상)", run.longterm.interest_cost, _MONEY, "원")
@@ -171,26 +288,27 @@ def _summary_sheet(wb, run: PensionRun) -> None:
 
     if run.plan_assets is not None:
         assets = run.plan_assets
-        section("3-2. 사외적립자산 · 순확정급여부채")
+        section("사외적립자산 · 순확정급여부채")
         line("사외적립자산 공정가치", assets.closing_fair_value, _MONEY, "원")
         line("순확정급여부채", assets.net_liability, _MONEY, "원")
         line("적립비율", assets.funded_ratio, "0.0%", "")
         row += 1
 
-    section("4. 당기 지급 실적")
+    section("당기 지급 실적")
     line("퇴직급여 지급액", run.benefits_paid, _MONEY, "원")
     line("정산 지급액 (중간정산·DC전환·전출)", run.settlements_paid, _MONEY, "원")
     line("사외적립자산 지급액", run.fund_assets_paid, _MONEY, "원")
     line("장기종업원급여 지급액", run.longterm_paid, _MONEY, "원")
     row += 1
 
-    section("5. 직군별 확정급여채무")
+    section("직군별 확정급여채무")
     ws.cell(row, 2, "직군").font = st["total"]
     ws.cell(row, 3, "인원").font = st["total"]
     ws.cell(row, 4, "확정급여채무").font = st["total"]
     ws.cell(row, 5, "당기근무원가").font = st["total"]
     ws.column_dimensions["E"].width = 18
     row += 1
+    first_group = row
     for group, (count, dbo, sc) in run.valuation.by_job_group().items():
         ws.cell(row, 2, group)
         ws.cell(row, 3, count).number_format = _MONEY
@@ -203,9 +321,10 @@ def _summary_sheet(wb, run: PensionRun) -> None:
         cell.fill = st["total_fill"]
         cell.font = st["total"]
     ws.cell(row, 2, "합계")
-    ws.cell(row, 3, run.valuation.headcount).number_format = _MONEY
-    ws.cell(row, 4, run.valuation.dbo).number_format = _MONEY
-    ws.cell(row, 5, run.valuation.service_cost).number_format = _MONEY
+    for column, letter in ((3, "C"), (4, "D"), (5, "E")):
+        ws.cell(row, column,
+                f"=SUM({letter}{first_group}:{letter}{row - 1})"
+                ).number_format = _MONEY
 
     errors = len(run.issues.errors)
     warnings = len(run.issues.warnings)
@@ -221,7 +340,7 @@ def _rollforward_sheet(wb, run: PensionRun) -> None:
     if run.rollforward is None:
         return
     st = _styles()
-    ws = wb.create_sheet("증감분석")
+    ws = wb.create_sheet("채무 증감")
     ws["B2"] = "확정급여채무 증감분석 (Roll-forward)"
     ws["B2"].font = st["title"]
     ws.column_dimensions["B"].width = 34
@@ -307,7 +426,7 @@ def _sensitivity_sheet(wb, run: PensionRun) -> None:
     if run.sensitivity is None:
         return
     st = _styles()
-    ws = wb.create_sheet("민감도분석")
+    ws = wb.create_sheet("민감도")
     ws["B2"] = "확정급여채무 민감도분석"
     ws["B2"].font = st["title"]
 
@@ -326,12 +445,12 @@ def _sensitivity_sheet(wb, run: PensionRun) -> None:
 
 
 def _member_sheet(wb, run: PensionRun) -> None:
-    ws = wb.create_sheet("개인별산출")
+    ws = wb.create_sheet("개인별 결과")
     headers = [
         "사번", "성명", "직군", "성별", "원가코드", "제도구분", "연령", "근속연수",
-        "정년연령", "투영연수", "30일 평균임금", "퇴직급여추계액", "확정급여채무",
-        "당기근무원가", "이자원가", "듀레이션", "지급률 규정",
-        "누진 보전 근속", "누진 보전 율", "제외사유",
+        "정년연령", "남은 근무연수", "30일 평균임금", "퇴직금 추계액", "확정급여채무",
+        "당기근무원가", "차기 이자원가", "잔존만기(년)", "적용 지급률 규정",
+        "누진보전 근속연수", "누진보전 지급률", "산출 제외사유",
     ]
     rows = [
         [
@@ -357,11 +476,11 @@ def _member_sheet(wb, run: PensionRun) -> None:
 def _longterm_sheet(wb, run: PensionRun) -> None:
     if run.longterm is None:
         return
-    ws = wb.create_sheet("장기급여")
+    ws = wb.create_sheet("장기급여 개인별")
     headers = [
-        "사번", "성명", "직군", "연령", "근속연수", "일 기본급",
-        "다음 지급 근속", "남은 지급 횟수", "장기급여채무", "당기근무원가",
-        "이자원가", "제외사유",
+        "사번", "성명", "직군", "연령", "근속연수", "1일 통상임금",
+        "다음 지급 시점(근속)", "남은 지급 횟수", "장기급여채무", "당기근무원가",
+        "차기 이자원가", "산출 제외사유",
     ]
     rows = [
         [
@@ -380,19 +499,19 @@ def _longterm_sheet(wb, run: PensionRun) -> None:
 
 def _issues_sheet(wb, run: PensionRun) -> None:
     st = _styles()
-    ws = wb.create_sheet("검증리포트")
-    headers = ["심각도", "시트", "행", "열", "순번", "사번", "코드", "내용", "값"]
+    ws = wb.create_sheet("검증")
+    headers = ["심각도", "어디", "행", "열", "순번", "사번", "내용", "값", "코드"]
     rows = [
         [
             issue.severity.value, issue.sheet, issue.row, issue.column,
-            issue.seq, issue.employee_id, issue.code, issue.message, issue.value,
+            issue.seq, issue.employee_id, issue.message, issue.value, issue.code,
         ]
         for issue in run.issues
     ]
     if not rows:
-        rows = [["-", "-", None, "-", None, "-", "-", "검증 이슈가 없습니다", "-"]]
+        rows = [["-", "-", None, "-", None, "-", "검증 이슈가 없습니다", "-", "-"]]
 
-    next_row = _write_table(ws, headers, rows, widths={8: 60, 9: 20})
+    next_row = _write_table(ws, headers, rows, widths={7: 60, 8: 20})
 
     fills = {
         Severity.ERROR: st["error_fill"],
@@ -414,7 +533,7 @@ def _issues_sheet(wb, run: PensionRun) -> None:
 
 def _upload_sheet(wb, title: str, headers: tuple[str, ...], rows: list[list[Any]]) -> None:
     ws = wb.create_sheet(title)
-    if "Jae" in title:
+    if title == "재직자명부":
         # 생년월일·입사일자·중간정산일 / 전입일 / 추가지급 기준일
         date_cols = {7, 8, 9, 20, 33}
         # 평균임금·명퇴임금·추계액·일기본급 / 중간정산금액 / 장기급여·전입액 / 추가지급 기본급
@@ -442,7 +561,7 @@ def _cashflow_sheet(wb, run: PensionRun) -> None:
         return
 
     st = _styles()
-    ws = wb.create_sheet("기대현금흐름")
+    ws = wb.create_sheet("현금흐름")
     ws["B2"] = "기대 급여 현금흐름 (퇴직급여 확정급여채무)"
     ws["B2"].font = st["title"]
     ws.cell(3, 2, "탈퇴는 연 중앙(t-0.5)에, 정년퇴직은 연말에 일어난 것으로 봅니다. "
@@ -628,6 +747,10 @@ def write_report(run: PensionRun, path: str | Path) -> Path:
     wb = openpyxl.Workbook()
     del wb["Sheet"]
 
+    # 읽는 순서대로 둔다. 검증이 맨 앞인 것은, 오류가 있으면 그 뒤의 숫자를
+    # 쓸 수 없기 때문이다 — 뒤에 두면 다 보고 나서야 알게 된다.
+    _guide_sheet(wb, run)
+    _issues_sheet(wb, run)
     _summary_sheet(wb, run)
     _rollforward_sheet(wb, run)
     _sensitivity_sheet(wb, run)
@@ -635,9 +758,8 @@ def write_report(run: PensionRun, path: str | Path) -> Path:
     _assumption_sheet(wb, run)
     _member_sheet(wb, run)
     _longterm_sheet(wb, run)
-    _issues_sheet(wb, run)
-    _upload_sheet(wb, "UpLoad_Jae", ACTIVE_UPLOAD_HEADERS, run.active_upload)
-    _upload_sheet(wb, "UpLoad_Toi", RETIRED_UPLOAD_HEADERS, run.retired_upload)
+    _upload_sheet(wb, "재직자명부", ACTIVE_UPLOAD_HEADERS, run.active_upload)
+    _upload_sheet(wb, "퇴직자명부", RETIRED_UPLOAD_HEADERS, run.retired_upload)
 
     wb.save(path)
     return path

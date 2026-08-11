@@ -290,7 +290,6 @@ def write_member_export(run: PensionRun, path: str | Path) -> Path:
         cell.number_format = fmt or _MONEY
         cell.border = border
 
-    ws.freeze_panes = ws.cell(header_row + 1, 3)
     ws.auto_filter.ref = (
         f"A{header_row}:{get_column_letter(len(_COLUMNS))}{header_row + len(rows)}"
     )
@@ -333,7 +332,6 @@ def write_member_export(run: PensionRun, path: str | Path) -> Path:
             cell.border = border
             if col > 2:
                 cell.number_format = _MONEY
-        sheet.freeze_panes = "A2"
 
     summary_sheet(COST_SHEET, "원가코드", _group_by(rows, lambda r: r.cost_code))
     summary_sheet(GROUP_SHEET, "직군", _group_by(rows, lambda r: r.job_group))

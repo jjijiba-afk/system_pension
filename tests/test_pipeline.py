@@ -290,8 +290,8 @@ class TestReport:
 
         wb = openpyxl.load_workbook(path)
         assert set(wb.sheetnames) == {
-            "산출요약", "증감분석", "민감도분석", "기대현금흐름", "적용가정", "개인별산출",
-            "장기급여", "검증리포트", "UpLoad_Jae", "UpLoad_Toi",
+            "요약", "채무 증감", "민감도", "현금흐름", "적용가정", "이 파일 보는 법", "개인별 결과",
+            "장기급여 개인별", "검증", "재직자명부", "퇴직자명부",
         }
 
     def test_member_sheet_has_one_row_per_person(
@@ -304,7 +304,7 @@ class TestReport:
         ))
         path = write_report(run, tmp_path / "결과.xlsx")
         wb = openpyxl.load_workbook(path)
-        assert wb["개인별산출"].max_row == len(run.valuation.members) + 1
+        assert wb["개인별 결과"].max_row == len(run.valuation.members) + 1
 
 
 def test_load_inputs_returns_all_four_pieces(
@@ -441,7 +441,7 @@ class TestReportAuditTrail:
         """시트의 두 열(지급액·현가계수)만으로 채무가 재계산되어야 한다."""
         run, path = self._report(roster_path, assumptions_path, tmp_path)
 
-        ws = openpyxl.load_workbook(path, data_only=True)["기대현금흐름"]
+        ws = openpyxl.load_workbook(path, data_only=True)["현금흐름"]
         rows = [
             (ws.cell(r, 1).value, ws.cell(r, 2).value, ws.cell(r, 3).value)
             for r in range(6, ws.max_row + 1)
@@ -456,7 +456,7 @@ class TestReportAuditTrail:
     ) -> None:
         run, path = self._report(roster_path, assumptions_path, tmp_path)
 
-        ws = openpyxl.load_workbook(path, data_only=True)["기대현금흐름"]
+        ws = openpyxl.load_workbook(path, data_only=True)["현금흐름"]
         rate = run.valuation.single_discount_rate()
         rows = [
             (ws.cell(r, 1).value, ws.cell(r, 2).value)

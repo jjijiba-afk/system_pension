@@ -126,8 +126,8 @@ class TestCommands:
         assert main(["upload", str(roster_path), "-o", str(out)]) == 0
 
         wb = openpyxl.load_workbook(out)
-        assert wb.sheetnames == ["UpLoad_Jae", "UpLoad_Toi"]
-        assert wb["UpLoad_Jae"].max_row == 6  # 머리글 + 재직자 5명
+        assert wb.sheetnames == ["재직자명부", "퇴직자명부"]
+        assert wb["재직자명부"].max_row == 6  # 머리글 + 재직자 5명
 
     def test_missing_file_returns_nonzero(self, tmp_path: Path, capsys) -> None:
         assert main(["check", str(tmp_path / "없는명부.xlsx")]) == 2

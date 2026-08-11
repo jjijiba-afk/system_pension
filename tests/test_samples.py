@@ -618,7 +618,7 @@ class TestByCause:
         run = self._run(pack, tmp_path)
         target = tmp_path / "결과.xlsx"
         write_report(run, target)
-        ws = openpyxl.load_workbook(target)["산출요약"]
+        ws = openpyxl.load_workbook(target)["요약"]
         labels = [ws.cell(r, 2).value for r in range(1, ws.max_row + 1)]
         assert any("퇴직사유별" in str(v) for v in labels)
         assert any(v == "합계 (= 확정급여채무)" for v in labels)

@@ -1062,7 +1062,6 @@ def write_case_roster(
                 if index is None or value == "":
                     continue
                 ws.cell(row, index, value)
-        ws.freeze_panes = ws.cell(first_row, 3)
 
     sheet(ACTIVE_SHEET, ACTIVE_COLUMNS, ACTIVE_HEADER_ALIASES, ACTIVE_FIRST_ROW, actives)
     sheet(RETIRED_SHEET, RETIRED_COLUMNS, RETIRED_HEADER_ALIASES, RETIRED_FIRST_ROW, retirees)

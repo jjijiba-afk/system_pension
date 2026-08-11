@@ -532,14 +532,13 @@ def _cmd_upload(args: argparse.Namespace) -> int:
     out = openpyxl.Workbook()
     del out["Sheet"]
     for title, headers, rows in (
-        ("UpLoad_Jae", ACTIVE_UPLOAD_HEADERS, active),
-        ("UpLoad_Toi", RETIRED_UPLOAD_HEADERS, retired),
+        ("재직자명부", ACTIVE_UPLOAD_HEADERS, active),
+        ("퇴직자명부", RETIRED_UPLOAD_HEADERS, retired),
     ):
         ws = out.create_sheet(title)
         ws.append(list(headers))
         for row in rows:
             ws.append(row)
-        ws.freeze_panes = "A2"
     out.save(args.output)
 
     print(f"재직자 {len(active):,}명 / 퇴직자 {len(retired):,}명 → {args.output}")

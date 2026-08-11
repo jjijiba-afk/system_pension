@@ -194,7 +194,6 @@ def _sheet(wb, name: str, columns: list, first_row: int = 4, second: dict | None
         cell.border = BORDER
 
     ws.row_dimensions[3].height = 34
-    ws.freeze_panes = ws.cell(first_row, 4)
     return ws
 
 

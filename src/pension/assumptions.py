@@ -1045,7 +1045,6 @@ def write_assumptions(
         for offset, values in enumerate(rows, start=2):
             for col, value in enumerate(values, start=1):
                 ws.cell(offset, col, value)
-        ws.freeze_panes = "A2"
 
     for name, (headers, rows) in sheets.items():
         write_sheet(name, headers, rows)
@@ -1095,7 +1094,6 @@ def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
             for col, value in enumerate(values, start=1):
                 ws.cell(offset, col, value)
         ws.cell(len(rows) + 3, 1, note).font = note_font
-        ws.freeze_panes = "A2"
 
     make(
         DISCOUNT_SHEET, ["연차", "할인율"],

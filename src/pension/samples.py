@@ -205,7 +205,6 @@ def write_standard_assumptions(
             ws.cell(tail, 1, warn).font = warn_font
             tail += 1
         ws.cell(tail, 1, note).font = note_font
-        ws.freeze_panes = "A2"
 
     make(
         DISCOUNT_SHEET, ["연차", "할인율"], discount_rows or [list(r) for r in DISCOUNT_RATE],
@@ -354,7 +353,6 @@ def write_standard_table(path: str | Path) -> Path:
                 "· 마지막 줄(70세) 값이 그 이후 전 연령에 적용됩니다 — 표를 계단식으로 "
                 "읽으므로 110세까지 적어 둔 원표와 결과가 같습니다.")
         ws.cell(last + 1, 1).font = note_font
-        ws.freeze_panes = "C2"
 
     del wb["Sheet"]
     wb.save(path)
@@ -454,7 +452,6 @@ def write_curve_template(path: str | Path, *,
                 ws.cell(row, column).fill = fill_input
                 ws.cell(row, column).number_format = "0.000"
 
-    ws.freeze_panes = ws.cell(3, 5)
     wb.save(path)
     return path
 
