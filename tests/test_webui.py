@@ -1115,9 +1115,11 @@ class TestPlanAssetsAndAmendment:
 
         case = self._pack(tmp_path)
         wb = openpyxl.load_workbook(case["roster"])
-        ws = wb["1)일반사항"]
+        ws = wb["사외적립자산"]
         # 기말 잔액을 흔든다. 구성 열(DB퇴직연금)이 합계보다 우선하므로 거기를 고친다.
-        ws.cell(90, 5, float(ws.cell(90, 5).value) + 9_103_134)
+        closing = next(r for r in range(1, ws.max_row + 1)
+                       if str(ws.cell(r, 2).value or "").startswith("기말 잔액"))
+        ws.cell(closing, 3, float(ws.cell(closing, 3).value) + 9_103_134)
         broken = str(tmp_path / "안맞는표.xlsx")
         wb.save(broken)
 
@@ -1130,7 +1132,9 @@ class TestPlanAssetsAndAmendment:
 
         case = self._pack(tmp_path)
         wb = openpyxl.load_workbook(case["roster"])
-        del wb["1)일반사항"]
+        # 자산·규정·기본정보를 모두 뺀다 — 셋 중 하나만 남아도 읽을 것이 있다.
+        for name in ("사외적립자산", "퇴직급여규정", "기본정보"):
+            del wb[name]
         stripped = str(tmp_path / "일반사항없음.xlsx")
         wb.save(stripped)
 
@@ -1139,7 +1143,7 @@ class TestPlanAssetsAndAmendment:
         assert info["found"] == []
 
     def test_the_roster_sheet_fills_the_asset_table_by_itself(self, tmp_path) -> None:
-        """명부의 ``1)일반사항`` 에 표가 있으면 손으로 안 넣어도 나와야 한다."""
+        """명부의 ``사외적립자산`` 에 표가 있으면 손으로 안 넣어도 나와야 한다."""
         case = self._pack(tmp_path)
         report = call("run", roster=case["roster"], assumptions=case["assumptions"],
                       work=str(tmp_path), sensitivity=False, longterm=False)
@@ -1166,7 +1170,7 @@ class TestPlanAssetsAndAmendment:
         import openpyxl
 
         source = openpyxl.load_workbook(case_roster := self._pack(tmp_path)["roster"])
-        del source["1)일반사항"]
+        del source["사외적립자산"]
         stripped = str(tmp_path / "일반사항없음.xlsx")
         source.save(stripped)
         assert case_roster != stripped

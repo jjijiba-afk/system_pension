@@ -152,10 +152,20 @@ SECOND_RETIRED = {
 }
 
 
-def _sheet(wb, name: str, columns: list, first_row: int = 4, second: dict | None = None):
+def _sheet(wb, name: str, columns: list, first_row: int = 4, second: dict | None = None,
+           rows: list[dict] | None = None, extras: tuple[str, ...] = ()):
+    """명부 시트 한 장.
+
+    :param rows: 채워 넣을 자료. 주면 작성 예시 두 줄 대신 이것을 적는다.
+        열쇠는 **열 이름** 이다(:data:`ACTIVE` 의 두 번째 항목).
+    :param extras: 고정 서식에 없는 열. 오른쪽에 덧붙인다 — 회사가 누진 보전·
+        지급구간처럼 자기네 열을 더해 보내는 모양 그대로다.
+    """
+    columns = list(columns) + [("기타", label, "", "", "") for label in extras]
+
     ws = wb.create_sheet(name)
-    ws.cell(1, 1, f"{name} — 색이 진한 앞쪽 열이 필수입니다. "
-                  f"노란 줄은 작성 예시이니 지우고 쓰세요.")
+    ws.cell(1, 1, f"{name} — 색이 진한 앞쪽 열이 필수입니다."
+                  + ("" if rows else " 노란 줄은 작성 예시이니 지우고 쓰세요."))
     ws.cell(1, 1).font = Font(name=FACE, size=9, italic=True, color="5B6478")
 
     # 2행: 블록 이름을 병합해 얹는다. 어디까지가 필수인지 한눈에 보이게.
@@ -181,17 +191,29 @@ def _sheet(wb, name: str, columns: list, first_row: int = 4, second: dict | None
         cell.border = BORDER
         ws.column_dimensions[get_column_letter(index)].width = max(11, min(18, len(label) + 5))
 
-        sample_cell = ws.cell(first_row, index, sample)
-        sample_cell.font = Font(name=FACE, size=9, color="9C6500")
-        sample_cell.fill = PatternFill("solid", fgColor="FFF2CC")
-        sample_cell.border = BORDER
+        if rows is None:
+            sample_cell = ws.cell(first_row, index, sample)
+            sample_cell.font = Font(name=FACE, size=9, color="9C6500")
+            sample_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+            sample_cell.border = BORDER
 
-    for index, (block, label, _mean, _sample, _blank) in enumerate(columns, start=1):
-        value = (second or {}).get(label)
-        cell = ws.cell(first_row + 1, index, value)
-        cell.font = Font(name=FACE, size=9, color="9C6500")
-        cell.fill = PatternFill("solid", fgColor="FFF2CC")
-        cell.border = BORDER
+    if rows is None:
+        for index, (block, label, _mean, _sample, _blank) in enumerate(columns, start=1):
+            value = (second or {}).get(label)
+            cell = ws.cell(first_row + 1, index, value)
+            cell.font = Font(name=FACE, size=9, color="9C6500")
+            cell.fill = PatternFill("solid", fgColor="FFF2CC")
+            cell.border = BORDER
+    else:
+        where = {label: index for index, (_b, label, *_r) in enumerate(columns, start=1)}
+        body = Font(name=FACE, size=9)
+        for offset, record in enumerate(rows):
+            row = first_row + offset
+            for label, value in record.items():
+                index = where.get(label)
+                if index is None or value == "":
+                    continue
+                ws.cell(row, index, value).font = body
 
     ws.row_dimensions[3].height = 34
     return ws
@@ -263,8 +285,15 @@ def _guide(wb) -> None:
         row += 2
 
 
-def _basics(wb) -> None:
-    """예전 ``Input`` 시트. 'C3 에 넣으세요' 대신 이름을 붙인다."""
+def _basics(wb, *, values: dict | None = None, groups: list | None = None,
+            note: str = "") -> None:
+    """예전 ``Input`` 시트. 'C3 에 넣으세요' 대신 이름을 붙인다.
+
+    :param values: 항목 이름 → 값. 주면 예시 대신 이 값을 적는다.
+    :param groups: 직군 규칙 표의 줄들. ``(명부 직군, 산출 직군, 정년, 장기급여
+        정년, 가산연수)``.
+    """
+    filled = values is not None
     ws = wb.create_sheet("기본정보", 1)
     ws.column_dimensions["A"].width = 22
     ws.column_dimensions["B"].width = 22
@@ -272,7 +301,7 @@ def _basics(wb) -> None:
 
     ws["A1"] = "기본정보"
     ws["A1"].font = Font(name=FACE, size=14, bold=True, color="1F3864")
-    ws["A2"] = "노란 칸만 채우면 됩니다."
+    ws["A2"] = note or "노란 칸만 채우면 됩니다."
     ws["A2"].font = Font(name=FACE, size=9, color="5B6478")
 
     rows = [
@@ -283,11 +312,15 @@ def _basics(wb) -> None:
         ("회사채 신용등급", "AA-", "할인율로 쓸 회사채 등급. AAA·AA+·AA0·AA-·A+·A0·A- 중"),
         ("평균임금 하한 점검액", 0, "이보다 낮은 평균임금을 오류로 봅니다. 0 이면 점검 안 함"),
     ]
+    if filled:
+        rows = [(label, values.get(label, value), note_)
+                for label, value, note_ in rows]
     for offset, (label, value, note) in enumerate(rows, start=3):
         ws.cell(offset, 1, label).font = Font(name=FACE, size=9, bold=True)
         cell = ws.cell(offset, 2, value)
-        cell.font = Font(name=FACE, size=9, color="0000FF")
-        cell.fill = PatternFill("solid", fgColor="FFFF00")
+        cell.font = Font(name=FACE, size=9, color="000000" if filled else "0000FF")
+        if not filled:
+            cell.fill = PatternFill("solid", fgColor="FFFF00")
         cell.border = BORDER
         ws.cell(offset, 3, note).font = Font(name=FACE, size=9, color="5B6478")
 
@@ -303,11 +336,13 @@ def _basics(wb) -> None:
         cell.fill = PatternFill("solid", fgColor="44546A")
         cell.border = BORDER
         ws.column_dimensions[get_column_letter(index)].width = max(14, len(head) + 6)
-    for offset, group in enumerate(("정규직", "계약직", "임원"), start=13):
-        for index, value in enumerate((group, group, 60, 60, 2), start=1):
+    table = groups or [(group, group, 60, 60, 2) for group in ("정규직", "계약직", "임원")]
+    for offset, line in enumerate(table, start=13):
+        for index, value in enumerate(line, start=1):
             cell = ws.cell(offset, index, value)
-            cell.font = Font(name=FACE, size=9, color="9C6500")
-            cell.fill = PatternFill("solid", fgColor="FFF2CC")
+            cell.font = Font(name=FACE, size=9, color="000000" if filled else "9C6500")
+            if not filled:
+                cell.fill = PatternFill("solid", fgColor="FFF2CC")
             cell.border = BORDER
 
 
@@ -342,8 +377,11 @@ SPECIAL_ROWS = [
 ]
 
 
-def _rules(wb, *, filled: bool = False) -> None:
-    """퇴직급여 지급규정과 특이사항. 예전 ``1)일반사항`` 의 지급규정 칸."""
+def _rules(wb, *, filled: bool = False, specials: dict[str, str] | None = None) -> None:
+    """퇴직급여 지급규정과 특이사항. 예전 ``1)일반사항`` 의 지급규정 칸.
+
+    :param specials: 특이사항 구분 → 내용. 주면 그 줄을 채운 채로 낸다.
+    """
     ws = wb.create_sheet("퇴직급여규정", 2)
     ws.column_dimensions["A"].width = 3
     ws.column_dimensions["B"].width = 22
@@ -383,7 +421,11 @@ def _rules(wb, *, filled: bool = False) -> None:
     row = _band(row, "특이사항", ("구분", "내용", "적는 법"))
     for label, sample in SPECIAL_ROWS:
         ws.cell(row, 2, label).font = Font(name=FACE, size=9, bold=True)
-        cell = ws.cell(row, 3, sample if filled else "")
+        if specials is not None:
+            written = specials.get(label, "")
+        else:
+            written = sample if filled else ""
+        cell = ws.cell(row, 3, written)
         cell.font = Font(name=FACE, size=9)
         cell.fill = PatternFill("solid", fgColor="FFFFFF")
         ws.cell(row, 4, sample).font = Font(name=FACE, size=9, color="9C6500")
@@ -441,12 +483,22 @@ ASSET_BREAKDOWN = [
 ]
 
 
-def _assets(wb, *, filled: bool = False) -> None:
+def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     """사외적립자산 증감표와 세부내역.
 
     표 제목과 항목 이름은 지금 프로그램이 찾는 말 그대로 두었다. 시트 이름만
     ``1)일반사항`` 에서 바뀐다.
+
+    :param numbers: 채워 넣을 금액. 열쇠는 ``obligation``(항목→금액),
+        ``asset``(항목→(DB, 국민연금전환금)), ``opening``·``closing``(둘의 짝),
+        ``breakdown``(분류→금액), ``extras``(항목→금액). 주면 예시 대신 이것을
+        적는다. 검산줄이 0 이 되도록 **부르는 쪽이** 기말을 역산해 넘겨야 한다.
     """
+    filled = filled or numbers is not None
+    numbers = numbers or {}
+    obligation_of = numbers.get("obligation")
+    asset_of = numbers.get("asset")
+
     ws = wb.create_sheet("사외적립자산", 3)
     for column, width in (("A", 4), ("B", 34), ("C", 18), ("D", 18),
                           ("E", 18), ("F", 52)):
@@ -494,7 +546,7 @@ def _assets(wb, *, filled: bool = False) -> None:
     row = 6
     for sign, text_, amount in OBLIGATION_ROWS:
         label(row, sign, text_)
-        money(row, 3, amount)
+        money(row, 3, amount if obligation_of is None else obligation_of.get(text_, 0))
         row += 1
 
     # 자산 변동내역
@@ -505,15 +557,20 @@ def _assets(wb, *, filled: bool = False) -> None:
         Font(name=FACE, size=9, color="5B6478"))
     head(row + 1, ((2, "구분"), (3, "DB퇴직연금"), (4, "국민연금전환금"), (5, "합계")))
 
+    opening = numbers.get("opening", ASSET_OPENING)
+    closing = numbers.get("closing", ASSET_CLOSING)
+
     opening_row = row + 2
     label(opening_row, "", "기초 잔액 (전기말)")
-    money(opening_row, 3, ASSET_OPENING[0])
-    money(opening_row, 4, ASSET_OPENING[1])
+    money(opening_row, 3, opening[0])
+    money(opening_row, 4, opening[1])
     money(opening_row, 5, f"=C{opening_row}+D{opening_row}", formula=True)
 
     row = opening_row + 1
     for sign, text_, db, pension in ASSET_ROWS:
         label(row, sign, text_)
+        if asset_of is not None:
+            db, pension = asset_of.get(text_, (0, 0))
         money(row, 3, db)
         money(row, 4, pension)
         money(row, 5, f"=C{row}+D{row}", formula=True)
@@ -522,8 +579,8 @@ def _assets(wb, *, filled: bool = False) -> None:
 
     closing_row = row
     label(closing_row, "", "기말 잔액 (결산일)")
-    money(closing_row, 3, ASSET_CLOSING[0])
-    money(closing_row, 4, ASSET_CLOSING[1])
+    money(closing_row, 3, closing[0])
+    money(closing_row, 4, closing[1])
     money(closing_row, 5, f"=C{closing_row}+D{closing_row}", formula=True)
 
     verify_row = closing_row + 1
@@ -550,7 +607,7 @@ def _assets(wb, *, filled: bool = False) -> None:
     head(row + 1, ((2, "자산 분류"), (3, "공정가치")))
     row += 2
     first_detail = row
-    for name, amount in ASSET_BREAKDOWN:
+    for name, amount in numbers.get("breakdown", ASSET_BREAKDOWN):
         cell = ws.cell(row, 2, name)
         cell.font = Font(name=FACE, size=9)
         cell.border = BORDER
@@ -575,31 +632,78 @@ def _assets(wb, *, filled: bool = False) -> None:
         ("기준일 현재 미지급 퇴직급여", 0,
          "이미 퇴직했는데 결산일까지 못 준 금액. 순확정급여부채에 더합니다"),
         ("기중 장기근속 지급액", 0, "장기급여(근속포상·휴가)로 기중에 나간 금액"),
-        ("기중 장기근속 받은 금액", 0, "전입 등으로 기중에 들어온 장기급여"),
+        # '받은금액' 을 붙여 쓴다 — 프로그램이 찾는 말이 그것이라, 띄우면 못 읽는다.
+        ("기중 장기근속 받은금액", 0, "전입 등으로 기중에 들어온 장기급여"),
     ]
+    given = numbers.get("extras", {})
     for name, amount, note in extras:
         label(row, "", name)
-        money(row, 3, amount)
+        money(row, 3, given.get(name, amount))
         ws.cell(row, 4, note).font = Font(name=FACE, size=9, color="5B6478")
         row += 1
 
 
 
 
-def write_roster_template(path: str | Path) -> Path:
-    """빈 명부 양식을 만든다."""
+def build_workbook(
+    *,
+    basics: dict | None = None,
+    groups: list | None = None,
+    note: str = "",
+    rules_filled: bool = False,
+    specials: dict[str, str] | None = None,
+    numbers: dict | None = None,
+    actives: list[dict] | None = None,
+    retirees: list[dict] | None = None,
+    active_extras: tuple[str, ...] = (),
+    retired_extras: tuple[str, ...] = (),
+):
+    """이 양식대로 된 통합문서 하나.
+
+    빈 양식과 시험용 명부가 **같은 서식** 이어야 한다. 따로 만들면 회사에 보낸
+    양식과 우리가 시험하는 명부가 서서히 갈라져, 정작 받아 본 파일에서 처음
+    어긋난다. 그래서 시트를 만드는 곳은 여기 하나다.
+    """
     import openpyxl
 
-    path = Path(path)
     wb = openpyxl.Workbook()
     del wb["Sheet"]
     _guide(wb)
-    _basics(wb)
-    _rules(wb)
-    _assets(wb)
-    _sheet(wb, "재직자명부", ACTIVE, second=SECOND_ACTIVE)
-    _sheet(wb, "퇴직자명부", RETIRED, second=SECOND_RETIRED)
-    wb.save(path)
+    _basics(wb, values=basics, groups=groups, note=note)
+    _rules(wb, filled=rules_filled, specials=specials)
+    _assets(wb, numbers=numbers)
+    _sheet(wb, "재직자명부", ACTIVE, second=SECOND_ACTIVE,
+           rows=actives, extras=active_extras)
+    _sheet(wb, "퇴직자명부", RETIRED, second=SECOND_RETIRED,
+           rows=retirees, extras=retired_extras)
+    return wb
+
+
+def label_for(columns: list, aliases: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    """필드명 → 이 양식의 열 이름.
+
+    :mod:`pension.layout` 의 별칭표와 맞대어 짓는다. 이름을 손으로 한 벌 더
+    적어 두면 한쪽만 고쳐졌을 때 조용히 어긋난다.
+    """
+    from .layout import normalize_header
+
+    known: dict[str, str] = {}
+    for key, names in aliases.items():
+        for name in names:
+            known.setdefault(normalize_header(name), key)
+
+    found: dict[str, str] = {}
+    for _block, label, *_rest in columns:
+        key = known.get(normalize_header(label))
+        if key:
+            found.setdefault(key, label)
+    return found
+
+
+def write_roster_template(path: str | Path) -> Path:
+    """빈 명부 양식을 만든다."""
+    path = Path(path)
+    build_workbook().save(path)
     _embed_values(path)
     return path
 

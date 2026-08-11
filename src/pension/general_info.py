@@ -519,7 +519,10 @@ def _read_assets(ws) -> AssetMovement:
     detail = _find_row(ws, "사외적립자산 세부내역")
     if detail:
         name_col = 2 if text(ws.cell(detail + 1, 2).value).startswith("자산") else 3
-        for row in range(detail + 1, detail + 14):
+        # 세부내역 다음에 오는 표에서 멈춘다. 고정 길이로 훑으면 그 표의 금액이
+        # 자산 분류로 딸려 들어와, 분류별 합계가 기말 잔액과 어긋난다.
+        stop = _find_row(ws, "그 밖의 입력", start=detail + 1) or (detail + 14)
+        for row in range(detail + 1, stop):
             label = text(ws.cell(row, name_col).value)
             if not label or "합계" in label:
                 continue
@@ -548,6 +551,21 @@ def _read_period(ws) -> tuple[_dt.date | None, _dt.date | None]:
             )
     return None, None
 
+
+
+def _labelled_date(ws, *names: str) -> _dt.date | None:
+    """``이름 | 값`` 으로 적힌 날짜. 새 [기본정보] 시트를 읽는 방법이다."""
+    from .dates import to_date
+
+    wanted = {name.replace(" ", "") for name in names}
+    for row in range(1, min(ws.max_row, 30) + 1):
+        if text(ws.cell(row, 1).value).replace(" ", "") not in wanted:
+            continue
+        try:
+            return to_date(ws.cell(row, 2).value)
+        except Exception:      # noqa: BLE001 — 날짜가 아니면 없는 것으로 본다
+            return None
+    return None
 
 
 #: 새 [퇴직급여규정] 시트의 항목 이름 → 저장할 열쇠.
@@ -611,12 +629,24 @@ def read_general_info(workbook) -> GeneralInfo:
         info.obligation = _read_obligation(money_ws)
         info.assets = _read_assets(money_ws)
 
-    grade_row = _find_row(ws, "회사채 신용등급")
-    if grade_row:
-        grades = ("AAA", "AA+", "AA0", "AA-", "A+", "A0", "A-", "국고채")
+    # 새 양식은 회계기간을 [기본정보] 에 '산출 시작일 / 산출기준일' 로 적는다.
+    # 옛 양식의 '2번 대상 회계기간' 이 없으므로 여기서도 찾아본다 — 못 읽으면
+    # 이자원가를 1년으로 환산해 버려, 결산기가 바뀐 해에 조용히 틀린다.
+    if info.period_end is None and basics_ws is not None:
+        info.period_start = _labelled_date(basics_ws, "산출 시작일", "산출시작일")
+        info.period_end = _labelled_date(basics_ws, "산출기준일", "결산일")
+
+    # 신용등급은 양식마다 다른 시트에 있다. [기본정보] 를 먼저 본다.
+    grades = ("AAA", "AA+", "AA0", "AA-", "A+", "A0", "A-", "국고채")
+    for sheet in (basics_ws, ws):
+        if sheet is None or info.credit_grade:
+            continue
+        grade_row = _find_row(sheet, "회사채 신용등급")
+        if not grade_row:
+            continue
         for row in range(grade_row, grade_row + 8):
             for col in range(2, 7):
-                candidate = text(ws.cell(row, col).value).upper()
+                candidate = text(sheet.cell(row, col).value).upper()
                 if candidate in grades:
                     info.credit_grade = candidate
                     break

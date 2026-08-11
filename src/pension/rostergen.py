@@ -783,18 +783,18 @@ def _case_report(
 
     lines += [
         "",
-        "[1)일반사항 — 담당자가 채워 보낸 것으로 두었습니다]",
+        "[기본정보·퇴직급여규정·사외적립자산 — 담당자가 채워 보낸 것으로 두었습니다]",
         "  이 명부를 올리면 아래 항목이 화면에 저절로 들어갑니다. 다시 적을 필요가 없습니다.",
-        "  · 2번 대상 회계기간 — 산출기준일과 시작일",
-        "  · 4번 할인율 회사채 신용등급",
-        "  · 5-1) 퇴직급여추계액 변동내역 — 퇴직자명부의 지급액과 맞춰 두었습니다",
-        "  · 5-2) 사외적립자산 변동내역 — 검산줄(기초+유입−유출=기말)이 0 원으로 맞습니다",
-        "  · 5-3) 사외적립자산 세부내역 — 문단 142 공시용 분류별 공정가치",
-        "  · 7-2) 기중 장기근속 지급액",
+        "  · [기본정보] 산출기준일·산출 시작일·상시근로자 수·회사채 신용등급·직군 규칙",
+        "  · [퇴직급여규정] 지급규정 열 항목과 특이사항 — 산출가정 초안의 근거가 됩니다",
+        "  · [사외적립자산] 퇴직급여추계액 변동내역 — 퇴직자명부의 지급액과 맞춰 두었습니다",
+        "  · [사외적립자산] 사외적립자산 변동내역 — 검증줄(기초+유입−유출−기말)이 0 원입니다",
+        "  · [사외적립자산] 세부내역 — 문단 142 공시용 분류별 공정가치",
+        "  · [사외적립자산] 기중 장기근속 지급액",
         "",
         "[같이 만든 기초율]",
         f"  {spec.title}_기초율.xlsx — 이 명부의 직군 매핑이 들어 있습니다.",
-        "  기초율의 '지급규정' 시트가 명부 Input 의 직군 규칙보다 우선합니다.",
+        "  기초율의 '지급규정' 시트가 명부 [기본정보] 의 직군 규칙보다 우선합니다.",
         "  다른 기초율을 쓰면 직군이 맞지 않아 전원 '직군을 찾지 못함' 오류가 납니다.",
         "",
         "이 명부는 난수로 만든 가상 자료입니다. 성명·사번은 실제 인물과 무관합니다.",
@@ -832,67 +832,23 @@ def _obligation_totals(
     return totals
 
 
-def _write_general_sheet(
-    ws, spec: CaseSpec, actives: list[dict[str, Any]],
-    retirees: list[dict[str, Any]], base: _dt.date, rng: random.Random, st,
-) -> None:
-    """``1)일반사항`` 을 자료요청서 서식대로 채운다.
+def _asset_numbers(
+    spec: CaseSpec, actives: list[dict[str, Any]],
+    retirees: list[dict[str, Any]], rng: random.Random,
+) -> dict[str, Any]:
+    """[사외적립자산] 시트에 넣을 금액 일체.
 
-    담당자가 실제로 채워 보내는 항목(회계기간·신용등급·퇴직급여 변동내역·
-    사외적립자산)을 시험 명부에도 넣어 둔다. 이 값들은 산출 화면이 그대로
-    읽어 채우므로, 없으면 '명부만 올려도 되는가' 를 시험할 수 없다.
+    회사가 신탁 명세서를 보고 채워 보내는 표지만, 시험 명부에서는 **명부와
+    맞아떨어져야** 한다. 임의의 숫자를 넣으면 증감표 검산이 어긋나 그것이
+    시스템 오류인지 시험 자료 탓인지 알 수 없다.
     """
-    ws.cell(1, 2, f"시험용 자료요청서 — {spec.key}").font = st["title_font"]
-
-    period_start = base.replace(year=base.year - 1) + _dt.timedelta(days=1)
-
-    ws.cell(22, 2, "2.")
-    ws.cell(22, 3, "대상 회계기간").font = st["title_font"]
-    ws.cell(23, 3, "기시")
-    ws.cell(23, 4, "기말")
-    ws.cell(24, 3, period_start)
-    ws.cell(24, 4, base)
-
-    ws.cell(49, 2, "4.")
-    ws.cell(49, 3, "할인율 회사채 신용등급").font = st["title_font"]
-    ws.cell(53, 3, spec.flags.get("credit_grade", "AA0"))
-
-    # ── 5-1) 퇴직급여추계액 변동내역 ────────────────────────────
     paid = _obligation_totals(retirees)
-    settlement = sum(
-        float(row.get("settlement_amount") or 0) for row in actives
-    )
+    settlement = sum(float(row.get("settlement_amount") or 0) for row in actives)
     transfer_in = sum(float(row.get("transfer_in_amount") or 0) for row in actives)
 
-    ws.cell(60, 2, "5.")
-    ws.cell(60, 3, "퇴직급여").font = st["title_font"]
-    ws.cell(65, 3, "1) 퇴직급여추계액 변동내역 (발생기준 작성)").font = st["title_font"]
-    ws.cell(66, 3, "구분").font = st["head_font"]
-    ws.cell(66, 3).fill = st["head_fill"]
-    ws.cell(66, 5, "추계액").font = st["head_font"]
-    ws.cell(66, 5).fill = st["head_fill"]
-
-    obligation = (
-        ("(+)증가", "계열사 전입", transfer_in),
-        ("", "합병", 0.0),
-        ("(-)감소", "퇴직금 지급액", paid["benefits_paid"]),
-        ("", "중간정산금", settlement),
-        ("", "DC전환", paid["dc_converted"]),
-        ("", "퇴직위로금", paid["other_paid"]),
-        ("", "계열사 전출", paid["transfer_out"]),
-        ("", "사업처분/분할", paid["disposal"]),
-    )
-    for offset, (group, label, amount) in enumerate(obligation):
-        row = 67 + offset
-        if group:
-            ws.cell(row, 3, group)
-        ws.cell(row, 4, label)
-        ws.cell(row, 5, round(amount))
-
-    # ── 5-2) 사외적립자산 변동내역 ──────────────────────────────
-    # 검산줄이 맞아떨어지도록 **기말을 역산** 한다. 기초와 유출입을 임의로
-    # 넣고 기말도 임의로 넣으면 표가 스스로 안 맞아, 산출이 그 차이를
-    # 경고로 뱉는다 — 시험 자료가 시스템을 거짓으로 고발하는 셈이다.
+    # 검산줄이 맞아떨어지도록 **기말을 역산** 한다. 기초와 유출입을 임의로 넣고
+    # 기말도 임의로 넣으면 표가 스스로 안 맞아, 산출이 그 차이를 경고로 뱉는다 —
+    # 시험 자료가 시스템을 거짓으로 고발하는 셈이다.
     fund_paid = sum(float(row.get("fund_payment") or 0) for row in retirees)
     accrued = sum(float(row.get("accrued_benefit") or 0) for row in actives)
     opening = round(max(accrued * rng.uniform(0.55, 0.85), fund_paid * 3), -3)
@@ -907,76 +863,111 @@ def _write_general_sheet(
         opening + contributions + actual_return
         - fund_paid - management_fee - custody_fee
     )
-
-    ws.cell(76, 3, "2) 사외적립자산 변동내역 (현금기준 작성)").font = st["title_font"]
-    for col, title in ((3, "구분"), (5, "DB퇴직연금,\n퇴직보험"),
-                       (6, "국민연금전환금"), (7, "합계")):
-        cell = ws.cell(77, col, title)
-        cell.font = st["head_font"]
-        cell.fill = st["head_fill"]
-
-    ws.cell(78, 3, period_start)
-    ws.cell(78, 5, opening - national_pension)
-    if national_pension:
-        ws.cell(78, 6, national_pension)
-    ws.cell(78, 7, opening)
-
-    assets = (
-        ("(+)증가", "부담금납입", contributions),
-        ("", "이자수익", actual_return),
-        ("", "계열사 전입", 0.0),
-        ("", "합병", 0.0),
-        ("(-)감소", "퇴직금", fund_paid),
-        ("", "중간정산금", 0.0),
-        ("", "DC전환", 0.0),
-        ("", "계열사 전출", 0.0),
-        ("", "사업처분/분할", 0.0),
-        ("", "운용관리수수료", management_fee),
-        ("", "자산관리수수료", custody_fee),
-    )
-    for offset, (group, label, amount) in enumerate(assets):
-        row = 79 + offset
-        if group:
-            ws.cell(row, 3, group)
-        ws.cell(row, 4, label)
-        ws.cell(row, 5, round(amount))
-        ws.cell(row, 7, round(amount))
-
-    ws.cell(90, 3, base)
-    ws.cell(90, 5, round(closing - national_pension))
-    if national_pension:
-        ws.cell(90, 6, national_pension)
-    ws.cell(90, 7, round(closing))
-    ws.cell(91, 3, "검증")
-
-    # ── 5-3) 사외적립자산 세부내역 ──────────────────────────────
-    ws.cell(93, 3, "3) 사외적립자산 세부내역").font = st["title_font"]
-    ws.cell(95, 3, "구분").font = st["head_font"]
-    ws.cell(95, 3).fill = st["head_fill"]
-    ws.cell(95, 5, "금액").font = st["head_font"]
-    ws.cell(95, 5).fill = st["head_fill"]
-    cash = round(closing * 0.8, -3)
-    breakdown = (("⑴ 현금 및 현금등가물", cash), ("⑶ 채무상품", round(closing) - cash))
-    for offset, (label, amount) in enumerate(breakdown):
-        ws.cell(96 + offset, 3, label)
-        ws.cell(96 + offset, 5, amount)
-    ws.cell(96 + len(breakdown), 3, "합계")
-    ws.cell(96 + len(breakdown), 5, sum(a for _, a in breakdown))
-
-    # ── 7-2) 기중 장기근속 지급액 ───────────────────────────────
     longterm_paid = sum(float(row.get("longterm_payment") or 0) for row in retirees)
-    ws.cell(123, 2, "7.")
-    ws.cell(123, 3, "기타장기종업원급여").font = st["title_font"]
-    ws.cell(133, 3, "2) 기중 장기근속 지급액").font = st["title_font"]
-    ws.cell(135, 3, "(-)감소")
-    ws.cell(135, 4, "장기근속 지급액")
-    ws.cell(135, 5, round(longterm_paid))
-    ws.cell(136, 3, "(+)증가")
-    ws.cell(136, 4, "장기근속 받은금액")
-    ws.cell(136, 5, 0)
 
-    for col in (2, 3, 4, 5, 6, 7):
-        ws.column_dimensions[ws.cell(1, col).column_letter].width = 22 if col == 4 else 16
+    cash = round(closing * 0.8, -3)
+    return {
+        "obligation": {
+            "계열사 전입": round(transfer_in),
+            "합병으로 받은 금액": 0,
+            "퇴직금 지급액": round(paid["benefits_paid"]),
+            "중간정산금": round(settlement),
+            "DC전환 지급액": round(paid["dc_converted"]),
+            "퇴직위로금 (명예퇴직금 등)": round(paid["other_paid"]),
+            "계열사 전출": round(paid["transfer_out"]),
+            "사업처분·분할": round(paid["disposal"]),
+        },
+        "opening": (round(opening - national_pension), round(national_pension)),
+        "asset": {
+            "부담금 납입액": (round(contributions), 0),
+            "이자수익": (round(actual_return), 0),
+            "계열사 전입": (0, 0),
+            "합병으로 받은 금액": (0, 0),
+            "퇴직금 지급액": (round(fund_paid), 0),
+            "중간정산금": (0, 0),
+            "DC전환 지급액": (0, 0),
+            "계열사 전출": (0, 0),
+            "사업처분·분할": (0, 0),
+            "운용관리수수료": (round(management_fee), 0),
+            "자산관리수수료": (round(custody_fee), 0),
+        },
+        "closing": (round(closing - national_pension), round(national_pension)),
+        "breakdown": [
+            ("현금 및 현금등가물", cash),
+            ("정기예금·원리금보장 GIC", round(closing) - cash),
+        ],
+        "extras": {
+            "자산인식상한 (문단 64)": "",
+            "기준일 현재 미지급 퇴직급여": 0,
+            "기중 장기근속 지급액": round(longterm_paid),
+            "기중 장기근속 받은금액": 0,
+        },
+    }
+
+
+def _rule_rows(spec: CaseSpec) -> list[tuple[Any, ...]]:
+    """[기본정보] 의 직군 규칙 표.
+
+    '자료불량' 사례는 규정에서 한 직군을 일부러 뺀다. 명부에는 있는데 규정에는
+    없는 직군이 실제로 흔하고, 그때 검증이 무엇을 말해 주는지가 이 사례의
+    존재 이유다.
+    """
+    from .jobgroup import suggest_group
+
+    names = [name for name, _ in spec.groups if name]
+    if spec.flags.get("dirty"):
+        names = names[:-1]
+    rows: list[tuple[Any, ...]] = []
+    for name in names:
+        executive = _is_executive(name)
+        mapped = suggest_group(name, _TYPE_EXEC if executive else _TYPE_STAFF)
+        nra = 65 if executive else 60
+        rows.append((name, mapped, nra, nra, 2))
+    return rows
+
+
+def _special_rows(spec: CaseSpec) -> dict[str, str]:
+    """[퇴직급여규정] 의 특이사항 칸. 사례가 무엇을 담고 있는지 적어 둔다."""
+    special = {"그 밖에": " ".join(note.lstrip("· ") for note in spec.notes)}
+    if spec.flags.get("dc_share"):
+        special["DC 전환"] = "일부 가입자가 DC 로 전환했습니다. 전환자는 전환일에 정산했습니다."
+    if spec.flags.get("settlement_share"):
+        special["중간정산"] = "중간정산자가 있습니다. 근속을 정산일부터 다시 셉니다."
+    if spec.flags.get("wage_peak_share"):
+        special["임금피크"] = "임금피크 대상자가 있습니다. 정년이 그 연령으로 당겨집니다."
+    if spec.flags.get("longterm_share"):
+        special["장기급여"] = "근속 10·20·30년에 근속포상이 있습니다."
+    if spec.flags.get("practice"):
+        special["제도 변경"] = "연봉제 전환 시점의 누진 지급률을 보전하는 사람이 있습니다."
+        special["명예퇴직"] = "명예퇴직 예정자가 있습니다. 산정용 임금이 따로 적혀 있습니다."
+    return special
+
+
+def _laid_out(
+    records: list[dict[str, Any]], columns: list, aliases: dict[str, tuple[str, ...]]
+) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
+    """필드 이름을 이 양식의 열 이름으로 바꾼다.
+
+    양식에 없는 항목(누진 보전·지급구간 등)은 표준 표기 그대로 두어 오른쪽에
+    덧붙게 한다. 회사가 자기네 열을 더해 보내는 모양 그대로여야, 머리글로 열을
+    찾아내는 경로까지 시험 자료가 짚고 간다.
+    """
+    from . import rostertemplate as tpl
+
+    known = tpl.label_for(columns, aliases)
+    extras: list[str] = []
+    rows: list[dict[str, Any]] = []
+    for offset, record in enumerate(records, start=1):
+        line: dict[str, Any] = {"순번": offset}
+        for key, value in record.items():
+            label = known.get(key)
+            if label is None:
+                label = aliases.get(key, (key,))[0]
+                if label not in extras:
+                    extras.append(label)
+            line[label] = value
+        rows.append(line)
+    return rows, tuple(extras)
 
 
 def write_case_roster(
@@ -986,22 +977,15 @@ def write_case_roster(
 ) -> Path:
     """사례 하나를 명부 통합문서로 쓴다.
 
+    서식은 회사에 보내는 :mod:`pension.rostertemplate` 의 표준 양식 그대로다 —
+    빈 양식과 시험 명부가 갈라지면, 정작 받아 본 파일에서 처음 어긋난다.
+
     :param report_path: 주면 그 자리에 특이사항 안내문(.txt)도 쓴다.
     :param base_date: 명부의 산출기준일. 생략하면 :data:`BASE_DATE`.
         연령·근속·퇴사일이 모두 이 날짜를 기준으로 만들어진다.
     """
-    import openpyxl
-
+    from . import rostertemplate as tpl
     from .layout import ACTIVE_HEADER_ALIASES, RETIRED_HEADER_ALIASES
-    from .readers import (
-        ACTIVE_COLUMNS,
-        ACTIVE_FIRST_ROW,
-        ACTIVE_SHEET,
-        RETIRED_COLUMNS,
-        RETIRED_FIRST_ROW,
-        RETIRED_SHEET,
-    )
-    from .samples import _style
 
     base = base_date or BASE_DATE
     rng = random.Random(f"{seed}:{spec.key}:{base}")
@@ -1017,104 +1001,36 @@ def write_case_roster(
         _spoil_active(rng, actives, base)
         _spoil_retired(rng, retirees)
 
-    path = Path(path)
-    st = _style()
-    wb = openpyxl.Workbook()
-
-    def sheet(name, columns, aliases, first_row, rows):
-        ws = wb.create_sheet(name)
-        header_row = first_row - 2
-        ws.cell(header_row, 2, "순번").font = st["head_font"]
-        ws.cell(header_row, 2).fill = st["head_fill"]
-
-        # 고정 서식에 없는 항목(누진 보전·지급구간 등)은 회사가 오른쪽에 열을
-        # 덧붙여 보낸다. 그 모양 그대로 만들어야 머리글로 열을 찾아내는
-        # 경로까지 시험 자료가 짚고 간다.
-        placed = dict(columns)
-        used = [key for record in rows for key in record]
-        extras = [key for key in dict.fromkeys(used) if key not in placed]
-        next_index = max(col.index for col in columns.values()) + 1
-        extra_index = {}
-        for offset, key in enumerate(extras):
-            extra_index[key] = next_index + offset
-
-        for key, col in columns.items():
-            label = aliases.get(key, (col.label,))[0]
-            cell = ws.cell(header_row, col.index, label)
-            cell.font = st["head_font"]
-            cell.fill = st["head_fill"]
-            cell.alignment = st["center"]
-            ws.column_dimensions[cell.column_letter].width = max(10, min(22, len(label) + 4))
-        for key, index in extra_index.items():
-            label = aliases.get(key, (key,))[0]
-            cell = ws.cell(header_row, index, label)
-            cell.font = st["head_font"]
-            cell.fill = st["head_fill"]
-            cell.alignment = st["center"]
-            ws.column_dimensions[cell.column_letter].width = max(12, min(22, len(label) + 4))
-
-        for offset, record in enumerate(rows):
-            row = first_row + offset
-            ws.cell(row, 2, offset + 1)
-            for key, value in record.items():
-                column = columns.get(key)
-                index = column.index if column is not None else extra_index.get(key)
-                if index is None or value == "":
-                    continue
-                ws.cell(row, index, value)
-
-    sheet(ACTIVE_SHEET, ACTIVE_COLUMNS, ACTIVE_HEADER_ALIASES, ACTIVE_FIRST_ROW, actives)
-    sheet(RETIRED_SHEET, RETIRED_COLUMNS, RETIRED_HEADER_ALIASES, RETIRED_FIRST_ROW, retirees)
-
-    # ── Input 시트 ──────────────────────────────────────────────
-    ws = wb.create_sheet("Input", 0)
-    ws.cell(1, 2, f"시험용 명부 — {spec.key}").font = st["title_font"]
-    ws.cell(2, 2, spec.summary).font = st["note_font"]
-    ws.cell(3, 2, "산출기준일")
-    ws.cell(3, 3, base.isoformat())
-    ws.cell(5, 2, "평균임금 체크금액")
-    ws.cell(5, 3, spec.wage_check)
-
-    # 직군 규칙표의 자리는 정해져 있다 — 머리글 11행, 값 12행부터. 설명을
-    # 위쪽에 늘어놓다 이 자리를 밀면 규칙을 통째로 못 읽어 전원이
-    # '직군을 찾지 못함' 오류가 난다.
-    ws.cell(10, 2, "직군 규칙").font = st["title_font"]
-    head = 11
-    headers = ("명부직군", "변환직군명", "퇴직급여 정년연령", "장기급여 정년연령",
-               "정년초과 가산연령")
-    for col, title in enumerate(headers, start=2):
-        cell = ws.cell(head, col, title)
-        cell.font = st["head_font"]
-        cell.fill = st["head_fill"]
-        cell.alignment = st["center"]
-        ws.column_dimensions[cell.column_letter].width = 18
-
-    # 직군 규칙은 명부에 실제로 쓰인 표기로 적는다. '자료불량' 사례는 일부러
-    # 한 직군을 빼서 '직군을 찾지 못함' 오류가 나게 둔다.
-    from .jobgroup import suggest_group
-
-    used = [name for name, _ in spec.groups if name]
-    if spec.flags.get("dirty"):
-        used = used[:-1]
-    for offset, name in enumerate(used):
-        mapped = suggest_group(name, _TYPE_EXEC if _is_executive(name) else _TYPE_STAFF)
-        nra = 65 if _is_executive(name) else 60
-        for col, value in enumerate((name, mapped, nra, nra, 2), start=2):
-            ws.cell(head + 1 + offset, col, value)
-
-    # 설명은 규칙표를 훑는 구간(12~36행) 아래에 적는다. 그 안에 두면 설명
-    # 문장이 직군 규칙 한 줄로 읽힌다.
-    for offset, note in enumerate(spec.notes):
-        ws.cell(40 + offset, 2, note).font = st["note_font"]
-
-    # 자료요청서 앞장. 회계기간·신용등급·사외적립자산을 담당자가 채워 보낸
-    # 것처럼 넣어 두면, 명부 하나만 올려도 산출 화면이 그대로 읽어 채운다.
-    _write_general_sheet(
-        wb.create_sheet("1)일반사항", 1), spec, actives, retirees, base, rng, st
+    active_rows, active_extras = _laid_out(actives, tpl.ACTIVE, ACTIVE_HEADER_ALIASES)
+    retired_rows, retired_extras = _laid_out(
+        retirees, tpl.RETIRED, RETIRED_HEADER_ALIASES
     )
+    period_start = base.replace(year=base.year - 1) + _dt.timedelta(days=1)
 
-    del wb["Sheet"]
-    wb.save(path)
+    path = Path(path)
+    workbook = tpl.build_workbook(
+        note=f"시험용 명부 — {spec.key}. {spec.summary}",
+        basics={
+            "단체명": "○○주식회사",
+            "산출기준일": base.isoformat(),
+            "산출 시작일": period_start.isoformat(),
+            "상시근로자 수": spec.active,
+            "회사채 신용등급": spec.flags.get("credit_grade", "AA0"),
+            "평균임금 하한 점검액": spec.wage_check,
+        },
+        groups=_rule_rows(spec),
+        rules_filled=True,
+        specials=_special_rows(spec),
+        numbers=_asset_numbers(spec, actives, retirees, rng),
+        actives=active_rows,
+        retirees=retired_rows,
+        active_extras=active_extras,
+        retired_extras=retired_extras,
+    )
+    workbook.save(path)
+    # 수식 칸에 값을 심는다. 없으면 엑셀 '제한된 보기' 에서 검증줄과 합계가
+    # 빈칸으로 보여, 표가 깨진 것처럼 읽힌다.
+    tpl._embed_values(path)
 
     if report_path is not None:
         Path(report_path).write_text(

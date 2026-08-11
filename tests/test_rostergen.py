@@ -200,7 +200,7 @@ class TestGeneralSheet:
         report = tmp_path / "특이사항.txt"
         write_case_roster(CASES[0], tmp_path / "명부.xlsx", report_path=report)
         text = report.read_text(encoding="utf-8")
-        assert "1)일반사항" in text
+        assert "[기본정보]" in text
         assert "사외적립자산 변동내역" in text
 
 
@@ -215,8 +215,8 @@ def test_same_seed_gives_the_same_file(tmp_path) -> None:
     def rows(path):
         ws = openpyxl.load_workbook(path)["재직자명부"]
         return [
-            [ws.cell(r, c).value for c in range(3, 12)]
-            for r in range(25, 40)
+            [ws.cell(r, c).value for c in range(2, 11)]
+            for r in range(4, 20)
         ]
 
     assert rows(first) == rows(second)
@@ -237,10 +237,10 @@ class TestPracticeCases:
         roster, _ = pack["자료불량"]
         wb = openpyxl.load_workbook(roster, data_only=True)
         ws = wb["재직자명부"]
-        head = {c.value: c.column for c in ws[24] if c.value}
+        head = {c.value: c.column for c in ws[3] if c.value}
         rows = [
             {name: ws.cell(r, col).value for name, col in head.items()}
-            for r in range(26, ws.max_row + 1)
+            for r in range(4, ws.max_row + 1)
             if ws.cell(r, head["사번"]).value
         ]
         wb.close()

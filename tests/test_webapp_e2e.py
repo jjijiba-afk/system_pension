@@ -211,7 +211,12 @@ def test_library_registers_curve_into_editor(page, tmp_path) -> None:
     page.set_input_files("#lib-curve-file", str(source))
     page.fill("#lib-curve-name", "KIS_E2E")
     page.click("#lib-curve-add")
-    page.wait_for_selector("#lib-curve-list table", timeout=30_000)
+    # 목록에 표가 있는지로 기다리면 안 된다 — 내장 금리표가 이미 한 줄 있어
+    # 곧바로 통과해 버리고, 등록이 끝나기 전에 확인하게 된다.
+    page.wait_for_function(
+        "() => document.getElementById('lib-curve-list')"
+        ".textContent.includes('KIS_E2E')",
+        timeout=30_000)
     assert "KIS_E2E" in page.inner_text("#lib-curve-list")
 
     page.click("#tab-edit")
@@ -760,7 +765,6 @@ def test_prior_roster_comparison_runs_before_the_valuation(page, tmp_path) -> No
     """
     import openpyxl
 
-    from pension.readers import ACTIVE_COLUMNS, ACTIVE_FIRST_ROW, ACTIVE_SHEET
     from pension.samples import write_sample_pack
 
     files = write_sample_pack(tmp_path)
@@ -781,8 +785,11 @@ def test_prior_roster_comparison_runs_before_the_valuation(page, tmp_path) -> No
     # 당기 명부 — 첫 사람의 생년월일만 바꾼다.
     changed = tmp_path / "당기명부.xlsx"
     book = openpyxl.load_workbook(roster)
-    sheet = book[ACTIVE_SHEET]
-    sheet.cell(ACTIVE_FIRST_ROW, ACTIVE_COLUMNS["birth_date"].index, "1955-01-01")
+    sheet = book["재직자명부"]
+    # 열은 머리글로 찾는다. 번호를 못박으면 양식이 한 칸만 움직여도 빈 칸을
+    # 고치게 되고, 그러면 '바뀐 것이 없다' 로 조용히 통과한다.
+    birth = next(c.column for c in sheet[3] if c.value == "생년월일")
+    sheet.cell(4, birth, "1955-01-01")
     book.save(changed)
 
     page.click("#tab-calc")
