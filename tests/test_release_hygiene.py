@@ -308,3 +308,47 @@ class TestInstaller:
         flow = (ROOT / ".github/workflows/build-exe.yml").read_text(encoding="utf-8")
         assert "packaging\\설치.iss" in flow
         assert "연금계리산출_설치.exe" in flow
+
+
+class TestPagesDeploy:
+    """웹앱이 주소로 열리는지 — 배포가 조용히 반쪽이 되는 자리들.
+
+    아이패드에서 쓰는 것이 목적이라 주소가 열리지 않으면 프로그램이 없는 것과
+    같다. 그런데 Pages 배포는 실패해도 초록으로 끝나는 경우가 있어(빠진 파일은
+    404 로만 드러난다) 여기서 설정을 못 박는다.
+    """
+
+    def _flow(self) -> str:
+        return (ROOT / ".github/workflows/deploy-webapp.yml").read_text(encoding="utf-8")
+
+    def test_it_actually_deploys(self) -> None:
+        flow = self._flow()
+        assert "actions/upload-pages-artifact" in flow
+        assert "actions/deploy-pages" in flow
+        assert "path: webapp/dist" in flow
+
+    def test_it_has_the_rights_to_deploy(self) -> None:
+        """pages·id-token 이 없으면 마지막 단계에서만 막힌다."""
+        flow = self._flow()
+        assert "pages: write" in flow
+        assert "id-token: write" in flow
+
+    def test_underscore_files_are_not_swallowed(self) -> None:
+        """Pages 는 밑줄로 시작하는 이름을 감춘다. 런타임에 그런 파일이 있다."""
+        assert ".nojekyll" in self._flow()
+
+    def test_the_app_survives_a_subfolder(self) -> None:
+        """Pages 주소는 /저장소이름/ 아래다. 절대경로가 하나라도 있으면 깨진다."""
+        page = (ROOT / "webapp/app/index.html").read_text(encoding="utf-8")
+        manifest = (ROOT / "webapp/app/manifest.webmanifest").read_text(encoding="utf-8")
+        for mark in ('href="/', 'src="/'):
+            assert mark not in page, mark
+        assert '"start_url": "./index.html"' in manifest
+        assert '"scope": "./"' in manifest
+
+    @pytest.mark.skipif(not (ROOT / "webapp/dist").exists(),
+                        reason="webapp/build.py 를 먼저 실행")
+    def test_precache_paths_are_relative(self) -> None:
+        worker = (ROOT / "webapp/dist/sw.js").read_text(encoding="utf-8")
+        assert '"/index.html"' not in worker
+        assert '"./index.html"' in worker
