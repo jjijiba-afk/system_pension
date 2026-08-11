@@ -400,6 +400,16 @@ def validate_active(
                 value=member.honorary_wage, **kw,
             )
 
+        if member.payout_multiple and member.payout_multiple != 1.0:
+            log.warning(
+                "JAE_PAYOUT_MULTIPLE_FORMULA_ONLY",
+                f"개인 지급배수 {member.payout_multiple:g} 는 지급률 규정이 "
+                "**수식 방식** 이고 식에 `배수` 가 들어 있을 때만 쓰입니다. "
+                "표(누적·누진) 방식 규정에서는 무시되어 산출에 반영되지 않습니다",
+                column=_col(sheet, "payout_multiple"),
+                value=member.payout_multiple, **kw,
+            )
+
         if member.accrued_benefit < 0:
             log.warning("JAE_ACCRUED_NEGATIVE", "퇴직급여추계액이 음수입니다",
                         column=_col(sheet, "accrued_benefit"),

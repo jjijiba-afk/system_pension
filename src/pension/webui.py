@@ -861,6 +861,60 @@ def _as_date(token: object) -> _dt.date | None:
 
 # ── 시험용 난수 명부 ─────────────────────────────────────────────
 
+def _gen_features(request: dict) -> dict[str, Any]:
+    """특이사항 한 가지씩만 담은 명부 한 벌.
+
+    사람은 한 벌뿐이고 명부마다 특이사항 하나가 **전원 또는 한 직군 전체** 에
+    걸린다. 기준 명부와의 채무 차이가 곧 그 특이사항이 만든 차이라, "이 숫자가
+    왜 이렇게 나왔나" 에 답할 수 있는 유일한 시험 자료다.
+    """
+    from .featurecases import BASE_SPEC, FEATURES, write_feature_pack
+
+    seed = int(request.get("seed") or 20251231)
+    base_date = _as_date(request.get("base_date"))
+    measure = request.get("measure", True)
+    work = Path(request.get("work", "/work"))
+    folder = work / "특이사항명부"
+    if folder.exists():
+        shutil.rmtree(folder)
+    made = write_feature_pack(
+        folder, seed=seed, base_date=base_date, measure=bool(measure)
+    )
+
+    target = work / f"특이사항명부_{seed}.zip"
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in made:
+            archive.write(path, path.name)
+
+    assumptions = str(folder / "기초율.xlsx")
+    cases = [{
+        "key": "기준", "title": BASE_SPEC.title, "scope": "—",
+        "summary": BASE_SPEC.summary,
+        "roster": str(folder / f"{BASE_SPEC.title}.xlsx"),
+        "assumptions": assumptions, "force": False,
+    }]
+    for index, feature in enumerate(FEATURES, start=1):
+        name = f"{index}_{feature.key}"
+        cases.append({
+            "key": feature.key, "title": name, "scope": feature.scope,
+            "summary": f"{feature.title} — {feature.detail} "
+                       f"(적용: {feature.scope}, 기준 대비 {feature.expect})",
+            "roster": str(folder / f"{name}.xlsx"),
+            "assumptions": assumptions,
+            # 임금 단위 오류 명부만 검증에 걸린다.
+            "force": feature.key == "임금단위",
+        })
+
+    return {
+        "path": str(target), "filename": target.name,
+        "size": target.stat().st_size,
+        "files": [path.name for path in made],
+        "base_date": str(base_date or ""),
+        "report": (folder / "특이사항_한가지씩_안내.txt").read_text(encoding="utf-8"),
+        "cases": cases,
+    }
+
+
 def _gen_cases(request: dict) -> dict[str, Any]:
     """난수 명부 세 사례를 만들어 zip 하나로 묶는다.
 
@@ -1076,6 +1130,7 @@ _OPS = {
     "preset_save": _preset_save,
     "preset_state": _preset_state,
     "gen_cases": _gen_cases,
+    "gen_features": _gen_features,
     "gen_case_register": _gen_case_register,
     "roster_scan": _roster_scan,
     "roster_groups": _roster_groups,

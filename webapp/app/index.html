@@ -551,6 +551,29 @@
 </fieldset>
 
 <div id="gen-cases"></div>
+
+<fieldset><legend>특이사항 한 가지씩 — 한 벌</legend>
+  <p class="hint">위의 세 벌은 특이사항 열두 가지를 <b>한 사람씩</b> 심어 한 파일에
+  몰아 넣은 것입니다. 무엇이 있는지 훑기에는 좋지만, 산출 결과를 놓고 "이 숫자가
+  왜 이렇게 나왔나" 를 따지기에는 쓸 수 없습니다 — 한 사람만 달라진 것이라 채무
+  전체에서 티가 안 나고, 열두 가지가 서로 얽혀 있기 때문입니다.<br>
+  이쪽은 반대입니다. <b>사람은 한 벌</b>이고, <b>명부 하나에 특이사항 하나</b>를
+  <b>전원 또는 한 직군 전체</b>에 겁니다. 특이사항이 없는 기준 명부도 함께 나오므로,
+  두 명부의 채무 차이가 곧 그 특이사항이 만든 차이입니다. 기초율도 한 벌을 같이 씁니다.</p>
+  <div class="lib-line">
+    <label style="display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="feat-measure" checked> 확정급여채무까지 재기
+    </label>
+    <button class="small primary" type="button" id="feat-run">특이사항 명부 만들기</button>
+    <button class="small" type="button" id="feat-report" disabled>안내문 보기</button>
+    <button class="small" type="button" id="feat-download" disabled>zip 내려받기</button>
+  </div>
+  <div class="hint">기준일·씨앗은 위 칸을 그대로 씁니다. [확정급여채무까지 재기] 를
+  켜면 명부를 전부 산출해 기준 대비 차이와 <b>기대한 방향대로 움직였는지</b>까지
+  안내문에 적습니다 — 명부가 열한 벌이라 그만큼 오래 걸립니다.</div>
+</fieldset>
+
+<div id="feat-cases"></div>
 </div></details>
 
 <details class="section" id="lib-backup"><summary>보관함 — 기기 밖에 저장<span class="count"></span></summary>

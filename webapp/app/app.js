@@ -2873,6 +2873,60 @@ async function registerGenerated(item) {
   }
 }
 
+// ── 특이사항 한 가지씩 ──────────────────────────────────────────
+// 사람은 한 벌, 명부마다 특이사항 하나. 기준 명부와의 차이가 곧 그 특이사항이
+// 만든 차이다 — 위의 세 벌로는 답할 수 없는 "왜 이 숫자인가" 에 답한다.
+
+let features = null;
+
+$("feat-run").addEventListener("click", () => {
+  const measure = $("feat-measure").checked;
+  try {
+    status(measure
+      ? "특이사항 명부를 만들고 채무를 재는 중… (명부가 열한 벌이라 오래 걸립니다)"
+      : "특이사항 명부를 만드는 중…");
+    const seed = parseInt($("gen-seed").value, 10) || 20251231;
+    features = py("gen_features", {
+      work: "/work", seed, base_date: $("gen-base-date").value, measure,
+    });
+    renderFeatures();
+    $("feat-download").disabled = false;
+    $("feat-report").disabled = false;
+    status(`특이사항 명부 ${features.cases.length}벌을 만들었습니다.` +
+           (measure ? " 안내문에 확정급여채무 표가 들어 있습니다." : ""));
+  } catch (error) {
+    status("만들지 못했습니다: " + (error.message || error));
+    alert(error.message || error);
+  }
+});
+
+$("feat-download").addEventListener("click", () => {
+  if (features) download(features.path, features.filename, "application/zip");
+});
+
+$("feat-report").addEventListener("click", () => {
+  if (!features) return;
+  $("report-title").textContent = "특이사항 한 가지씩 — 안내문";
+  $("report-body").textContent = features.report;
+  $("report-dialog").showModal();
+});
+
+function renderFeatures() {
+  $("feat-cases").replaceChildren(...features.cases.map((item) => {
+    const box = el("fieldset", {},
+      el("legend", {}, `${item.title}  ·  ${item.scope}`),
+      el("div", { class: "hint" }, item.summary),
+      el("div", { class: "toolbar" },
+        el("button", { class: "small primary", type: "button",
+          onclick: () => useGenerated(item) }, "이 명부로 산출 준비")));
+    if (item.force) {
+      box.append(el("div", { class: "warn-box" },
+        "자료 오류 명부입니다 — [검증 오류가 있어도 산출 강행] 을 켜야 끝까지 돕니다."));
+    }
+    return box;
+  }));
+}
+
 // 접힌 구획의 제목 옆 요약은 값이 바뀔 때마다 다시 맞춘다.
 $("page-calc").addEventListener("input", refreshCalcBadges);
 $("page-calc").addEventListener("change", refreshCalcBadges);

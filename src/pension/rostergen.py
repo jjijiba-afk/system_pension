@@ -42,7 +42,8 @@ from pathlib import Path
 from typing import Any, Final
 
 __all__ = [
-    "CASES", "DEFAULT_CASE", "CaseSpec", "write_case_roster", "write_case_rosters",
+    "CASES", "DEFAULT_CASE", "CaseSpec", "make_population",
+    "write_case_roster", "write_case_rosters",
 ]
 
 BASE_DATE: Final = _dt.date(2025, 12, 31)
@@ -970,10 +971,33 @@ def _laid_out(
     return rows, tuple(extras)
 
 
+def make_population(
+    spec: CaseSpec, *, seed: int = 20251231, base_date: _dt.date | None = None,
+    rng: random.Random | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """이 사례의 사람들. 특이사항도 자료 오류도 아직 없는 상태다.
+
+    여러 명부가 **같은 사람** 을 놓고 한 가지씩만 달라야 할 때 쓴다. 명부마다
+    다시 뽑으면 사람이 바뀌어, 채무 차이가 특이사항 때문인지 사람이 달라서인지
+    가릴 수 없다.
+
+    :param rng: 이어서 쓸 난수기. 주지 않으면 씨앗으로 새로 만든다. 뒤에
+        특이사항을 더 심을 것이라면 **같은 난수기를 넘겨받아 이어 써야** 한다 —
+        새로 만들면 난수 흐름이 처음으로 되감겨 명부가 통째로 달라진다.
+    """
+    base = base_date or BASE_DATE
+    rng = rng or random.Random(f"{seed}:{spec.key}:{base}")
+    actives = [_make_active(rng, spec, i + 1, base) for i in range(spec.active)]
+    retirees = [_make_retired(rng, spec, i + 1, base) for i in range(spec.retired)]
+    _ensure_special_cases(rng, spec, actives, base)
+    return actives, retirees
+
+
 def write_case_roster(
     spec: CaseSpec, path: str | Path, *, seed: int = 20251231,
     report_path: str | Path | None = None,
     base_date: _dt.date | None = None,
+    population: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None,
 ) -> Path:
     """사례 하나를 명부 통합문서로 쓴다.
 
@@ -983,23 +1007,27 @@ def write_case_roster(
     :param report_path: 주면 그 자리에 특이사항 안내문(.txt)도 쓴다.
     :param base_date: 명부의 산출기준일. 생략하면 :data:`BASE_DATE`.
         연령·근속·퇴사일이 모두 이 날짜를 기준으로 만들어진다.
+    :param population: 이미 만들어 둔 ``(재직자, 퇴직자)``. 주면 그대로 쓴다 —
+        같은 사람을 놓고 한 가지만 바꾼 명부를 여러 벌 낼 때 쓴다.
     """
     from . import rostertemplate as tpl
     from .layout import ACTIVE_HEADER_ALIASES, RETIRED_HEADER_ALIASES
 
     base = base_date or BASE_DATE
     rng = random.Random(f"{seed}:{spec.key}:{base}")
-    actives = [_make_active(rng, spec, i + 1, base) for i in range(spec.active)]
-    retirees = [_make_retired(rng, spec, i + 1, base) for i in range(spec.retired)]
-    _ensure_special_cases(rng, spec, actives, base)
-    # 특이사항을 먼저 심고 그 위에 자료 오류를 뿌린다. 순서를 바꾸면 오류가
-    # 특이사항 줄을 덮어써 무엇을 보려던 자료인지 알 수 없게 된다.
     planted: dict[str, str] = {}
-    if spec.flags.get("practice"):
-        planted = _add_practice_cases(rng, actives, retirees, base)
-    if spec.flags.get("dirty"):
-        _spoil_active(rng, actives, base)
-        _spoil_retired(rng, retirees)
+    if population is not None:
+        actives, retirees = population
+    else:
+        actives, retirees = make_population(
+            spec, seed=seed, base_date=base, rng=rng)
+        # 특이사항을 먼저 심고 그 위에 자료 오류를 뿌린다. 순서를 바꾸면 오류가
+        # 특이사항 줄을 덮어써 무엇을 보려던 자료인지 알 수 없게 된다.
+        if spec.flags.get("practice"):
+            planted = _add_practice_cases(rng, actives, retirees, base)
+        if spec.flags.get("dirty"):
+            _spoil_active(rng, actives, base)
+            _spoil_retired(rng, retirees)
 
     active_rows, active_extras = _laid_out(actives, tpl.ACTIVE, ACTIVE_HEADER_ALIASES)
     retired_rows, retired_extras = _laid_out(

@@ -382,6 +382,22 @@ class TestPagesDeploy:
         assert "홈 화면에 추가" in page
         assert "%APPDATA%" not in page
 
+    def test_the_one_feature_per_roster_pack_is_reachable(self) -> None:
+        """특이사항 한 가지씩 만드는 벌이 화면에서 눌러 갈 수 있어야 한다.
+
+        엔진에만 있고 화면에 없으면 아무도 쓰지 않는다.
+        """
+        page = (ROOT / "webapp/app/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "webapp/app/app.js").read_text(encoding="utf-8")
+        for box in ("feat-run", "feat-download", "feat-report", "feat-measure"):
+            assert f'id="{box}"' in page, box
+            assert box in script, box
+        assert "gen_features" in script
+        assert "gen_features" in (
+            ROOT / "src/pension/webui.py").read_text(encoding="utf-8")
+        manual = (ROOT / "docs/웹앱-사용설명서.md").read_text(encoding="utf-8")
+        assert "특이사항 한 가지씩" in manual
+
     def test_every_saved_input_comes_back(self) -> None:
         """저장한 입력칸은 [입력 불러오기] 로 하나도 빠짐없이 돌아와야 한다.
 
