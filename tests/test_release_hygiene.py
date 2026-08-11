@@ -327,6 +327,24 @@ class TestPagesDeploy:
         assert "actions/deploy-pages" in flow
         assert "path: webapp/dist" in flow
 
+    def test_a_repository_without_pages_still_builds_green(self) -> None:
+        """Pages 는 워크플로가 켤 수 없다. 꺼져 있다고 빌드가 빨개지면 안 된다.
+
+        실제로 그렇게 됐다 — 켜려고 시도했다가 권한이 없어 죽었다. 켜져 있는지
+        먼저 묻고, 아니면 주소 배포만 건너뛴다.
+        """
+        flow = self._flow()
+        assert "repos/${{ github.repository }}/pages" in flow
+        assert "if: needs.build.outputs.pages == 'true'" in flow
+        assert "configure-pages" not in flow    # 켜려 들면 다시 죽는다
+
+    def test_the_zip_is_made_either_way(self) -> None:
+        """주소가 없어도 배포본은 나와야 한다 — 사내 서버로 올리는 길이다."""
+        flow = self._flow()
+        upload = flow.index("배포본 업로드 (zip)")
+        check = flow.index("Pages 가 켜져 있는지")
+        assert upload < check, "zip 이 Pages 확인보다 먼저 나와야 한다"
+
     def test_it_has_the_rights_to_deploy(self) -> None:
         """pages·id-token 이 없으면 마지막 단계에서만 막힌다."""
         flow = self._flow()
