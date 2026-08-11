@@ -26,7 +26,21 @@
     <button class="small" type="button" id="client-rename">이름 바꾸기</button>
     <button class="small" type="button" id="client-remove">삭제</button>
   </div>
+  <button type="button" id="help-open" title="사용설명서" aria-label="사용설명서">?</button>
 </header>
+
+<!-- 사용설명서. 화면을 떠나지 않고 읽을 수 있어야 한다 — 산출 도중에 물어볼
+     것이 생기는데, 다른 창으로 나가면 입력하던 것을 잃는다. -->
+<div id="help" hidden>
+  <div id="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div id="help-bar">
+      <strong id="help-title">사용설명서</strong>
+      <input type="search" id="help-find" placeholder="찾기">
+      <button class="small" type="button" id="help-close">닫기</button>
+    </div>
+    <div id="help-body">불러오는 중…</div>
+  </div>
+</div>
 
 <div id="status">엔진을 준비하는 중… (처음 한 번만 오래 걸립니다)</div>
 

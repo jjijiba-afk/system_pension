@@ -884,3 +884,24 @@ def test_a_new_build_reaches_a_device_that_already_installed_the_app(
         f"새로 올린 app.css 가 기기에 닿지 않았습니다 (그대로 {after}). "
         "화면 파일은 네트워크를 먼저 봐야 합니다."
     )
+
+
+def test_help_opens_over_the_screen(page) -> None:
+    """물음표를 누르면 화면을 떠나지 않고 사용설명서를 읽는다.
+
+    산출 도중에 물어볼 것이 생기는데 다른 창으로 나가면 입력하던 것을 잃는다.
+    겹쳐 뜨는지, 닫으면 하던 화면으로 그대로 돌아오는지 본다.
+    """
+    page.fill("#base_date", "2025-12-31")          # 하던 입력
+    page.click("#help-open")
+    page.wait_for_selector("#help-body h1", timeout=15_000)
+    assert "사용설명서" in page.inner_text("#help-body h1")
+    assert page.locator("#help-body table").count() > 5   # 표가 살아 있다
+
+    page.fill("#help-find", "확정급여채무")
+    page.wait_for_selector("#help-body mark", timeout=5_000)
+    assert page.locator("#help-body mark").count() > 0
+
+    page.click("#help-close")
+    assert page.locator("#help").is_hidden()
+    assert page.input_value("#base_date") == "2025-12-31"

@@ -189,6 +189,122 @@ def _hash_dir(directory: Path) -> str:
     return digest.hexdigest()[:12]
 
 
+
+def _markdown(text: str) -> str:
+    """사용설명서를 화면에 띄울 조각으로. 이 문서가 쓰는 것만 다룬다.
+
+    범용 변환기를 끌어오면 휠이 하나 더 늘고, 웹앱은 그것을 통째로 내려받아야
+    한다. 문서는 우리가 쓰는 것이라 쓰이는 표기가 정해져 있으므로 여기서 그만큼
+    만 옮긴다 — 제목·표·목록·인용·코드·굵게·코드조각.
+    """
+    import html as _html
+    import re
+
+    def inline(raw: str) -> str:
+        out = _html.escape(raw)
+        out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
+        out = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", out)
+        out = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", out)   # 링크는 글자만
+        return out
+
+    lines = text.splitlines()
+    out: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+
+        if line.startswith("```"):                      # 코드 덩어리
+            index += 1
+            block = []
+            while index < len(lines) and not lines[index].startswith("```"):
+                block.append(_html.escape(lines[index]))
+                index += 1
+            out.append("<pre><code>" + "\n".join(block) + "</code></pre>")
+            index += 1
+            continue
+
+        if line.startswith("|") and index + 1 < len(lines) and set(
+                lines[index + 1].replace("|", "").strip()) <= set("-: "):
+            def cells(row: str) -> list[str]:
+                return [c.strip() for c in row.strip().strip("|").split("|")]
+
+            head = cells(line)
+            index += 2
+            rows = []
+            while index < len(lines) and lines[index].startswith("|"):
+                rows.append(cells(lines[index]))
+                index += 1
+            out.append("<table><thead><tr>"
+                       + "".join(f"<th>{inline(c)}</th>" for c in head)
+                       + "</tr></thead><tbody>"
+                       + "".join("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row)
+                                 + "</tr>" for row in rows)
+                       + "</tbody></table>")
+            continue
+
+        heading = re.match(r"^(#{1,4})\s+(.*)$", line)
+        if heading:
+            level = len(heading.group(1))
+            out.append(f"<h{level}>{inline(heading.group(2))}</h{level}>")
+            index += 1
+            continue
+
+        if line.startswith(">"):
+            block = []
+            while index < len(lines) and lines[index].startswith(">"):
+                block.append(lines[index].lstrip(">").strip())
+                index += 1
+            out.append("<blockquote>" + inline(" ".join(block)) + "</blockquote>")
+            continue
+
+        bullet = re.match(r"^\s*([-*]|\d+\.)\s+(.*)$", line)
+        if bullet:
+            ordered = bullet.group(1).endswith(".")
+            tag = "ol" if ordered else "ul"
+            items: list[str] = []
+            while index < len(lines):
+                found = re.match(r"^\s*([-*]|\d+\.)\s+(.*)$", lines[index])
+                if found and found.group(1).endswith(".") == ordered:
+                    items.append(found.group(2))
+                    index += 1
+                    continue
+                # 이어지는 줄. 원문은 긴 항목을 다음 줄로 접어 쓰므로, 여기서
+                # 붙이지 않으면 한 항목이 문단으로 떨어져 나온다.
+                if (items and lines[index].strip()
+                        and not re.match(r"^(#{1,4}\s|\||>|```)", lines[index])):
+                    items[-1] += " " + lines[index].strip()
+                    index += 1
+                    continue
+                break
+            out.append(f"<{tag}>"
+                       + "".join(f"<li>{inline(item)}</li>" for item in items)
+                       + f"</{tag}>")
+            continue
+
+        if line.strip() in ("", "---"):
+            index += 1
+            continue
+
+        block = []
+        while index < len(lines) and lines[index].strip() and not re.match(
+                r"^(#{1,4}\s|\||>|```|\s*([-*]|\d+\.)\s)", lines[index]):
+            block.append(lines[index].strip())
+            index += 1
+        out.append("<p>" + inline(" ".join(block)) + "</p>")
+
+    return "\n".join(out)
+
+
+def _write_help(target: Path) -> None:
+    """사용설명서를 앱 안에서 읽을 수 있게 넣는다.
+
+    다른 창으로 나가 읽게 하면 입력하던 것을 잃는다. 산출 도중에 물어볼 것이
+    생기므로 화면을 떠나지 않고 볼 수 있어야 한다.
+    """
+    source = ROOT / "docs" / "사용설명서.md"
+    target.write_text(_markdown(source.read_text(encoding="utf-8")), encoding="utf-8")
+
+
 def build() -> Path:
     if DIST.exists():
         shutil.rmtree(DIST)
@@ -201,6 +317,7 @@ def build() -> Path:
 
     for name in ("index.html", "app.css", "app.js", "manifest.webmanifest"):
         shutil.copy2(APP / name, DIST / name)
+    _write_help(DIST / "help.html")
     (DIST / "icon-180.png").write_bytes(_png(180))
     (DIST / "icon-512.png").write_bytes(_png(512))
 

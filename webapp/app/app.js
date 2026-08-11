@@ -2790,3 +2790,76 @@ async function registerGenerated(item) {
 $("page-calc").addEventListener("input", refreshCalcBadges);
 $("page-calc").addEventListener("change", refreshCalcBadges);
 refreshCalcBadges();
+
+// ── 사용설명서 ────────────────────────────────────────────────
+// 빌드가 docs/사용설명서.md 를 help.html 로 바꿔 넣어 둔다. 처음 누를 때만
+// 받아 두고 그 뒤로는 그대로 다시 보여 준다 — 산출 중에 여는 것이라 기다리게
+// 하면 안 된다.
+let helpLoaded = false;
+
+async function openHelp() {
+  const box = document.getElementById("help");
+  box.hidden = false;
+  document.getElementById("help-find").focus();
+  if (helpLoaded) return;
+  const body = document.getElementById("help-body");
+  try {
+    const answer = await fetch("help.html", { cache: "no-cache" });
+    if (!answer.ok) throw new Error(String(answer.status));
+    body.innerHTML = await answer.text();
+    helpLoaded = true;
+  } catch (err) {
+    body.innerHTML = "<p>설명서를 불러오지 못했습니다. " +
+      "빌드한 앱에서만 볼 수 있습니다.</p>";
+  }
+}
+
+function closeHelp() {
+  document.getElementById("help").hidden = true;
+}
+
+// 찾기 — 문서가 길어서 눈으로 훑기 어렵다. 맞는 곳을 표시하고 첫 곳으로 옮긴다.
+function findInHelp(needle) {
+  const body = document.getElementById("help-body");
+  body.querySelectorAll("mark").forEach((mark) => {
+    mark.replaceWith(document.createTextNode(mark.textContent));
+  });
+  body.normalize();
+  const word = needle.trim();
+  if (word.length < 2) return;
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  const hits = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue.toLowerCase().includes(word.toLowerCase())) hits.push(node);
+  }
+  let first = null;
+  for (const text of hits) {
+    const parts = text.nodeValue.split(new RegExp(`(${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
+    const holder = document.createDocumentFragment();
+    for (const part of parts) {
+      if (part.toLowerCase() === word.toLowerCase()) {
+        const mark = document.createElement("mark");
+        mark.textContent = part;
+        holder.appendChild(mark);
+        if (!first) first = mark;
+      } else if (part) {
+        holder.appendChild(document.createTextNode(part));
+      }
+    }
+    text.replaceWith(holder);
+  }
+  if (first) first.scrollIntoView({ block: "center" });
+}
+
+document.getElementById("help-open").addEventListener("click", openHelp);
+document.getElementById("help-close").addEventListener("click", closeHelp);
+document.getElementById("help").addEventListener("click", (event) => {
+  if (event.target.id === "help") closeHelp();   // 바깥을 눌러도 닫힌다
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !document.getElementById("help").hidden) closeHelp();
+});
+document.getElementById("help-find").addEventListener("input", (event) => {
+  findInHelp(event.target.value);
+});

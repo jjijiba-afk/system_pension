@@ -358,3 +358,43 @@ select { padding-right: 30px;
 input[type=checkbox], input[type=radio] { -webkit-appearance: auto; appearance: auto; }
 /* 날짜칸의 달력 아이콘도 남겨 둔다. */
 input[type=date] { -webkit-appearance: none; appearance: none; }
+
+/* ── 사용설명서 ──
+   제목 줄 오른쪽 끝의 물음표. 탭 안에 두면 여덟 번째 탭이 되어 일하는 순서를
+   흐트러뜨리므로, 언제 눌러도 되는 것은 탭 밖에 둔다. */
+#help-open { width: 30px; height: 30px; padding: 0; font-size: 1.05rem;
+  font-weight: 700; line-height: 1; color: var(--navy);
+  border: 1px solid var(--navy); border-radius: 0; background: var(--paper);
+  align-self: center; flex: 0 0 auto; }
+#help-open:hover { background: var(--navy); color: #FFFFFF; }
+
+#help { position: fixed; inset: 0; z-index: 50; background: rgba(26, 29, 35, 0.45);
+  display: flex; align-items: stretch; justify-content: center; padding: 16px; }
+#help[hidden] { display: none; }
+#help-panel { display: flex; flex-direction: column; width: min(860px, 100%);
+  background: var(--paper); border: 1px solid var(--navy); border-radius: 0; }
+#help-bar { display: flex; gap: 8px; align-items: center; flex: 0 0 auto;
+  padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg-soft); }
+#help-bar strong { flex: 1 1 auto; color: var(--navy); }
+#help-bar input { width: 150px; margin: 0; }
+#help-body { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 12px 16px; font-size: 0.94rem; line-height: 1.55; }
+#help-body h1 { font-size: 1.15rem; }
+#help-body h2 { margin: 18px 0 6px; padding-bottom: 3px; font-size: 1.05rem;
+  color: var(--navy); border-bottom: 1px solid var(--navy); }
+#help-body h3 { margin: 14px 0 4px; font-size: 0.99rem; color: var(--navy); }
+#help-body h4 { margin: 10px 0 3px; font-size: 0.94rem; color: var(--hint); }
+#help-body p, #help-body ul, #help-body ol { margin: 5px 0; }
+#help-body ul, #help-body ol { padding-left: 20px; }
+#help-body code { padding: 0 3px; background: var(--bg-soft); font-size: 0.9em; }
+#help-body pre { overflow-x: auto; padding: 8px 10px; background: var(--bg-soft);
+  border: 1px solid var(--line); }
+#help-body pre code { padding: 0; background: none; }
+#help-body blockquote { margin: 6px 0; padding: 4px 10px; color: var(--hint);
+  border-left: 3px solid var(--line); }
+#help-body table { width: 100%; border-collapse: collapse; margin: 6px 0;
+  font-size: 0.9rem; display: block; overflow-x: auto; }
+#help-body th, #help-body td { padding: 3px 7px; border: 1px solid var(--line);
+  text-align: left; vertical-align: top; }
+#help-body th { background: var(--bg-soft); color: var(--navy); }
+#help-body mark { background: #FFF2CC; }
