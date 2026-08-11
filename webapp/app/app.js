@@ -1441,7 +1441,8 @@ const autoFilled = new Set();
 
 /** 사람이 손댄 칸은 그 뒤로 명부가 덮어쓰지 않는다. */
 for (const id of ["base_date", "period_start", "asset_opening",
-                  "asset_contributions", "asset_paid", "asset_closing"]) {
+                  "asset_contributions", "asset_paid", "asset_closing",
+                  "unpaid_benefits", "asset_ceiling"]) {
   $(id).addEventListener("input", () => autoFilled.delete(id));
 }
 
@@ -1467,7 +1468,8 @@ async function fillFromGeneralSheet() {
 
     const lines = [];
     if (info.found?.length) {
-      lines.push("명부의 [1)일반사항] 에서 가져왔습니다 — " + info.found.join(" · "));
+      lines.push("명부에 딸려 온 [기본정보]·[사외적립자산] 에서 가져왔습니다 — "
+        + info.found.join(" · "));
     }
     if (kept.length) {
       lines.push("직접 입력한 칸은 그대로 두었습니다.");
@@ -1479,7 +1481,8 @@ async function fillFromGeneralSheet() {
     // 채워 넣은 구획은 펼쳐 둔다. 접힌 채로 값만 들어가면 담당자가 확인할
     // 기회 없이 그대로 산출된다 — 회사 표가 틀렸을 때 잡을 수 없다.
     if ("base_date" in fields || "period_start" in fields) $("sec-dates").open = true;
-    if ("asset_opening" in fields) $("sec-assets").open = true;
+    if ("asset_opening" in fields || "asset_ceiling" in fields
+        || "unpaid_benefits" in fields) $("sec-assets").open = true;
 
     refreshCalcBadges();
     if (!lines.length) return;
@@ -2643,13 +2646,21 @@ function restoreRun(name) {
     if ("force" in options) $("force").checked = Boolean(options.force);
     if ("sensitivity" in options) $("sensitivity").checked = Boolean(options.sensitivity);
     if ("longterm" in options) $("longterm").checked = Boolean(options.longterm);
+    if ("split_remeasurement" in options) {
+      $("split_remeasurement").checked = Boolean(options.split_remeasurement);
+    }
     $("base_date").value = options.base_date || "";
     $("period_start").value = options.period_start || "";
     $("prior_dbo").value = options.prior_dbo || "";
     $("prior_rate").value = options.prior_rate || "";
+    // 저장한 칸은 하나도 빠짐없이 되돌린다. 빠진 칸은 빈 값으로 남아 조용히
+    // 다르게 산출된다 — 자산인식상한이 그랬다. 상한을 걸어 둔 회차를 불러와
+    // 다시 돌리면 문단 64 가 통째로 빠진 채 순확정급여자산이 나왔다.
     for (const key of ["past_service_cost", "settlement_obligation",
-                       "asset_opening", "asset_contributions",
-                       "asset_paid", "asset_closing", "unpaid_benefits"]) {
+                       "prior_longterm_dbo", "asset_opening",
+                       "asset_contributions", "asset_paid", "asset_closing",
+                       "unpaid_benefits", "expected_contributions",
+                       "asset_ceiling"]) {
       $(key).value = options[key] || "";
     }
     $("run-name").value = name;

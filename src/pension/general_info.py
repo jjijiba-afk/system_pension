@@ -143,6 +143,13 @@ class AssetMovement:
     """자산관리수수료."""
     national_pension: float = 0.0
     """국민연금전환금 기말 잔액. 별도 열로 관리된다."""
+    unpaid_benefits: float = 0.0
+    """기준일 현재 미지급 퇴직급여. 이미 퇴직했는데 결산일까지 못 준 금액."""
+    asset_ceiling: float | None = None
+    """자산인식상한(문단 64). ``None`` 이면 회사가 적지 않았다는 뜻이다.
+
+    0 과 구별해야 한다 — 0 은 '상한이 0 원' 이고 ``None`` 은 '미적용' 이다.
+    """
     breakdown: dict[str, float] = field(default_factory=dict)
     """자산 분류별 공정가치(문단 142 공시)."""
 
@@ -531,6 +538,17 @@ def _read_assets(ws) -> AssetMovement:
                 # '⑴ 현금 및 현금등가물' → '현금 및 현금등가물'
                 clean = re.sub(r"^[^가-힣A-Za-z]+", "", label)
                 result.breakdown[clean] = amount
+
+    # '그 밖의 입력' — 표에 있으면서도 아무도 읽지 않으면, 채워 보낸 사람은
+    # 화면에 손으로 한 번 더 적어야 한다. 물어봤으면 읽어야 한다.
+    extras = _find_row(ws, "그 밖의 입력")
+    if extras:
+        for row in range(extras + 1, extras + 8):
+            label = text(ws.cell(row, 2).value)
+            if "자산인식상한" in label:
+                result.asset_ceiling = _opt_number(ws.cell(row, 3).value)
+            elif "미지급 퇴직급여" in label:
+                result.unpaid_benefits = abs(_number(ws.cell(row, 3).value))
     return result
 
 

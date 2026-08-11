@@ -544,7 +544,7 @@ def _split_assumption_change(
 def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | None:
     """사외적립자산 증감표.
 
-    담당자가 화면에 넣은 값이 없으면 명부의 ``1)일반사항`` 5-2) 표를 그대로
+    담당자가 화면에 넣은 값이 없으면 명부의 ``사외적립자산`` 시트를 그대로
     쓴다. 신탁 명세서를 보고 이미 채워 보낸 표라 다시 옮겨 적을 이유가 없다.
     """
     given = options.plan_assets
@@ -562,13 +562,21 @@ def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | Non
         contributions = from_sheet.contributions
         # 자산에서 나간 돈은 전부 뺀다 — 수수료도 자산을 줄인다.
         paid = from_sheet.total_paid - from_sheet.total_received
-        unpaid = 0.0
+        unpaid = from_sheet.unpaid_benefits
     else:
         opening = given.opening_fair_value
         closing = given.closing_fair_value
         contributions = given.contributions
         paid = given.benefits_paid or run.fund_assets_paid
         unpaid = given.unpaid_benefits
+        if not unpaid and from_sheet is not None:
+            unpaid = from_sheet.unpaid_benefits
+
+    # 상한은 화면 값이 먼저다 — 명부보다 나중 자료다. 화면이 비었을 때만
+    # 명부에 적힌 것을 쓴다. 0 과 '안 적음' 을 가려야 해서 None 으로 본다.
+    ceiling = given.asset_ceiling
+    if ceiling is None and from_sheet is not None:
+        ceiling = from_sheet.asset_ceiling
 
     return build_plan_assets(
         opening_fair_value=opening,
@@ -579,7 +587,7 @@ def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | Non
         closing_dbo=run.valuation.dbo,
         unpaid_benefits=unpaid,
         period_years=_period_years(run.config.base_date, _period_start(run, options)),
-        asset_ceiling=given.asset_ceiling,
+        asset_ceiling=ceiling,
     )
 
 

@@ -375,7 +375,8 @@ def _roster_groups(request: dict) -> dict[str, Any]:
 
 
 def _general_info(request: dict) -> dict[str, Any]:
-    """자료요청서 ``1)일반사항`` 에서 화면에 채울 것을 전부 읽는다.
+    """명부에 딸려 온 [기본정보]·[퇴직급여규정]·[사외적립자산] 에서
+    화면에 채울 것을 전부 읽는다.
 
     6번 지급규정 초안은 ``values`` 로(지급규정 탭), 담당자가 이미 채워 보낸
     2·4·5번 표는 ``fields`` 로(산출 탭 입력칸) 나간다. 산출 엔진은 칸이 비면
@@ -429,6 +430,15 @@ def _general_info(request: dict) -> dict[str, Any]:
         found.append(
             f"사외적립자산 기초 {assets.opening:,.0f}원 → 기말 {assets.closing:,.0f}원"
         )
+
+    # 양식의 '그 밖의 입력'. 물어봐 놓고 화면에 넣어 주지 않으면 담당자는
+    # 엑셀에 적은 것을 여기 손으로 한 번 더 옮겨야 한다.
+    if assets.unpaid_benefits:
+        fields["unpaid_benefits"] = f"{assets.unpaid_benefits:.0f}"
+        found.append(f"미지급 퇴직급여 {assets.unpaid_benefits:,.0f}원")
+    if assets.asset_ceiling is not None:
+        fields["asset_ceiling"] = f"{assets.asset_ceiling:.0f}"
+        found.append(f"자산인식상한 {assets.asset_ceiling:,.0f}원")
 
     problems: list[str] = []
     if not assets.is_empty() and round(assets.difference) != 0:

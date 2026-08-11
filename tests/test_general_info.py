@@ -432,3 +432,53 @@ class TestPayoutSectionStillWorks:
         draft = _read(_full_workbook(tmp_path)).draft
         assert draft.min_service_years == 1.0
         assert draft.staff_nra == 60
+
+
+class TestTheStandardTemplateReadsBackWhole:
+    """회사에 보내는 표준 양식은 **적은 것이 전부 읽혀야** 한다.
+
+    물어봐 놓고 읽지 않으면 담당자는 엑셀에 채운 것을 화면에 손으로 한 번 더
+    옮겨야 한다. 그 자리에서 자릿수를 틀린다.
+    """
+
+    def _book(self, path, **numbers):
+        import openpyxl
+
+        from pension.rostertemplate import build_workbook
+
+        build_workbook(**numbers).save(path)
+        return openpyxl.load_workbook(path, data_only=True)
+
+    def test_the_blank_template_gives_period_grade_and_a_balanced_table(
+        self, tmp_path
+    ) -> None:
+        book = self._book(tmp_path / "양식.xlsx")
+        info = read_general_info(book)
+
+        assert info.period_start is not None and info.period_end is not None
+        assert info.period_start < info.period_end
+        assert info.credit_grade, "신용등급이 [기본정보] 에 있는데 읽히지 않았다"
+        assert round(info.assets.difference) == 0
+        # 세부내역이 아래 표까지 훑어 들어가면 합이 기말과 어긋난다.
+        assert sum(info.assets.breakdown.values()) == pytest.approx(
+            info.assets.closing, rel=1e-9)
+
+    def test_the_ceiling_and_unpaid_boxes_are_read(self, tmp_path) -> None:
+        book = self._book(
+            tmp_path / "채운양식.xlsx",
+            numbers={
+                "opening": (1_000_000_000, 0), "closing": (1_000_000_000, 0),
+                "asset": {}, "obligation": {},
+                "breakdown": [("현금 및 현금등가물", 1_000_000_000)],
+                "extras": {"자산인식상한 (문단 64)": 250_000_000,
+                           "기준일 현재 미지급 퇴직급여": 3_000_000},
+            },
+        )
+        assets = read_general_info(book).assets
+        assert assets.asset_ceiling == 250_000_000
+        assert assets.unpaid_benefits == 3_000_000
+
+    def test_an_unwritten_ceiling_is_not_zero(self, tmp_path) -> None:
+        """0 은 '상한이 0 원', 빈칸은 '미적용' 이다. 섞으면 자산을 통째로 깎는다."""
+        book = self._book(tmp_path / "빈양식.xlsx")
+        assert read_general_info(book).assets.asset_ceiling is None

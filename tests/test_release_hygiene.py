@@ -382,6 +382,26 @@ class TestPagesDeploy:
         assert "홈 화면에 추가" in page
         assert "%APPDATA%" not in page
 
+    def test_every_saved_input_comes_back(self) -> None:
+        """저장한 입력칸은 [입력 불러오기] 로 하나도 빠짐없이 돌아와야 한다.
+
+        빠진 칸은 빈 값으로 남아 **조용히 다르게** 산출된다. 자산인식상한이
+        그랬다 — 상한을 걸어 둔 회차를 불러와 다시 돌리면 문단 64 가 통째로
+        빠진 채 순확정급여자산이 나왔다.
+        """
+        import re
+
+        script = (ROOT / "webapp/app/app.js").read_text(encoding="utf-8")
+        saved = script[script.index("const options = {"):]
+        saved = saved[:saved.index("\n    };")]
+        # `키: $("칸").value` 로 적힌 것들이 저장되는 입력칸이다.
+        boxes = set(re.findall(r'\$\("([a-z_]+)"\)\.value', saved))
+
+        restore = script[script.index("function restoreRun("):]
+        restore = restore[:restore.index("\n}")]
+        for box in sorted(boxes):
+            assert box in restore, f"'{box}' 을(를) 되돌리지 않는다"
+
     def test_the_browser_screen_is_actually_tested_in_ci(self) -> None:
         """웹앱 시험이 CI 에서 조용히 건너뛰어지지 않아야 한다.
 
