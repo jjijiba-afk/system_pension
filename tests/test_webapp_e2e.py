@@ -972,3 +972,24 @@ def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_every_template_downloads_from_the_library(page, tmp_path) -> None:
+    """양식을 화면에서 받을 수 있어야 한다.
+
+    회사에 명부를 요청할 때마다 양식 파일을 어디선가 찾아 붙여 보내면, 프로그램이
+    바뀐 뒤에도 옛 양식이 돌아다닌다. 눌러서 받는 것이 늘 지금 것이다.
+    """
+    page.click("#tab-lib")
+    page.wait_for_selector("#template-list .lib-line", timeout=30_000)
+    buttons = page.locator("#template-list button")
+    assert buttons.count() >= 6
+
+    for index in range(buttons.count()):
+        with page.expect_download(timeout=120_000) as got:
+            buttons.nth(index).click()
+        made = got.value
+        assert made.suggested_filename.endswith(".xlsx")
+        saved = tmp_path / made.suggested_filename
+        made.save_as(str(saved))
+        assert saved.stat().st_size > 4_000, made.suggested_filename

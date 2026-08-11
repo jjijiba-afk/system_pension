@@ -992,6 +992,55 @@ def _backup_import(request: dict) -> dict[str, Any]:
     return result
 
 
+
+#: 화면에서 내려받을 수 있는 양식. (열쇠, 파일명, 설명, 만드는 함수 이름)
+_TEMPLATES: Final = (
+    ("roster", "명부_양식.xlsx",
+     "받는 명부 양식. 작성요령·기본정보·퇴직급여규정·사외적립자산과 "
+     "재직자·퇴직자명부가 들어 있습니다", "write_roster_template"),
+    ("roster_sample", "시험명부.xlsx",
+     "같은 양식에 난수 자료를 채운 것. 실제 명부 없이 두드려 볼 때",
+     "write_default_roster"),
+    ("rates_blank", "기초율_빈양식.xlsx",
+     "산출가정 워크북 빈 양식", "write_template"),
+    ("rates_default", "기초율_기본값.xlsx",
+     "표준률과 기본 가정이 채워진 산출가정 워크북. 여기서 시작하면 빠릅니다",
+     "write_standard_assumptions"),
+    ("curve", "금리표_양식.xlsx",
+     "등급별 기간구조를 적는 양식. 결산일 곡선을 여기에 옮기면 할인율이 "
+     "한 번에 채워집니다", "write_curve_template"),
+    ("standard", "표준률_원표.xlsx",
+     "퇴직률·승급률·사망률 표준률 원표. 사업장 규모별로 나뉘어 있습니다",
+     "write_standard_table"),
+)
+
+
+def _templates(request: dict) -> dict[str, Any]:
+    """어떤 양식을 받을 수 있는지."""
+    return {"templates": [{"key": key, "file": name, "note": note}
+                          for key, name, note, _maker in _TEMPLATES]}
+
+
+def _template_make(request: dict) -> dict[str, Any]:
+    """양식 하나를 만들어 경로를 돌려준다. 화면이 그 경로를 내려받는다.
+
+    양식을 손으로 만들어 두었다가 프로그램이 바뀌면 서로 어긋난다. 프로그램이
+    지금 읽는 그대로를 즉석에서 만들어 주는 편이 어긋날 자리가 없다.
+    """
+    from . import samples
+
+    wanted = text(request.get("key"))
+    found = next((row for row in _TEMPLATES if row[0] == wanted), None)
+    if found is None:
+        raise ValueError(f"그런 양식이 없습니다: {wanted}")
+    _key, name, _note, maker = found
+    folder = Path(request.get("work", "/work")) / "양식"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    getattr(samples, maker)(path)
+    return {"path": str(path), "file": name}
+
+
 _OPS = {
     "meta": _meta,
     "state_new": _state_new,
@@ -1036,4 +1085,6 @@ _OPS = {
     "library_path": _library_path,
     "backup_export": _backup_export,
     "backup_import": _backup_import,
+    "templates": _templates,
+    "template_make": _template_make,
 }

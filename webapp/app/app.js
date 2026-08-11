@@ -1248,6 +1248,7 @@ function libCount(sectionId, data) {
 }
 
 function refreshLibrary() {
+  fillTemplates();
   const { library, backup } = py("library_list");
   renderLibraryList("금리표", library["금리표"], $("lib-curve-list"));
   renderLibraryList("표준률", library["표준률"], $("lib-rates-list"));
@@ -2888,3 +2889,32 @@ document.addEventListener("keydown", (event) => {
 document.getElementById("help-find").addEventListener("input", (event) => {
   findInHelp(event.target.value);
 });
+
+
+// ── 양식 내려받기 ────────────────────────────────────────────────
+// 양식 파일을 어딘가에 만들어 두고 링크만 걸면, 프로그램이 바뀔 때 그 파일이
+// 옛것으로 남는다. 누를 때마다 지금 코드로 만들어 준다.
+function fillTemplates() {
+  const target = $("template-list");
+  if (!target) return;
+  const rows = py("templates").templates.map((item) => {
+    const button = el("button", { class: "small primary", type: "button" }, "내려받기");
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      try {
+        const made = py("template_make", { key: item.key });
+        download(made.path, made.file);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    return el("div", { class: "lib-line" },
+      el("div", { style: "flex:1;min-width:180px" },
+        el("b", {}, item.file),
+        el("div", { class: "hint" }, item.note)),
+      button);
+  });
+  target.replaceChildren(...rows);
+}
