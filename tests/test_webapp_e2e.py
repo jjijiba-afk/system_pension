@@ -1,7 +1,9 @@
 """아이패드 웹앱(브라우저 안 엔진) 끝까지 검증.
 
-Playwright 와 Chromium, 그리고 빌드된 dist 가 있을 때만 돈다 — CI 기본
-잡에서는 건너뛰고, 로컬·전용 잡에서 실제 브라우저로 확인한다.
+Playwright 와 Chromium, 그리고 빌드된 dist 가 있을 때 돈다. 크로미움은 이
+상자에 미리 깔린 것을 먼저 쓰고, 없으면 Playwright 가 자기 것을 찾게 둔다 —
+경로를 하나로 못박아 두었더니 CI 에서는 늘 조용히 건너뛰어, 브라우저 화면이
+한 번도 시험되지 않은 채로 지나갔다.
 """
 
 from __future__ import annotations
@@ -16,11 +18,26 @@ import pytest
 playwright_api = pytest.importorskip("playwright.sync_api")
 
 DIST = Path(__file__).resolve().parent.parent / "webapp" / "dist"
-CHROMIUM = Path("/opt/pw-browsers/chromium")
+
+
+def _chromium() -> str | None:
+    """쓸 수 있는 크로미움 실행파일. 없으면 ``None``."""
+    pinned = Path("/opt/pw-browsers/chromium")
+    if pinned.exists():
+        return str(pinned)
+    try:
+        with playwright_api.sync_playwright() as play:
+            found = Path(play.chromium.executable_path)
+    except Exception:      # noqa: BLE001 — 안 깔렸으면 건너뛴다
+        return None
+    return str(found) if found.exists() else None
+
+
+CHROMIUM = _chromium()
 
 pytestmark = [
     pytest.mark.skipif(not DIST.exists(), reason="webapp/build.py 를 먼저 실행"),
-    pytest.mark.skipif(not CHROMIUM.exists(), reason="Chromium 없음"),
+    pytest.mark.skipif(CHROMIUM is None, reason="Chromium 없음"),
 ]
 
 
@@ -45,7 +62,7 @@ def shared_dir(tmp_path_factory):
 @pytest.fixture(scope="module")
 def browser():
     with playwright_api.sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=str(CHROMIUM))
+        browser = p.chromium.launch(executable_path=CHROMIUM)
         yield browser
         browser.close()
 

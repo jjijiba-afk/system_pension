@@ -382,6 +382,20 @@ class TestPagesDeploy:
         assert "홈 화면에 추가" in page
         assert "%APPDATA%" not in page
 
+    def test_the_browser_screen_is_actually_tested_in_ci(self) -> None:
+        """웹앱 시험이 CI 에서 조용히 건너뛰어지지 않아야 한다.
+
+        브라우저 시험은 크로미움과 빌드된 dist 가 있을 때만 돈다. 둘 다 없는
+        잡에서 돌리면 27개가 통째로 skip 되는데, 초록불은 그대로라 아무도
+        모른다 — 지금 주력이 웹앱인데 그쪽만 시험되지 않는다.
+        """
+        flow = (ROOT / ".github/workflows/build-exe.yml").read_text(encoding="utf-8")
+        assert "playwright install" in flow
+        assert "webapp/build.py" in flow
+        assert "tests/test_webapp_e2e.py" in flow
+        # dist 를 만들기 **전에** 시험하면 옛 판을 보게 된다.
+        assert flow.index("webapp/build.py") < flow.index("tests/test_webapp_e2e.py")
+
     def test_the_first_visit_points_at_the_library(self) -> None:
         """받은 명부가 없는 사람은 첫 화면에서 더 갈 곳이 없다.
 
