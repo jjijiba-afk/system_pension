@@ -300,8 +300,14 @@ def _write_help(target: Path) -> None:
 
     다른 창으로 나가 읽게 하면 입력하던 것을 잃는다. 산출 도중에 물어볼 것이
     생기므로 화면을 떠나지 않고 볼 수 있어야 한다.
+
+    **설치판 설명서를 그대로 쓰면 안 된다.** 그 문서는 '설치 파일을
+    더블클릭하라' 로 시작하고 명령행과 ``%APPDATA%`` 를 말한다 — 브라우저로
+    쓰는 사람에게는 하나도 해당되지 않는다. 웹앱용 문서를 따로 둔다.
     """
-    source = ROOT / "docs" / "사용설명서.md"
+    source = ROOT / "docs" / "웹앱-사용설명서.md"
+    if not source.exists():                       # 없으면 아예 넣지 않는다.
+        raise FileNotFoundError(f"{source} 가 없습니다")
     target.write_text(_markdown(source.read_text(encoding="utf-8")), encoding="utf-8")
 
 

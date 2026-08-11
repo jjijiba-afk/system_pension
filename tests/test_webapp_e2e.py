@@ -896,7 +896,8 @@ def test_help_opens_over_the_screen(page) -> None:
     page.click("#help-open")
     page.wait_for_selector("#help-body h1", timeout=15_000)
     assert "사용설명서" in page.inner_text("#help-body h1")
-    assert page.locator("#help-body table").count() > 5   # 표가 살아 있다
+    assert page.locator("#help-body table").count() >= 3   # 표가 살아 있다
+    assert "홈 화면에 추가" in page.inner_text("#help-body")   # 웹앱용 문서다
 
     page.fill("#help-find", "확정급여채무")
     page.wait_for_selector("#help-body mark", timeout=5_000)

@@ -361,6 +361,27 @@ class TestPagesDeploy:
         """Pages 는 밑줄로 시작하는 이름을 감춘다. 런타임에 그런 파일이 있다."""
         assert ".nojekyll" in self._flow()
 
+    def test_the_help_is_written_for_the_browser(self) -> None:
+        """설치판 설명서를 그대로 실으면 안 된다.
+
+        그 문서는 '설치 파일을 더블클릭하라' 로 시작하고 명령행과 %APPDATA% 를
+        말한다 — 브라우저로 쓰는 사람에게는 하나도 해당되지 않는다.
+        """
+        source = ROOT / "docs/웹앱-사용설명서.md"
+        assert source.exists()
+        text = source.read_text(encoding="utf-8")
+        for word in ("_설치.exe", "%APPDATA%", "pension-cli", "명령프롬프트"):
+            assert word not in text, word
+        for word in ("홈 화면에 추가", "브라우저", "보관함"):
+            assert word in text, word
+
+    @pytest.mark.skipif(not (ROOT / "webapp/dist/help.html").exists(),
+                        reason="webapp/build.py 를 먼저 실행")
+    def test_the_shipped_help_is_the_web_one(self) -> None:
+        page = (ROOT / "webapp/dist/help.html").read_text(encoding="utf-8")
+        assert "홈 화면에 추가" in page
+        assert "%APPDATA%" not in page
+
     def test_the_app_survives_a_subfolder(self) -> None:
         """Pages 주소는 /저장소이름/ 아래다. 절대경로가 하나라도 있으면 깨진다."""
         page = (ROOT / "webapp/app/index.html").read_text(encoding="utf-8")
