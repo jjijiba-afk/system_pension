@@ -780,6 +780,55 @@ class TestRosterOps:
         groups = call("roster_groups", path=str(roster_path))["groups"]
         assert groups == ["2임원", "1정규직", "3계약직"]
 
+    def _named_rule_column(self, tmp_path, header: str, values: list[str]) -> Path:
+        """규정 칸의 머리글을 ``header`` 로 바꾼 재직자명부."""
+        from pension.layout import ACTIVE_HEADER_ALIASES, find_header_row
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "명부.xlsx")
+        book = openpyxl.load_workbook(path)
+        sheet = book["재직자명부"]
+        row = find_header_row(sheet, ACTIVE_HEADER_ALIASES)
+        column = next(
+            c for c in range(1, sheet.max_column + 1)
+            if str(sheet.cell(row, c).value or "").strip() == "규정명"
+        )
+        sheet.cell(row, column, header)
+        for offset, value in enumerate(values):
+            sheet.cell(row + 1 + offset, column, value)
+        book.save(path)
+        return path
+
+    def test_an_unusually_named_rule_column_is_still_found(self, tmp_path) -> None:
+        """규정 칸 머리글은 회사마다 다르다 — '지급규정' 이라고 적어 보낸다.
+
+        못 찾으면 조용히 직군으로 물러서고, 사람마다 다른 규정이 통째로
+        뭉개진 채 산출이 끝난다. 오류 없이 그럴듯한 숫자가 나오는 쪽이라
+        머리글을 넉넉히 알아봐야 한다.
+        """
+        path = self._named_rule_column(tmp_path, "지급규정", ["임원규정", "직원규정"])
+
+        result = call("roster_groups", path=str(path))
+        assert result["rules"] == ["임원규정", "직원규정"]
+        assert result["groups"][:2] == ["임원규정", "직원규정"]
+
+    def test_the_scan_says_which_column_it_read(self, tmp_path) -> None:
+        """어느 칸을 읽었는지 말해 주지 않으면 잘못 읽힌 것을 알 길이 없다."""
+        path = self._named_rule_column(tmp_path, "퇴직금규정", ["갑규정"])
+
+        result = call("roster_groups", path=str(path))
+        assert result["rule_header"] == "퇴직금규정"
+        assert result["rule_column"]                 # 엑셀 열 문자 (예: "J")
+        assert any("성명" in line for line in result["headers"])
+
+    def test_a_roster_without_a_rule_column_hands_back_its_headers(
+        self, roster_path
+    ) -> None:
+        """못 찾았으면 명부에 적혀 온 머리글을 돌려줘 어느 칸인지 짚게 한다."""
+        result = call("roster_groups", path=str(roster_path))
+        assert result["rules"] == []
+        assert result["rule_column"] == ""
+
 
 class TestRunOp:
     def test_full_run(self, tmp_path, roster_path) -> None:

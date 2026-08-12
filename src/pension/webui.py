@@ -371,8 +371,15 @@ def _roster_columns(path: Path) -> dict[str, Any]:
     없으면 읽는 단계에서 직군 규칙의 규정명을 채워 넣기 때문에, 규정명을 적지
     않은 명부인데도 규정이 있는 것처럼 보인다. 그러면 직군 열이 밀려난다.
 
-    :returns: ``{"rules": [...], "blank": n, "extra_pay": n}``
+    :returns: ``{"rules": [...], "blank": n, "extra_pay": n,
+        "rule_column": "I", "rule_header": "지급규정", "headers": [...]}``
+
+    ``rule_column`` 을 함께 돌려주는 이유는, 규정명 칸을 못 찾았을 때 화면이
+    조용히 직군으로 물러서기 때문이다. 어느 칸을 읽었는지(또는 못 읽었는지)
+    말해 주지 않으면 담당자는 잘못 읽혔다는 것을 알 길이 없다.
     """
+    from openpyxl.utils import get_column_letter
+
     from .layout import (
         ACTIVE_HEADER_ALIASES,
         find_data_start,
@@ -382,7 +389,10 @@ def _roster_columns(path: Path) -> dict[str, Any]:
     from .readers import ACTIVE_SHEET_ALIASES
     from .workbook import find_sheet, open_workbook
 
-    empty: dict[str, Any] = {"rules": [], "blank": 0, "extra_pay": 0}
+    empty: dict[str, Any] = {
+        "rules": [], "blank": 0, "extra_pay": 0,
+        "rule_column": "", "rule_header": "", "headers": [],
+    }
     book = open_workbook(path)
     try:
         sheet = find_sheet(book, *ACTIVE_SHEET_ALIASES)
@@ -393,10 +403,13 @@ def _roster_columns(path: Path) -> dict[str, Any]:
             return empty          # 머리글 없는 옛 서식에는 규정명 칸이 없다
 
         seen: dict[str, int] = {}
+        written: list[str] = []
         for column in range(1, min(sheet.max_column, 80) + 1):
-            key = normalize_header(sheet.cell(header_row, column).value)
+            raw = text(sheet.cell(header_row, column).value)
+            key = normalize_header(raw)
             if key and key not in seen:
                 seen[key] = column
+                written.append(f"{get_column_letter(column)}열 {raw}")
 
         def column_of(field: str) -> int:
             for alias in ACTIVE_HEADER_ALIASES.get(field, ()):
@@ -410,8 +423,14 @@ def _roster_columns(path: Path) -> dict[str, Any]:
         severance = column_of("severance_benefit")
         extra_column = column_of("extra_pay_base_wage")
         anchor = column_of("employee_id") or column_of("birth_date")
+        where = {
+            "rule_column": get_column_letter(severance) if severance else "",
+            "rule_header": (text(sheet.cell(header_row, severance).value)
+                            if severance else ""),
+            "headers": written,
+        }
         if not rule_columns and not extra_column:
-            return empty
+            return {**empty, **where}
 
         rules: list[str] = []
         blank = extra_pay = 0
@@ -430,7 +449,7 @@ def _roster_columns(path: Path) -> dict[str, Any]:
                         extra_pay += 1
                 except (TypeError, ValueError):
                     pass
-        return {"rules": rules, "blank": blank, "extra_pay": extra_pay}
+        return {"rules": rules, "blank": blank, "extra_pay": extra_pay, **where}
     finally:
         book.close()
 
@@ -466,7 +485,8 @@ def _roster_groups(request: dict) -> dict[str, Any]:
     try:
         found = _roster_columns(path)
     except Exception:
-        found = {"rules": [], "blank": 0, "extra_pay": 0}
+        found = {"rules": [], "blank": 0, "extra_pay": 0,
+                 "rule_column": "", "rule_header": "", "headers": []}
     rules = found["rules"]
 
     columns = list(rules) if rules else list(names)
@@ -486,6 +506,11 @@ def _roster_groups(request: dict) -> dict[str, Any]:
         "blank_rule": found["blank"] if rules else 0,
         "extra_pay": found["extra_pay"],
         "extra_pay_column": EXTRA_PAY_COLUMN,
+        # 규정명 칸을 어디서 읽었는지. 못 찾았으면 빈 문자열이고, 그때는
+        # 명부에 적혀 온 머리글을 그대로 돌려줘 어느 칸인지 짚게 한다.
+        "rule_column": found["rule_column"],
+        "rule_header": found["rule_header"],
+        "headers": found["headers"],
     }
 
 

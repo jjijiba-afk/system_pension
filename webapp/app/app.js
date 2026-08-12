@@ -1136,18 +1136,30 @@ $("ed-groups-roster").addEventListener("click", async () => {
       return;
     }
     applyGroups(result.groups);
-    // 어디서 몇 개가 왔는지 말해 준다. 규정명이 안 딸려 오면 그 규정에
-    // 지급률을 넣을 열이 없어, 이름만 있고 값이 없는 채로 산출된다.
-    const from = [];
-    if (result.job_groups?.length) from.push(`직군 ${result.job_groups.length}개`);
-    if (result.rules?.length) from.push(`명부 규정명 ${result.rules.length}개`);
-    $("ed-status").textContent = from.length
-      ? `명부에서 ${from.join(" · ")} 을(를) 가져왔습니다. 규정마다 지급률을 넣으세요.`
-      : "";
+    // **어느 칸에서 읽었는지** 를 먼저 말한다. 규정명 칸을 못 찾으면 화면은
+    // 조용히 직군으로 물러서는데, 그러면 사람마다 다른 규정이 통째로 뭉개진
+    // 채로 산출이 끝난다 — 오류 없이 그럴듯한 숫자가 나오는 쪽이다.
+    const rules = result.rules || [];
+    $("ed-status").textContent = rules.length
+      ? `재직자명부 ${result.rule_column}열 [${result.rule_header}] 에서 `
+        + `규정 ${rules.length}개를 가져왔습니다 — ${rules.join(", ")}. `
+        + "규정마다 지급률을 넣으세요."
+      : (result.job_groups?.length
+         ? `명부에 규정명 칸이 없어 직군 ${result.job_groups.length}개로 `
+           + "가져왔습니다."
+         : "");
 
     // 명부에 적혀 왔지만 규정에 옮겨 적기 전에는 산출에 들어가지 않는 것들.
     // 여기서 말해 주지 않으면 '적었는데 왜 안 들어갔나' 로 끝난다.
     const notes = [];
+    if (!rules.length) {
+      notes.push("재직자명부에서 규정명 칸을 찾지 못해 직군으로 가져왔습니다.\n"
+                 + "사람마다 다른 규정이 걸리는 회사라면, 그 칸의 머리글이 "
+                 + "아래에 있는지 확인하세요.\n\n"
+                 + (result.headers?.length
+                    ? result.headers.join("\n")
+                    : "(머리글 행을 찾지 못했습니다 — 명부 3행을 확인하세요)"));
+    }
     if (result.blank_rule) {
       notes.push(`규정명이 빈 줄이 ${result.blank_rule}명 있습니다. `
                  + "그 사람들은 직군에 걸린 규정으로 산출됩니다.");
