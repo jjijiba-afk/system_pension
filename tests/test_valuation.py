@@ -120,25 +120,41 @@ class TestSingleDecrementCase:
         expected = total * 1_000_000 * (1.03**10) * (past / total) / (1.05**10)
         assert result.dbo == pytest.approx(expected, rel=1e-9)
 
-    def test_a_personal_multiple_scales_the_benefit(
+    def test_a_personal_multiple_is_not_applied_on_its_own(
         self, config: CalculationConfig
     ) -> None:
-        """명부의 개인 지급배수는 규정이 내는 배수에 곱해진다.
+        """명부의 개인 지급배수는 엔진이 스스로 곱하지 않는다.
 
-        임원 퇴직금 규정이 '평균임금 × 근속 × 2배' 인 회사가 명부에 배수만 적어
-        보낸다. 곱하지 않으면 그 사람 채무가 절반으로 잡히는데, 검증에도 안
-        걸리고 총액만 조금 작아져 눈에 띄지 않는다.
+        그 칸에 담긴 것이 회사마다 다르다. 배수인 회사, 누적 지급배수(근속 ×
+        배수)인 회사, 한도인 회사가 섞여 온다. 실제로 `44` 가 적혀 온 명부가
+        있었는데 그대로 곱하면 그 사람 하나가 채무를 통째로 흔든다.
+        넘겨짚지 않고 지급규정이 `배수` 로 읽어 쓰게 둔다.
         """
         member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
         plain = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
 
-        member.payout_multiple = 2.0
-        doubled = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+        member.payout_multiple = 44.0
+        marked = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
 
-        assert doubled.dbo == pytest.approx(plain.dbo * 2, rel=1e-9)
-        assert doubled.service_cost == pytest.approx(plain.service_cost * 2, rel=1e-9)
-        # 배수는 급여만 키운다. 귀속비율은 분자·분모가 같이 커져 그대로다.
-        assert doubled.past_service == plain.past_service
+        assert marked.dbo == pytest.approx(plain.dbo, rel=1e-9)
+        assert marked.service_cost == pytest.approx(plain.service_cost, rel=1e-9)
+
+    def test_an_extra_pay_wage_is_not_added_on_its_own(
+        self, config: CalculationConfig
+    ) -> None:
+        """명부의 추가지급 기본급도 저절로 더해지지 않는다.
+
+        사망 위로금인 회사, 명퇴 가산금인 회사가 섞여 온다. 모든 사유에 정액으로
+        얹으면 사망확률이 낮은 만큼 정년·중도 몫이 통째로 부풀어 채무가 배로
+        뛴다. 어느 사유에 붙는 돈인지는 [퇴직사유] 표가 정한다.
+        """
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        plain = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+
+        member.extra_pay_base_wage = 50_000_000
+        marked = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+
+        assert marked.dbo == pytest.approx(plain.dbo, rel=1e-9)
 
     def test_the_db_share_scales_the_whole_benefit(
         self, config: CalculationConfig
@@ -173,10 +189,13 @@ class TestSingleDecrementCase:
                 member, config, make_assumptions(discount=0.05, salary=0.0)
             ).dbo == pytest.approx(full.dbo, rel=1e-9)
 
-    def test_a_formula_that_already_uses_the_multiple_is_not_scaled_twice(
+    def test_a_formula_can_read_the_personal_multiple(
         self, config: CalculationConfig
     ) -> None:
-        """식이 `배수` 를 직접 쓰면 밖에서 다시 곱하지 않는다 — 두 번 먹는다."""
+        """개인 배수를 쓰는 길은 하나뿐이다 — 지급규정 식에서 `배수` 를 부른다.
+
+        규정이 부른 것만 반영되므로 밖에서 한 번 더 곱히지 않는다.
+        """
         from pension.assumptions import Formula
 
         member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)

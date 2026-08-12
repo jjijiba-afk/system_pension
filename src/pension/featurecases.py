@@ -132,7 +132,7 @@ def _wage_peak(rows: list[dict[str, Any]], base: _dt.date) -> None:
 def _multiple(rows: list[dict[str, Any]], base: _dt.date) -> None:
     for row in rows:
         row["payout_multiple"] = 2.0
-        row["note"] = "임원 퇴직금 지급규정 — 2배수"
+        row["note"] = "명부에 개인 지급배수 2 가 적혀 옴 (규정이 부르지 않으면 미반영)"
 
 
 def _late_nra(rows: list[dict[str, Any]], base: _dt.date) -> None:
@@ -161,7 +161,7 @@ def _extra_pay(rows: list[dict[str, Any]], base: _dt.date) -> None:
     for row in rows:
         row["extra_pay_base_wage"] = int(
             float(row["monthly_wage"]) * 0.8 / 1_000) * 1_000
-        row["note"] = "정년퇴직 시 기본급 1개월분 추가지급"
+        row["note"] = "명부에 추가지급 기본급이 적혀 옴 (규정이 부르지 않으면 미반영)"
 
 
 def _mixed_plan(rows: list[dict[str, Any]], base: _dt.date) -> None:
@@ -227,13 +227,14 @@ FEATURES: Final[tuple[FeatureSpec, ...]] = (
             "이 명부의 방향도 뒤집힌다.",
     ),
     FeatureSpec(
-        key="지급배수", title="임원 개인 지급배수 2.0",
-        detail="임원 전원에게 개인 지급배수 2.0 을 건다.",
-        scope="임원", expect=UP,
-        why="지급률 규정이 내는 배수에 명부의 배수가 곱해진다. 임원 몫이 정확히 "
-            "두 배가 되므로, 늘어난 금액은 기준 명부의 임원 채무와 같아야 한다 — "
-            "그것이 이 명부의 검산이다. 규정이 수식 방식이고 식이 이미 `배수` 를 "
-            "쓰고 있으면 밖에서 다시 곱하지 않는다(두 번 먹지 않게).",
+        key="지급배수", title="임원 개인 지급배수 2.0 (명부에만 적힘)",
+        detail="임원 전원의 명부에 개인 지급배수 2.0 이 적혀 있다.",
+        scope="임원", expect=FLAT,
+        why="그 칸에 담긴 것이 회사마다 다르다 — 배수인 곳, 누적 지급배수인 곳, "
+            "한도인 곳이 섞여 온다(실제로 `44` 가 적혀 온 명부가 있었다). "
+            "엔진이 넘겨짚어 곱하면 그 한 사람이 총액을 흔들므로, 적혀 있어도 "
+            "채무는 그대로여야 한다. 움직였다면 자동 반영이 되살아난 것이다. "
+            "쓰려면 지급률 규정을 수식 방식으로 두고 식에서 `배수` 를 부른다.",
     ),
     FeatureSpec(
         key="정년연장", title="임원 정년 68세 (명부가 직군 규칙을 덮음)",
@@ -258,10 +259,14 @@ FEATURES: Final[tuple[FeatureSpec, ...]] = (
             "쓰이지 않아야 할 값이 새어 들어간 것이다.",
     ),
     FeatureSpec(
-        key="추가지급", title="정년퇴직 시 기본급 추가지급",
-        detail="전원에게 정년 시 기본급 1개월분(평균임금의 80%)을 얹어 준다.",
-        scope="전원", expect=UP,
-        why="정년으로 나가는 몫에 정액이 더해진다. 정년 비중만큼 늘어난다.",
+        key="추가지급", title="추가지급 기본급 (명부에만 적힘)",
+        detail="전원의 명부에 추가지급 기본급(평균임금의 80%)이 적혀 있다.",
+        scope="전원", expect=FLAT,
+        why="사망 위로금인 회사, 명퇴 가산금인 회사가 섞여 온다. 어느 사유에 "
+            "붙는 돈인지 모르는 채 모든 사유에 얹으면 사망확률이 낮은 만큼 "
+            "정년·중도 몫이 통째로 부풀어 채무가 배로 뛴다. 그래서 적혀 있어도 "
+            "채무는 그대로여야 한다. 실제로 얹으려면 [퇴직사유] 표에서 그 사유의 "
+            "행에 가산액과 가산 귀속을 적는다.",
     ),
     FeatureSpec(
         key="DC전환", title="계약직 DC 전환",

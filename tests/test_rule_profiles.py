@@ -133,7 +133,12 @@ class TestExcludedJobGroup:
 
 
 class TestSeveranceBonus:
-    """'위로금 금액이 적혀 있으면 대상자' — 명부의 추가지급 기본급."""
+    """명부의 추가지급 기본급은 **적어 두기만** 한다.
+
+    그 칸에 담긴 것이 회사마다 다르다(사망 위로금·명퇴 가산금). 모든 사유에
+    정액으로 얹으면 채무가 배로 뛰므로, 엔진은 값을 결과에 남길 뿐 급여에
+    더하지 않는다. 실제 가산은 [퇴직사유] 표가 사유별로 정한다.
+    """
 
     def _valued(self, extra: float):
         rule = _rule()
@@ -146,15 +151,13 @@ class TestSeveranceBonus:
         )
         return value_member(member, config, assumptions)
 
-    def test_bonus_is_added_to_the_benefit(self) -> None:
+    def test_the_amount_is_recorded_but_not_added(self) -> None:
         without = self._valued(0.0)
         with_bonus = self._valued(10_000_000)
 
         assert with_bonus.extra_payment == 10_000_000
-        assert with_bonus.accrued_benefit == pytest.approx(
-            without.accrued_benefit + 10_000_000
-        )
-        assert with_bonus.dbo > without.dbo
+        assert with_bonus.accrued_benefit == pytest.approx(without.accrued_benefit)
+        assert with_bonus.dbo == pytest.approx(without.dbo)
 
     def test_blank_means_not_eligible(self) -> None:
         result = self._valued(0.0)

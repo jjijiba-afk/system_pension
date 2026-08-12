@@ -165,7 +165,13 @@ class MemberValuation:
     rounding_unit: int = 0
     """적용한 지급액 반올림 단위(원). 0 이면 반올림하지 않았다."""
     extra_payment: float = 0.0
-    """전별금·위로금 등 정액 추가지급액. 명부에 금액이 적힌 사람만 대상이다."""
+    """명부에 적혀 온 추가지급 기본급(원). **산출에 더해진 값이 아니다.**
+
+    회사마다 이 칸에 담는 것이 달라(사망 위로금·유족 일시금·명퇴 가산금)
+    엔진이 스스로 얹지 않는다. 실제로 얹히는 가산은 [퇴직사유] 표의 가산액이다.
+    적혀 온 값을 결과에 남겨 두는 것은, 규정에 옮겨 적었는지 대조할 자리가
+    있어야 하기 때문이다.
+    """
     db_ratio: float = 1.0
     """적용한 DB 비중. 혼합형이 아니면 1 이다.
 
@@ -428,6 +434,7 @@ def value_member(
         "제도": member.plan.value if member.plan else "",
         "임직원": member.employee_type.value,
         "배수": member.payout_multiple,
+        "추가급": max(0.0, member.extra_pay_base_wage),
     }
 
     minimum = member.min_service_years
@@ -444,7 +451,14 @@ def value_member(
         rounding_mode = found[1].benefit_rounding_mode
     result.rounding_unit = rounding_unit
 
-    # 명부의 추가지급 기본급. 값이 있으면 그 사람이 위로금 대상이라는 뜻이다.
+    # 명부의 추가지급 기본급과 개인 지급배수는 **엔진이 자동으로 얹지 않는다.**
+    # 회사마다 그 칸에 담는 것이 다르기 때문이다 — 사람마다 다른 위로금인 곳도
+    # 있고, 전원에게 같은 한도를 적어 두는 곳도 있고, 누적 지급배수를 적어 두는
+    # 곳도 있다. 자동으로 더하거나 곱하면 뒤의 두 경우에서 채무가 통째로 틀린다.
+    #
+    # 대신 **지급률 규정이 읽어 쓴다.** 수식 방식에서 `추가급`·`배수` 로 꺼내
+    # 쓰거나, [퇴직사유] 표의 가산 규정·가산액으로 건다. 무엇을 어떻게 얹을지는
+    # 규정이 정하는 일이지 명부 칸이 정할 일이 아니다.
     extra_payment = max(0.0, member.extra_pay_base_wage)
     result.extra_payment = extra_payment
 
@@ -487,23 +501,6 @@ def value_member(
         )
         return frozen_service * frozen_rate + max(0.0, after)
 
-    def personal_factor(rule_name: str) -> float:
-        """명부의 개인 지급배수. 임원 2배수·3배수 규정이 이렇게 온다.
-
-        규정이 **수식 방식이고 식이 이미 `배수` 를 쓰고 있으면 1 을 돌려준다.**
-        식 안에서 한 번 곱한 것을 밖에서 또 곱하면 두 배수가 세 번 곱해진다.
-
-        기본 급여에만 건다. 가산(정액 위로금 등)은 배수와 무관한 별도 금액이고,
-        귀속비율은 배수를 곱해도 분자·분모가 같이 커져 변하지 않는다.
-        """
-        multiple = member.payout_multiple
-        if multiple == 1.0:
-            return 1.0
-        formula = assumptions.severance_benefit.formulas.get(text(rule_name or rule))
-        if formula is not None and "배수" in getattr(formula, "source", ""):
-            return 1.0
-        return multiple
-
     def parts_at(
         cause: CauseBenefit, service: float, age: float, wage: float
     ) -> tuple[float, float]:
@@ -513,8 +510,7 @@ def value_member(
         내는 배수를 따라 쌓이고, 가산은 사유에 따라 즉시 귀속될 수 있다.
         """
         service = max(service, cause.min_service)
-        base = (multiple_at(service, age, cause.benefit_rule) * wage
-                * personal_factor(cause.benefit_rule))
+        base = multiple_at(service, age, cause.benefit_rule) * wage
         extra = cause.extra_amount
         if cause.extra_rule:
             extra += multiple_at(service, age, cause.extra_rule) * wage
@@ -533,8 +529,7 @@ def value_member(
         if minimum > 0 and max(service, cause.min_service) < minimum:
             return 0.0
         base, extra = parts_at(cause, service, age, wage)
-        # 전별금·위로금 등 정액 추가지급. 금액이 적힌 사람만 대상이다.
-        return round_amount(base + extra + extra_payment, rounding_unit, rounding_mode)
+        return round_amount(base + extra, rounding_unit, rounding_mode)
 
     def attribution_at(
         total_service: float, age: float, cause: CauseBenefit = _NO_CAUSE
@@ -588,15 +583,15 @@ def value_member(
             return 0.0, 0.0
 
         base, extra = parts_at(cause, total_service, exit_age, wage)
-        raw = base + extra + extra_payment
+        raw = base + extra
         if raw <= 0:
             return 0.0, 0.0
         paid = round_amount(raw, rounding_unit, rounding_mode)
         scale = paid / raw
 
         share, unit_share = attribution_at(total_service, exit_age, cause)
-        attributed = (base + extra_payment) * share
-        unit = (base + extra_payment) * unit_share
+        attributed = base * share
+        unit = base * unit_share
 
         if extra:
             if cause.attribution_basis(cause_name) == ATTRIB_IMMEDIATE:

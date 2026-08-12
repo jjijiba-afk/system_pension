@@ -62,8 +62,12 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
         "퇴직률 규정": result.withdrawal_rule or result.job_group,
         "가입자격(최소 근속)": result.min_service_years,
         "지급액 반올림 단위": result.rounding_unit,
-        "정액 추가지급": result.extra_payment,
     }
+    if result.extra_payment:
+        applied["명부 추가지급 기본급"] = (
+            f"{result.extra_payment:,.0f}원 — 산출에 더해지지 않았습니다. "
+            "얹으려면 [퇴직사유] 표의 가산액에 적으세요"
+        )
     if result.db_ratio != 1.0:
         applied["DB 비중 (혼합형)"] = (
             f"{result.db_ratio:.2f} — 급여의 이만큼만 채무로 잡습니다"

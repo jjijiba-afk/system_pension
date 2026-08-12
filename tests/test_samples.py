@@ -89,9 +89,9 @@ class TestOutOfTheBox:
         ))
 
         assert not run.issues.has_errors()
-        # 작성 예시의 임원은 지급배수 2 를 달고 있다. 배수가 규정 위에 곱해진다는
-        # 안내가 한 줄 붙는 것은 맞다 — 그 밖의 경고는 없어야 한다.
-        assert [i.code for i in run.issues.warnings] == ["JAE_PAYOUT_MULTIPLE_APPLIED"]
+        # 작성 예시의 임원은 지급배수 2 를 달고 있지만 그것은 안내(info) 로만
+        # 붙는다. 양식 그대로 돌린 산출에 경고가 하나라도 있으면 안 된다.
+        assert [i.code for i in run.issues.warnings] == []
         assert run.valuation.headcount == 2
         assert run.valuation.dbo > 0
         write_report(run, tmp_path / "결과.xlsx")

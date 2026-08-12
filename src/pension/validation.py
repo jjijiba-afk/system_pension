@@ -308,6 +308,17 @@ def validate_active(
                 if GROUP_EXECUTIVE in mapped:
                     member.employee_type = EmployeeType.EXECUTIVE
 
+        # 사망률이 성별로 갈린다. 못 정한 채 남자로 두면 여성이 남성 사망률을
+        # 받는데, 아무 표시가 없으면 담당자는 그런 일이 있었다는 것조차 모른다.
+        if not member.gender_known:
+            log.warning(
+                "JAE_GENDER_UNKNOWN",
+                "성별을 정할 수 없어 **남자** 로 봅니다. 여성이면 사망률이 "
+                "높게 걸려 채무가 작아집니다 — 주민등록번호 앞 7자리나 "
+                "성별 칸을 채우세요",
+                column=_col(sheet, "gender"), **kw,
+            )
+
         # ── 날짜 정합성 ────────────────────────────────────────────
         if member.birth_date and member.hire_date and member.birth_date >= member.hire_date:
             log.error("JAE_BIRTH_AFTER_HIRE", "생년월일이 입사일자보다 늦거나 같습니다",
@@ -389,15 +400,17 @@ def validate_active(
                       "(DB / DC / 퇴직금제도 중 하나로 적어 주세요)",
                       column=_col(sheet, "plan"), value=member.plan_raw, **kw)
 
-        # 추가지급 기본급은 '기본급' 인데 산출은 이것을 **정액 지급액** 으로
-        # 급여에 더한다. 종전 배수 규칙을 알 수 없어 그대로 두었으므로,
-        # 값이 있는 사람은 담당자가 의도를 확인해야 한다.
+        # 추가지급 기본급 칸에 회사마다 다른 것이 담겨 온다(사망 위로금·유족
+        # 일시금·명퇴 가산금…). 어느 사유에 얼마가 붙는지는 규정이 정할 일이므로
+        # 엔진은 이 값을 스스로 더하지 않는다. 값이 있으면 자리만 알려 준다.
         if member.extra_pay_base_wage:
-            log.warning(
-                "JAE_EXTRA_PAY_CHECK",
-                f"추가지급 기본급 {member.extra_pay_base_wage:,.0f}원이 "
-                "모든 퇴직 시점의 지급액에 정액으로 더해집니다 "
-                "(중도퇴직·정년퇴직 구분 없음). 규정과 맞는지 확인하세요",
+            log.info(
+                "JAE_EXTRA_PAY_UNUSED",
+                f"명부의 추가지급 기본급 {member.extra_pay_base_wage:,.0f}원은 "
+                "**저절로 더해지지 않습니다.** 어느 퇴직사유에 붙는 돈인지 "
+                "엔진이 넘겨짚지 않습니다. 반영하려면 [퇴직사유] 표에서 그 사유의 "
+                "행(예: 사망)에 가산액과 가산 귀속을 적거나, 지급률 규정을 수식 "
+                "방식으로 두고 식에서 `추가급` 을 쓰세요",
                 column=_col(sheet, "extra_pay_base_wage"),
                 value=member.extra_pay_base_wage, **kw,
             )
@@ -413,35 +426,24 @@ def validate_active(
             )
 
         if member.payout_multiple and member.payout_multiple != 1.0:
-            log.warning(
-                "JAE_PAYOUT_MULTIPLE_APPLIED",
-                f"개인 지급배수 {member.payout_multiple:g} 가 지급률 규정이 내는 "
-                "배수에 **곱해집니다.** 규정 자체에 이미 배수가 들어 있으면 두 번 "
-                "곱해지니, 규정과 맞는지 확인하세요 (수식 방식 규정이 식에서 "
-                "`배수` 를 직접 쓰고 있으면 밖에서 다시 곱하지 않습니다)",
+            log.info(
+                "JAE_PAYOUT_MULTIPLE_UNUSED",
+                f"명부의 지급배수 {member.payout_multiple:g} 는 **그대로 곱해지지 "
+                "않습니다.** 회사마다 이 칸에 담는 것이 달라(배수·누적배수·한도) "
+                "엔진이 넘겨짚지 않습니다. 반영하려면 지급률 규정을 수식 방식으로 "
+                "두고 식에서 `배수` 를 쓰거나, 지급률 표에 그 값을 직접 넣으세요",
                 column=_col(sheet, "payout_multiple"),
                 value=member.payout_multiple, **kw,
             )
 
-        # 성별을 못 정한 채 넘어가면 여성이 남성 사망률로 계산된다. 사망률은
-        # 사망 지급률이 걸린 회사에서 채무를 직접 움직이고, 그렇지 않아도
-        # 생존확률을 통해 전 구간에 스며든다. 조용히 넘겨짚지 않는다.
-        if not member.gender_known:
+        # 44 배수 같은 값이 실제로 온다. 규정이 읽어 쓰기 전에 한 번 짚어 둔다.
+        if member.payout_multiple > 10:
             log.warning(
-                "JAE_GENDER_UNKNOWN",
-                "성별을 정할 수 없어 **남자** 사망률로 계산합니다. "
-                "주민등록번호 앞 7자리(성별 한 자리까지) 또는 성별 칸을 채우세요",
-                column=_col(sheet, "gender"), **kw,
-            )
-
-        # 앞 7자리만 달라고 적어 두었는데 13자리가 통째로 온다. 산출에는 아무
-        # 지장이 없지만, 알려 주지 않으면 그 파일이 그대로 남는다.
-        if len("".join(c for c in member.resident_number if c.isdigit())) > 7:
-            log.warning(
-                "JAE_RESIDENT_TOO_LONG",
-                "주민등록번호 뒷자리까지 들어왔습니다. 산출에는 앞 7자리만 "
-                "쓰므로, 받은 파일의 뒷 여섯 자리를 지우고 보관하세요",
-                column=_col(sheet, "resident_number"), **kw,
+                "JAE_PAYOUT_MULTIPLE_RANGE",
+                f"지급배수 {member.payout_multiple:g} 가 상식 밖입니다. "
+                "**누적 지급배수를 적어 보낸 것은 아닌지** 확인하세요",
+                column=_col(sheet, "payout_multiple"),
+                value=member.payout_multiple, **kw,
             )
 
         if member.accrued_benefit < 0:

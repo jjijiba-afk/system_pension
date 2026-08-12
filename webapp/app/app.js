@@ -573,7 +573,10 @@ function buildPayoutTab(page) {
 }
 
 function renderPayout(payout) {
-  const headers = ["직군", "산출 제외", "가입자격(년)", "정년(직원)", "정년(임원)",
+  // 임원은 그 자체가 직군 줄이라 정년을 직원/임원으로 나눌 이유가 없다.
+  // 파일 서식과 엔진은 그대로 두고(옛 파일이 그대로 읽혀야 한다) 화면만
+  // 한 칸으로 합친다 — 저장할 때 임원 정년에도 같은 값을 넣는다.
+  const headers = ["직군", "산출 제외", "가입자격(년)", "정년",
     "가산연령", "근속 산정", "단수 처리", "지급액 반올림",
     "Base-up", "승급률", "퇴직률", "사망률"];
   payoutBody.replaceChildren(el("tr", {}, ...headers.map((h) => el("th", {}, h))));
@@ -583,7 +586,6 @@ function renderPayout(payout) {
       excluded: el("input", { type: "checkbox" }),
       min_service: el("input", { type: "text", value: item.min_service ?? "1" }),
       nra: el("input", { type: "text", value: item.nra ?? "60" }),
-      executive_nra: el("input", { type: "text", value: item.executive_nra ?? "60" }),
       add_age: el("input", { type: "text", value: item.add_age ?? "2" }),
       basis: makeSelect(META.service_bases, item.basis || META.service_bases[0]),
       fraction: makeSelect(META.fraction_modes, item.fraction || META.fraction_modes[0]),
@@ -609,7 +611,9 @@ function payoutValues() {
     const w = tr.widgets;
     result[tr.dataset.group] = {
       excluded: w.excluded.checked, min_service: w.min_service.value.trim(),
-      nra: w.nra.value.trim(), executive_nra: w.executive_nra.value.trim(),
+      // 임원 정년은 화면에서 없앴다. 파일에는 같은 값을 넣어 둔다 — 임원이
+      // 직군 칸에 '정규직' 으로 적혀 온 명부에서도 이 줄의 정년이 쓰이게.
+      nra: w.nra.value.trim(), executive_nra: w.nra.value.trim(),
       add_age: w.add_age.value.trim(), basis: w.basis.value,
       fraction: w.fraction.value, unit: w.unit.value,
       base_up: w.base_up.value, promotion: w.promotion.value,
@@ -1126,10 +1130,37 @@ $("ed-groups-roster").addEventListener("click", async () => {
   try {
     const path = await rosterIntoFS();
     const result = py("roster_groups", { path });
-    if (!result.groups.length) { alert("Input 시트에서 직군을 찾지 못했습니다."); return; }
+    if (!result.groups.length) {
+      alert("명부에서 직군도 규정명도 찾지 못했습니다.\n\n"
+            + "[기본정보] 의 직군 규칙, 또는 재직자명부의 [규정명] 칸을 확인하세요.");
+      return;
+    }
     applyGroups(result.groups);
+    // 어디서 몇 개가 왔는지 말해 준다. 규정명이 안 딸려 오면 그 규정에
+    // 지급률을 넣을 열이 없어, 이름만 있고 값이 없는 채로 산출된다.
+    const from = [];
+    if (result.job_groups?.length) from.push(`직군 ${result.job_groups.length}개`);
+    if (result.rules?.length) from.push(`명부 규정명 ${result.rules.length}개`);
+    $("ed-status").textContent = from.length
+      ? `명부에서 ${from.join(" · ")} 을(를) 가져왔습니다. 규정마다 지급률을 넣으세요.`
+      : "";
+
+    // 명부에 적혀 왔지만 규정에 옮겨 적기 전에는 산출에 들어가지 않는 것들.
+    // 여기서 말해 주지 않으면 '적었는데 왜 안 들어갔나' 로 끝난다.
+    const notes = [];
+    if (result.blank_rule) {
+      notes.push(`규정명이 빈 줄이 ${result.blank_rule}명 있습니다. `
+                 + "그 사람들은 직군에 걸린 규정으로 산출됩니다.");
+    }
+    if (result.extra_pay) {
+      notes.push(`[${result.extra_pay_column}] 에 금액이 적힌 사람이 `
+                 + `${result.extra_pay}명 있습니다. 이 금액은 저절로 더해지지 `
+                 + "않습니다 — 사망 위로금이라면 [퇴직사유] 탭에서 사유를 사망으로 "
+                 + "두고 가산액에 적으세요.");
+    }
+    if (notes.length) alert(notes.join("\n\n"));
   } catch (error) {
-    alert("명부에서 직군을 읽지 못했습니다.\n\n" + error.message);
+    alert("명부에서 읽지 못했습니다.\n\n" + error.message);
   }
 });
 

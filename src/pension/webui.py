@@ -360,18 +360,133 @@ def _roster_scan(request: dict) -> dict[str, Any]:
     }
 
 
+EXTRA_PAY_COLUMN: Final = "추가지급"
+"""명부에 추가지급 기본급이 적힌 사람이 있을 때 만들어 주는 지급률 열 이름."""
+
+
+def _roster_columns(path: Path) -> dict[str, Any]:
+    """재직자명부에서 **칸에 적혀 온 것만** 읽는다.
+
+    ``member.rules.severance_benefit`` 을 보면 안 된다. 명부에 규정명 칸이
+    없으면 읽는 단계에서 직군 규칙의 규정명을 채워 넣기 때문에, 규정명을 적지
+    않은 명부인데도 규정이 있는 것처럼 보인다. 그러면 직군 열이 밀려난다.
+
+    :returns: ``{"rules": [...], "blank": n, "extra_pay": n}``
+    """
+    from .layout import (
+        ACTIVE_HEADER_ALIASES,
+        find_data_start,
+        find_header_row,
+        normalize_header,
+    )
+    from .readers import ACTIVE_SHEET_ALIASES
+    from .workbook import find_sheet, open_workbook
+
+    empty: dict[str, Any] = {"rules": [], "blank": 0, "extra_pay": 0}
+    book = open_workbook(path)
+    try:
+        sheet = find_sheet(book, *ACTIVE_SHEET_ALIASES)
+        if sheet is None:
+            return empty
+        header_row = find_header_row(sheet, ACTIVE_HEADER_ALIASES)
+        if not header_row:
+            return empty          # 머리글 없는 옛 서식에는 규정명 칸이 없다
+
+        seen: dict[str, int] = {}
+        for column in range(1, min(sheet.max_column, 80) + 1):
+            key = normalize_header(sheet.cell(header_row, column).value)
+            if key and key not in seen:
+                seen[key] = column
+
+        def column_of(field: str) -> int:
+            for alias in ACTIVE_HEADER_ALIASES.get(field, ()):
+                found = seen.get(normalize_header(alias))
+                if found:
+                    return found
+            return 0
+
+        rule_columns = [c for c in (column_of("severance_benefit"),
+                                    column_of("longterm_benefit")) if c]
+        severance = column_of("severance_benefit")
+        extra_column = column_of("extra_pay_base_wage")
+        anchor = column_of("employee_id") or column_of("birth_date")
+        if not rule_columns and not extra_column:
+            return empty
+
+        rules: list[str] = []
+        blank = extra_pay = 0
+        for row in range(find_data_start(sheet, header_row), sheet.max_row + 1):
+            if anchor and not text(sheet.cell(row, anchor).value):
+                continue                       # 사람이 없는 줄
+            for column in rule_columns:
+                value = text(sheet.cell(row, column).value)
+                if value and value not in rules:
+                    rules.append(value)
+            if severance and not text(sheet.cell(row, severance).value):
+                blank += 1
+            if extra_column:
+                try:
+                    if float(sheet.cell(row, extra_column).value or 0) > 0:
+                        extra_pay += 1
+                except (TypeError, ValueError):
+                    pass
+        return {"rules": rules, "blank": blank, "extra_pay": extra_pay}
+    finally:
+        book.close()
+
+
 def _roster_groups(request: dict) -> dict[str, Any]:
-    """명부 ``Input`` 시트의 변환 직군명. '명부에서 직군 불러오기' 용."""
+    """가정 표의 열 머리글이 될 이름들. '명부에서 불러오기' 용.
+
+    두 곳에서 모은다.
+
+    ``기본정보`` 의 변환 직군명
+        직군 단위로 지급률이 갈리는 회사.
+
+    ``재직자명부`` 의 **규정명 칸**
+        한 직군 안에서도 사람마다 다른 규정이 걸리는 회사. 명부에 이름을
+        적어 놓고 화면에 그 열이 없으면, 적어 놓은 규정에 지급률을 넣을
+        자리가 없다 — 이름은 있는데 값이 없으니 법정 퇴직금으로 떨어진다.
+
+    규정명이 하나라도 적혀 있으면 **규정 단위** 로 간다. 직군 열과 섞어 두면
+    같은 사람에게 두 열이 걸린 것처럼 보여 어느 쪽이 쓰였는지 알기 어렵다.
+    """
     from .config import read_config
     from .workbook import open_workbook
 
-    book = open_workbook(request["path"])
+    path = Path(request["path"])
+    book = open_workbook(path)
     try:
         config = read_config(book)
     finally:
         book.close()
-    names = [r.mapped_name for r in config.job_group_rules if r.mapped_name]
-    return {"groups": list(dict.fromkeys(names))}
+    names = list(dict.fromkeys(
+        r.mapped_name for r in config.job_group_rules if r.mapped_name))
+
+    try:
+        found = _roster_columns(path)
+    except Exception:
+        found = {"rules": [], "blank": 0, "extra_pay": 0}
+    rules = found["rules"]
+
+    columns = list(rules) if rules else list(names)
+
+    # 명부에 추가지급 기본급이 적힌 사람이 있으면 그 몫을 걸 자리가 있어야
+    # 한다. 금액은 사람마다 명부에 있지만 **얼마를 어떻게 얹을지** 는 규정이
+    # 정하므로, 열 하나를 만들어 두고 [퇴직사유] 에서 가산 규정으로 고르게 한다.
+    if found["extra_pay"] and EXTRA_PAY_COLUMN not in columns:
+        columns.append(EXTRA_PAY_COLUMN)
+
+    return {
+        "groups": columns,
+        "job_groups": names,
+        "rules": rules,
+        # 규정 단위로 갔는데 규정명이 빈 사람은 직군으로 되돌아가 지급률을
+        # 찾는다 — 그 열이 없으니 법정 퇴직금으로 떨어진다. 몇 명인지 알린다.
+        "blank_rule": found["blank"] if rules else 0,
+        "extra_pay": found["extra_pay"],
+        "extra_pay_column": EXTRA_PAY_COLUMN,
+    }
 
 
 def _general_info(request: dict) -> dict[str, Any]:
