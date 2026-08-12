@@ -160,6 +160,20 @@ class ActiveMember:
     @property
     def has_period(self) -> bool:
         return self.period_start is not None or self.period_end is not None
+    service_add_years: float = 0.0
+    """지급률 근속에만 **더하는** 가산근속연수(군경력·특례 인정 등).
+
+    할당(귀속) 근속은 움직이지 않는다 — 할당은 언제나 기산일(중간정산일)부터
+    실제로 일한 기간으로 재고, 급여 배수를 찾는 근속만 이 값으로 늘린다.
+    입사일을 고쳐 넣는 방식은 할당까지 함께 움직여 틀린다.
+    """
+    service_deduct_years: float = 0.0
+    """지급률 근속에서만 **빼는** 차감근속연수.
+
+    '연단위 절사 지급' 같은 만근속 규정을 설계하는 자리다. 윤년 때문에
+    시스템 근속이 2.99/3.01년으로 흔들리므로, 차감에 버퍼를 두어 만근속을
+    맞춘다. 역시 할당 근속은 건드리지 않는다.
+    """
     declared_nra: int = 0
     """명부에 개인별로 적어 온 퇴직급여 정년연령. 0 이면 직군 규정을 따른다."""
     declared_longterm_nra: int = 0

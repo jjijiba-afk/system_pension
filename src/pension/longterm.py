@@ -150,7 +150,9 @@ def value_longterm_member(
             assumptions.mortality.qx(member.gender, age_t)
             if member.apply_mortality else 0.0
         )
-        probability *= (1.0 - withdrawal) * (1.0 - mortality)
+        # 퇴직급여와 같은 다중탈퇴율(종속률) 결합 — 더해서 뺀다.
+        mortality = min(mortality, 1.0 - withdrawal)
+        probability *= (1.0 - withdrawal - mortality)
         survival.append(probability)
         wage_index.append(index)
 

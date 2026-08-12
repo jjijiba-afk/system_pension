@@ -586,3 +586,34 @@ class TestGenderIsNotGuessedSilently:
         _config, roster, log = read_all(roster_path)
         assert all(m.gender_known for m in roster.active)
         assert not [i for i in log.warnings if i.code == "JAE_GENDER_UNKNOWN"]
+
+
+class TestServiceAdjustmentColumns:
+    """가산·차감근속연수가 머리글로 읽히는지.
+
+    실제 서식의 머리글은 '군경력 등 가산 근속연수' / '차감근속연수(+로 입력)'
+    처럼 설명이 붙어 온다 — 정규화가 걷어내고 알아봐야 한다.
+    """
+
+    def test_reader_picks_them_up(self, tmp_path: Path) -> None:
+        from pension.layout import ACTIVE_HEADER_ALIASES, find_header_row
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "명부.xlsx")
+        book = openpyxl.load_workbook(path)
+        sheet = book["재직자명부"]
+        header = find_header_row(sheet, ACTIVE_HEADER_ALIASES)
+        heads = {str(sheet.cell(header, c).value or ""): c
+                 for c in range(1, sheet.max_column + 1)}
+        # 실제 명부처럼 설명 붙은 머리글로 바꿔 본다.
+        sheet.cell(header, heads["가산근속연수"], "군경력 등 \n가산 근속연수")
+        sheet.cell(header, heads["차감근속연수"], "차감근속연수(+로 입력)")
+        sheet.cell(header + 1, heads["가산근속연수"], 2.5)
+        sheet.cell(header + 1, heads["차감근속연수"], 1)
+        book.save(path)
+
+        _config, roster, _log = read_all(path)
+        first = roster.active[0]
+        assert first.service_add_years == 2.5
+        assert first.service_deduct_years == 1.0
+        assert roster.active[1].service_add_years == 0.0

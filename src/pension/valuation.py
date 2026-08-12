@@ -9,11 +9,12 @@ K-IFRS 1019호 '종업원급여' 가 요구하는 예측단위적립방식(Proje
 각 연도 ``t`` 마다
 
 * **임금 투영** — 30일 평균임금에 Base-up 과 승급률을 복리로 곱한다.
-* **탈퇴 확률** — 중도퇴직률 ``w`` 와 사망률 ``q`` 를 함께 적용하되
-  (합계는 ``1 - (1-w)(1-q)``) **사유별로 갈라 둔다**. 회사 규정이 중도퇴직·
-  사망·정년퇴직에 다른 지급률을 주는 일이 흔해서, 뭉뚱그리면 어느 규정을
-  적용할지 정할 수 없다. 탈퇴는 연중앙(``t - 0.5``)에 일어난 것으로 보고,
-  정년까지 남은 사람은 마지막 시점에 전원 퇴직한다.
+* **탈퇴 확률** — 중도퇴직률 ``w`` 와 사망률 ``q`` 를 **다중탈퇴율(종속률)**
+  로 보아 그대로 더해 쓴다(그 해 잔존은 ``1 - w - q``). **사유별로 갈라
+  두는** 이유는, 회사 규정이 중도퇴직·사망·정년퇴직에 다른 지급률을 주는
+  일이 흔해 뭉뚱그리면 어느 규정을 적용할지 정할 수 없기 때문이다. 탈퇴는
+  연중앙(``t - 0.5``)에 일어난 것으로 보고, 정년까지 남은 사람은 마지막
+  시점에 전원 퇴직한다.
 * **급여 산정** — ``지급률(총근속) × 투영임금``.
 * **귀속** — PUC 이므로 급여 중 기준일까지의 근속에 해당하는 몫만 부채로 잡는다
   (``과거근속 / 총근속``).
@@ -487,6 +488,13 @@ def value_member(
     frozen_rate = member.progressive_rate
     split_benefit = frozen_service > 0.0 and frozen_rate > 0.0
 
+    # 지급률 근속 = 할당 근속 + 가산근속연수 − 차감근속연수.
+    # 군경력 인정·연단위 절사 같은 규정은 **급여 배수를 찾는 근속** 만 움직인다.
+    # 할당(귀속)은 그대로 실제 근속으로 잰다 — 입사일을 고쳐 넣으면 할당까지
+    # 함께 움직여 틀리고, 배수에 상수를 더하는 방식은 누진제로 바뀌는 순간
+    # 어긋난다. 그래서 근속연수 축에서 밀고 당긴다.
+    scale_shift = member.service_add_years - member.service_deduct_years
+
     def multiple_at(service: float, age: float, rule_name: str = "") -> float:
         """근속 ``service`` 년까지 쌓인 지급배수. 가입자격 문턱은 보지 않는다.
 
@@ -494,7 +502,13 @@ def value_member(
         직원의 채무가 통째로 0 이 되는데, 그것은 틀리다 — 문단 72 는 급여를 받게
         되는 근무가 **시작된 때** 부터 귀속하라고 한다. 요건 미달로 못 받는 것은
         그 시나리오의 급여액이 0 이 되는 것으로 이미 반영된다.
+
+        들어온 ``service`` 는 할당 근속이고, 배수는 지급률 근속으로 찾는다.
+        귀속비율도 이 이동된 자로 재므로(분자·분모가 함께 밀린다) 배수 곡선과
+        어긋나지 않는다.
         """
+        # 차감이 실제 근속보다 크면 그 시점 배수는 0 이다(음수 근속은 없다).
+        service = max(0.0, service + scale_shift)
         name = rule_name or rule
         if not split_benefit:
             return assumptions.severance_benefit.multiple(
@@ -664,16 +678,19 @@ def value_member(
             else 0.0
         )
         withdrawal = min(max(withdrawal, 0.0), 1.0)
+        # 퇴직률·사망률을 **다중탈퇴율(종속률)** 로 본다 — 여러 원인이 함께
+        # 있는 집단에서 그 원인으로 나가는 확률이라는 뜻이다. 그래서 그대로
+        # 더해 쓰고, 그 해 잔존은 (1 − w − q) 다. 독립률처럼 (1−w)(1−q) 로
+        # 겹침을 또 보정하면 이중 차감이 된다. 합이 1 을 넘는 비정상 입력만
+        # 막는다.
+        mortality = min(max(mortality, 0.0), 1.0 - withdrawal)
 
         # 중도·사망은 연중에 일어난다고 보아 그 해 한가운데에 둔다. 두 원인을
-        # 갈라 놓는 것은, 사유별로 지급률이 다르면 뭉뚱그린 ``1-(1-w)(1-q)``
-        # 로는 어느 규정을 적용할지 정할 수 없기 때문이다. 연중 균등발생을
-        # 가정하면 두 몫의 합은 원래 확률 그대로다.
+        # 갈라 놓는 것은, 사유별로 지급률이 다르면 뭉뚱그린 탈퇴율로는 어느
+        # 규정을 적용할지 정할 수 없기 때문이다.
         exits = [
-            (CAUSE_VOLUNTARY, t - 0.5,
-             survival * withdrawal * (1.0 - mortality / 2.0)),
-            (CAUSE_DEATH, t - 0.5,
-             survival * mortality * (1.0 - withdrawal / 2.0)),
+            (CAUSE_VOLUNTARY, t - 0.5, survival * withdrawal),
+            (CAUSE_DEATH, t - 0.5, survival * mortality),
         ]
         if t == years:
             # 마지막 해라고 중도퇴직·사망이 멈추는 것이 아니다. 그 해를 넘긴
@@ -681,7 +698,7 @@ def value_member(
             # 지급률이 더 높은 회사에서 그만큼 채무가 부풀고, 마지막 해의
             # 중도퇴직 급부가 통째로 사라진다.
             exits.append((CAUSE_NORMAL, float(t),
-                          survival * (1.0 - withdrawal) * (1.0 - mortality)))
+                          survival * (1.0 - withdrawal - mortality)))
 
         for cause_name, timing, exit_probability in exits:
             if exit_probability <= 0.0:
@@ -733,7 +750,7 @@ def value_member(
                     "service_cost": unit * exit_probability * discount,
                 })
 
-        survival *= (1.0 - withdrawal) * (1.0 - mortality)
+        survival *= (1.0 - withdrawal - mortality)
         if survival <= 0.0:
             # 전원 탈퇴했으므로 이후 연도는 기여할 것이 없다.
             break

@@ -72,6 +72,11 @@ ACTIVE_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "db_ratio": ("DB비율", "db비율", "DB비중", "db비중", "확정급여비율"),
     "remaining_contract_years": ("잔여계약기간", "잔여계약연수", "계약잔여기간"),
     "settlement_amount": ("중간정산지급금액", "중간정산금액"),
+    # 지급률 근속만 움직이는 가산·차감. 실제 서식은 '군경력 등 가산 근속연수' /
+    # '차감근속연수(+로 입력)' 로 온다 — 괄호는 정규화에서 걷힌다.
+    "service_add_years": ("가산근속연수", "군경력등가산근속연수", "가산근속년수",
+                          "근속가산연수"),
+    "service_deduct_years": ("차감근속연수", "차감근속년수", "근속차감연수"),
     "longterm_target": ("장기급여산출대상여부", "장기급여대상여부", "장기급여대상"),
     "wage_peak_age": ("임금피크연령", "임금피크"),
     "transfer_in_date": ("전입일", "전입일자"),

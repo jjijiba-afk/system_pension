@@ -76,6 +76,11 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
         applied["누진 보전 구간"] = (
             f"{result.progressive_service:g}년까지 연 {result.progressive_rate:g}배"
         )
+    if member.service_add_years or member.service_deduct_years:
+        applied["지급률 근속 가산·차감"] = (
+            f"+{member.service_add_years:g}년 / −{member.service_deduct_years:g}년 "
+            "— 급여 배수를 찾는 근속에만 반영, 귀속(할당)은 실제 근속"
+        )
 
     return {
         "excluded": result.excluded_reason,

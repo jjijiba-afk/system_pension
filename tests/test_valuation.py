@@ -570,3 +570,44 @@ class TestRosterFieldsThatWereIgnored:
         assert result.headcount == 0
         assert result.dbo == 0
         assert "입사일이 산출기준일보다 늦음" in result.exclusion_summary()
+
+
+class TestScaleServiceAdjustment:
+    """가산·차감근속연수는 **지급률 근속만** 밀고 당긴다.
+
+    군경력 인정·연단위 절사 같은 규정을 입사일 수정으로 흉내 내면 할당(귀속)
+    근속까지 함께 움직여 틀린다. 배수에 상수를 더하는 방식은 누진제로 바뀌는
+    순간 어긋난다. 그래서 근속연수 축에서 옮기되, 할당은 실제 근속을 지킨다.
+    """
+
+    def _pair(self, config, **fields):
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        plain = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+        for name, value in fields.items():
+            setattr(member, name, value)
+        moved = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+        return plain, moved
+
+    def test_added_years_raise_the_multiple_only(self, config: CalculationConfig) -> None:
+        plain, moved = self._pair(config, service_add_years=2.5)
+        # 법정(배수=근속)이라 즉시퇴직 지급액은 (근속+2.5)×임금 이어야 한다.
+        past = plain.past_service
+        assert plain.accrued_benefit == pytest.approx(past * 1_000_000)
+        assert moved.accrued_benefit == pytest.approx((past + 2.5) * 1_000_000)
+        # 할당(귀속) 근속은 그대로다.
+        assert moved.past_service == plain.past_service
+        assert moved.dbo > plain.dbo
+
+    def test_deducted_years_lower_the_multiple(self, config: CalculationConfig) -> None:
+        plain, moved = self._pair(config, service_deduct_years=1.0)
+        assert moved.accrued_benefit == pytest.approx(
+            (plain.past_service - 1.0) * 1_000_000)
+        assert moved.dbo < plain.dbo
+
+    def test_deduct_beyond_service_floors_at_zero(
+        self, config: CalculationConfig
+    ) -> None:
+        """차감이 근속을 넘어도 배수는 0 에서 멈춘다 — 음수 급여는 없다."""
+        _plain, moved = self._pair(config, service_deduct_years=50.0)
+        assert moved.accrued_benefit == 0.0
+        assert moved.dbo == 0.0

@@ -581,3 +581,33 @@ class TestTheFinalYearStillHasMidYearExits:
         # 마지막 해 시작 시점의 재직확률에서 그 해 탈퇴자를 뺀 것이 정년 몫이다.
         assert normal["survival"] == pytest.approx(
             normal["exit_probability"] + leavers)
+
+
+class TestDecrementsAreDependentRates:
+    """퇴직률·사망률은 다중탈퇴율(종속률)로 본다 — 더해서 뺀다.
+
+    참고 산출 시스템의 기수표가 ``b=a·w, c=a·q, e=a(1−w−q)`` 다. 독립률처럼
+    ``(1−w)(1−q)`` 로 겹침을 또 보정하면 이중 차감이라 원 단위가 어긋난다.
+    """
+
+    def test_exit_shares_are_plain_products(self, config) -> None:
+        member = make_member(age=57, past_service=10.0, wage=1_000_000, nra=60)
+        assumptions = make_assumptions(
+            discount=0.03, salary=0.0, withdrawal=0.08, mortality=0.02)
+        trace: list[dict] = []
+        value_member(member, config, assumptions, trace=trace)
+
+        first = {row["cause"]: row for row in trace if row["t"] == 1}
+        assert first[CAUSE_VOLUNTARY]["exit_probability"] == pytest.approx(0.08)
+        assert first[CAUSE_DEATH]["exit_probability"] == pytest.approx(0.02)
+        # 이듬해 초 재직확률 = 1 − w − q. 곱셈이면 0.9016 이 나와 버린다.
+        second = next(row for row in trace if row["t"] == 2)
+        assert second["survival"] == pytest.approx(0.90)
+
+    def test_probabilities_still_sum_to_one(self, config) -> None:
+        member = make_member(age=57, past_service=10.0, wage=1_000_000, nra=60)
+        assumptions = make_assumptions(
+            discount=0.03, salary=0.0, withdrawal=0.08, mortality=0.02)
+        trace: list[dict] = []
+        value_member(member, config, assumptions, trace=trace)
+        assert sum(r["exit_probability"] for r in trace) == pytest.approx(1.0)

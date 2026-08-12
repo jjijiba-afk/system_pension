@@ -421,6 +421,8 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.extra_pay_base_wage = _number(get("extra_pay_base_wage"))
         member.progressive_service = _number(get("progressive_service"))
         member.progressive_rate = _number(get("progressive_rate"))
+        member.service_add_years = _number(get("service_add_years"))
+        member.service_deduct_years = _number(get("service_deduct_years"))
 
         member.plan_raw = text(get("plan"))
         member.plan = normalize_benefit_plan(member.plan_raw)
