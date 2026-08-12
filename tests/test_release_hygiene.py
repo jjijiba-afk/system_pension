@@ -149,6 +149,32 @@ class TestNothingIdentifiesAClient:
         assert not list(ROOT.glob("vba/*"))
         assert not list(ROOT.glob("**/*.bas"))
 
+    def test_the_custom_domain_is_not_in_the_source(self) -> None:
+        """주소와 저장소를 잇는 끈을 소스에 두지 않는다.
+
+        저장소가 공개면 코드 검색이 된다. ``webapp/CNAME`` 에 도메인이 적혀
+        있으면, 주소를 아는 사람이 검색창에 그대로 쳐 넣는 것만으로 이 저장소가
+        걸린다. 배포는 ``PAGES_DOMAIN`` Secret 에서 받으므로 이 파일은 손으로
+        빌드할 때만 쓰고 커밋하지 않는다.
+
+        도메인 자체를 여기 적으면 이 파일이 검색에 걸린다. 그래서 **파일이
+        추적되고 있는지** 만 본다.
+        """
+        import subprocess
+
+        tracked = subprocess.run(
+            ["git", "ls-files", "webapp/CNAME"],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        assert tracked == "", "webapp/CNAME 이 저장소에 들어 있습니다"
+
+    def test_the_build_prefers_the_environment_over_the_file(self) -> None:
+        """Secret 이 있으면 그것을 쓴다. 파일은 손으로 빌드할 때의 대비책이다."""
+        source = (ROOT / "webapp" / "build.py").read_text(encoding="utf-8")
+        assert 'os.environ.get("PAGES_DOMAIN"' in source
+        # 공개 저장소는 실행 기록도 공개다. 도메인을 찍으면 소용이 없어진다.
+        assert "맞춤 도메인 설정됨" in source
+
     def test_no_raw_rosters(self) -> None:
         for pattern in ("**/*.csv", "**/*.xlsm", "**/*.xls"):
             stray = [p for p in ROOT.glob(pattern)
