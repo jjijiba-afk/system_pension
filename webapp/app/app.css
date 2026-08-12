@@ -411,7 +411,11 @@ input[type=date] { -webkit-appearance: none; appearance: none; }
    되돌리지 않아서, 글자가 잘린 채로 남고 좌우로 밀어야 한다. 손가락으로 쓰는
    기기에서만 키운다 — 마우스 쓰는 화면은 지금 크기가 알맞다. */
 @media (pointer: coarse) {
-  input, select, textarea { font-size: 16px; }
+  /* `!important` 를 쓴다. 산출 화면의 칸에는 `#page-calc input[type=date]`
+     처럼 아이디가 붙은 규정이 걸려 있어 그냥 두면 진다 — 실제로 지고 있었고,
+     정작 사람이 제일 많이 두드리는 칸들이 15px 로 남아 아이폰에서 확대됐다.
+     이건 다른 어떤 규칙보다 이겨야 하는 접근성 보정이다. */
+  input, select, textarea { font-size: 16px !important; }
 }
 
 /* ── 좁은 화면의 표 ──

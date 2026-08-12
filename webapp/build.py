@@ -147,23 +147,34 @@ def _strip_engine_source(wheel: Path) -> None:
             archive.writestr(info, payload)
 
 
-def _png(size: int) -> bytes:
-    """앱 아이콘. 남색 바탕에 오름차순 막대 셋 — 외부 라이브러리 없이 그린다."""
+def _png(size: int, *, safe: float = 1.0) -> bytes:
+    """앱 아이콘. 남색 바탕에 오름차순 막대 셋 — 외부 라이브러리 없이 그린다.
+
+    :param safe: 그림을 가운데로 줄이는 비율. 안드로이드는 홈 화면 아이콘을
+        기기 모양(원·둥근 사각)대로 **잘라 낸다.** 가장자리까지 그린 그림을
+        maskable 로 내놓으면 막대 끝이 잘린다. 0.6 쯤으로 줄여 안전지대
+        (가운데 80%) 안에 들어오게 한다. 바탕은 꽉 채우므로 흰 테두리는 없다.
+    """
     navy = (31, 56, 100)
     bar = (255, 255, 255)
     accent = (255, 217, 102)
 
     pixels = bytearray()
-    unit = size // 10
+    unit = size / 10 * safe
+    edge = (size - unit * 10) / 2      # 줄인 만큼 사방으로 민다
     bars = (  # (x0, x1, 높이) 비율 단위
         (2, 3.4, 3), (4.3, 5.7, 5), (6.6, 8, 7),
     )
+    floor = size - edge                # 막대가 서 있는 바닥
     for y in range(size):
         pixels.append(0)  # 필터 없음
         for x in range(size):
             color = navy
             for index, (x0, x1, height) in enumerate(bars):
-                if x0 * unit <= x < x1 * unit and y >= size - (height + 1.2) * unit:
+                # 아래쪽도 막아야 한다. 위쪽만 재면 막대가 그림 맨 밑까지
+                # 내려가, 줄여 놓고도 안드로이드 마스크에 그대로 잘린다.
+                if (edge + x0 * unit <= x < edge + x1 * unit
+                        and floor - (height + 1.2) * unit <= y < floor):
                     color = accent if index == 2 else bar
             pixels.extend(color)
 
@@ -348,6 +359,10 @@ def build() -> Path:
     _write_cname(DIST / "CNAME")
     (DIST / "icon-180.png").write_bytes(_png(180))
     (DIST / "icon-512.png").write_bytes(_png(512))
+    # 안드로이드는 192 를 먼저 찾고, maskable 이 없으면 아이콘을 흰 판에
+    # 얹어 letterbox 로 보여 준다 — 남의 앱들과 나란히 두면 그것만 튄다.
+    (DIST / "icon-192.png").write_bytes(_png(192))
+    (DIST / "icon-maskable-512.png").write_bytes(_png(512, safe=0.62))
 
     # index.html 에 휠 목록을 심는다. 파일명이 버전을 담고 있으므로 하드코딩하면
     # 버전을 올릴 때마다 손으로 고쳐야 한다.

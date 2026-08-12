@@ -967,6 +967,119 @@ def test_feature_pack_shows_a_table_not_a_wall_of_text(page) -> None:
     page.click("#tab-calc")     # 다음 시험이 산출 화면에서 시작하도록 돌려 놓는다
 
 
+def test_it_runs_on_a_galaxy_phone(browser, app_url, tmp_path) -> None:
+    """갤럭시(안드로이드 크로미움, 360px 세로 화면)에서 끝까지 돌아야 한다.
+
+    같은 프로그램을 동료가 갤럭시로 연다. 아이패드에 맞춰 만든 화면이 좁은
+    안드로이드에서 옆으로 밀리거나 엔진이 안 뜨면, 그 사람은 쓸 수가 없다.
+    """
+    from pension.samples import write_sample_pack
+
+    galaxy = browser.new_context(
+        viewport={"width": 360, "height": 800}, device_scale_factor=3,
+        is_mobile=True, has_touch=True,
+        user_agent="Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
+    )
+    page = galaxy.new_page()
+    broken: list[str] = []
+    page.on("pageerror", lambda e: broken.append(str(e)))
+    page.goto(app_url)
+    dismiss_intro(page)
+    page.wait_for_selector("#run:not([disabled])", timeout=180_000)
+
+    def overflow() -> int:
+        return page.evaluate(
+            "document.documentElement.scrollWidth"
+            " - document.documentElement.clientWidth")
+
+    # 화면 전체가 좌우로 밀리면 안 된다. 넓은 표는 표 안에서만 밀린다.
+    for tab in ("tab-calc", "tab-edit", "tab-dash", "tab-report",
+                "tab-member", "tab-runs", "tab-lib"):
+        page.click(f"#{tab}")
+        assert overflow() <= 1, f"{tab} 에서 화면이 {overflow()}px 옆으로 밀린다"
+
+    # 입력칸 글씨는 16px 이어야 한다. 그보다 작으면 아이폰이 포커스 순간
+    # 화면을 확대하고 스스로 돌아오지 않는다 — 안드로이드는 확대하지 않지만
+    # 같은 화면을 두 기기가 나눠 쓰므로 여기서 함께 못박는다.
+    page.click("#tab-calc")
+    for box in ("#base_date", "#period_start", "#run-name"):
+        size = page.evaluate(
+            f"getComputedStyle(document.querySelector('{box}')).fontSize")
+        assert size == "16px", f"{box} 가 {size} 라 아이폰에서 확대된다"
+
+    # 산출이 실제로 끝까지 돈다.
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=300_000)
+    assert "확정급여채무" in page.inner_text("#summary")
+    assert overflow() <= 1, "결과가 나온 뒤 화면이 옆으로 밀린다"
+
+    assert not broken, f"자바스크립트 오류: {broken}"
+    page.close()
+    galaxy.close()
+
+
+def test_the_home_screen_icon_fits_android(page) -> None:
+    """안드로이드 홈 화면 아이콘이 흰 판에 얹히거나 잘리지 않아야 한다.
+
+    안드로이드는 아이콘을 기기 모양대로 **잘라 낸다.** maskable 아이콘이 없으면
+    원본을 흰 배경에 축소해 얹어, 남의 앱들과 나란히 두면 그것만 튄다.
+    """
+    import json
+
+    manifest = json.loads(
+        (DIST / "manifest.webmanifest").read_text(encoding="utf-8"))
+    sizes = {icon["sizes"] for icon in manifest["icons"]}
+    assert "192x192" in sizes, "안드로이드가 먼저 찾는 192 가 없다"
+    purposes = {icon.get("purpose") for icon in manifest["icons"]}
+    assert "maskable" in purposes
+
+    for icon in manifest["icons"]:
+        assert (DIST / icon["src"]).is_file(), icon["src"]
+
+    # maskable 아이콘의 그림은 **가운데 80% 안** 에 들어와야 한다. 안드로이드가
+    # 기기 모양대로 잘라 내므로, 가장자리까지 그리면 막대 끝이 잘린다.
+    maskable = next(i for i in manifest["icons"] if i.get("purpose") == "maskable")
+    size, pixels = _read_png(DIST / maskable["src"])
+    stride = size * 3 + 1
+    navy = (31, 56, 100)
+    marks = [
+        (x, y)
+        for y in range(size)
+        for x in range(size)
+        if tuple(pixels[y * stride + 1 + x * 3: y * stride + 4 + x * 3]) != navy
+    ]
+    assert marks, "아이콘이 바탕색 한 가지뿐이다"
+    low, high = size * 0.1, size * 0.9
+    assert low <= min(x for x, _ in marks) and max(x for x, _ in marks) <= high
+    assert low <= min(y for _, y in marks) and max(y for _, y in marks) <= high
+
+
+def _read_png(path) -> tuple[int, bytes]:
+    """가로세로 같은 24비트 PNG 를 (한 변, 원본 픽셀) 로. 외부 라이브러리 없이."""
+    import struct
+    import zlib
+
+    raw = path.read_bytes()
+    pos, data, size = 8, b"", 0
+    while pos < len(raw):
+        length = struct.unpack(">I", raw[pos:pos + 4])[0]
+        kind = raw[pos + 4:pos + 8]
+        body = raw[pos + 8:pos + 8 + length]
+        if kind == b"IHDR":
+            size = struct.unpack(">II", body[:8])[0]
+        elif kind == b"IDAT":
+            data += body
+        pos += 12 + length
+    return size, zlib.decompress(data)
+
+
 def test_both_screens_have_the_same_tabs(page) -> None:
     """아이패드 화면과 PC 본 화면의 탭이 같아야 한다.
 
