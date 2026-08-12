@@ -98,6 +98,7 @@ def _meta(_request: dict) -> dict[str, Any]:
         ],
         "default_groups": list(DEFAULT_GROUPS),
         "apply_choices": list(form.APPLY_CHOICES),
+        "allocations": list(form.ALLOCATION_CHOICES),
         "rounding_units": list(form.ROUNDING_UNITS),
         "service_bases": list(SERVICE_BASES),
         "fraction_modes": list(FRACTION_MODES),

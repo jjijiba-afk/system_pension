@@ -456,9 +456,11 @@ def value_member(
     found = config.find_job_group(
         member.job_group_raw, member.employee_type.value, member.employee_type_raw
     )
+    allocation = ""
     if found is not None:
         rounding_unit = found[1].benefit_rounding_unit
         rounding_mode = found[1].benefit_rounding_mode
+        allocation = found[1].allocation_method
     result.rounding_unit = rounding_unit
 
     # 명부의 추가지급 기본급과 개인 지급배수는 **엔진이 자동으로 얹지 않는다.**
@@ -571,6 +573,12 @@ def value_member(
         """
         if total_service <= 0:
             return 0.0, 0.0
+
+        # 직군 규칙이 '근속비례' 를 고르면 급여식 대신 근속비로 귀속한다.
+        # 참고 산출 시스템의 근속기간할당(B/D × D0)과 같은 몫이다. 배수가
+        # 근속에 비례하는 법정 퇴직금에서는 급여식과 같은 값을 낸다.
+        if allocation == "근속비례":
+            return min(1.0, past_service / total_service), 1.0 / total_service
 
         total_multiple = multiple_at(
             max(total_service, cause.min_service), age, cause.benefit_rule

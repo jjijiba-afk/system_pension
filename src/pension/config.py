@@ -97,6 +97,13 @@ class JobGroupRule:
     apply_mortality: bool = True
     """사망률 적용 여부."""
 
+    allocation_method: str = ""
+    """확정급여채무 할당(귀속) 방식. ``급여식``(기본) / ``근속비례``.
+
+    급여식은 지급배수 비율로(상한·누진 대응, 문단 70), 근속비례는
+    ``과거근속 ÷ 총근속`` 으로 귀속한다. 배수가 근속에 비례하는 법정 퇴직금
+    에서는 두 방식이 같은 값을 낸다. 참고 산출 시스템과 맞출 때는 근속비례.
+    """
     excluded: bool = False
     """이 직군을 퇴직급여 산출에서 통째로 뺄지. ``Input`` R열.
 
@@ -328,6 +335,8 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
                 apply_promotion=_apply(ws.cell(row, 24).value),
                 apply_withdrawal=_apply(ws.cell(row, 25).value),
                 apply_mortality=_apply(ws.cell(row, 26).value),
+                # 27열이 없던 파일은 빈 값 → 급여식. 옛 파일이 그대로 읽힌다.
+                allocation_method=text(ws.cell(row, 27).value),
             )
         )
     return rules

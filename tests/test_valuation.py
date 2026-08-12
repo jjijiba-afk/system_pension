@@ -611,3 +611,72 @@ class TestScaleServiceAdjustment:
         _plain, moved = self._pair(config, service_deduct_years=50.0)
         assert moved.accrued_benefit == 0.0
         assert moved.dbo == 0.0
+
+
+class TestAllocationMethod:
+    """직군 규칙의 '할당 방식' — 급여식(기본) / 근속비례.
+
+    참고 산출 시스템의 공식 DBO 는 근속기간할당(B/D × D0)이다. 배수가 근속에
+    비례하는 법정 퇴직금에서는 두 방식이 같은 값을 내지만, 상한·가산근속이
+    있으면 갈린다. 어느 쪽으로 잴지는 규정이 정한다.
+    """
+
+    def _config(self, method: str) -> CalculationConfig:
+        return CalculationConfig(
+            base_date=BASE_DATE,
+            job_group_rules=[JobGroupRule(
+                "정규직", "정규직", severance_nra=60, longterm_nra=60,
+                allocation_method=method,
+            )],
+        )
+
+    def _member(self):
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        member.job_group_raw = "정규직"
+        return member
+
+    def test_statutory_gives_the_same_answer_either_way(self) -> None:
+        formula = value_member(self._member(), self._config(""),
+                               make_assumptions(discount=0.05, salary=0.0))
+        prorata = value_member(self._member(), self._config("근속비례"),
+                               make_assumptions(discount=0.05, salary=0.0))
+        assert prorata.dbo == pytest.approx(formula.dbo, rel=1e-9)
+        assert prorata.service_cost == pytest.approx(formula.service_cost, rel=1e-9)
+
+    def test_a_capped_scale_splits_the_two_methods(self) -> None:
+        """상한 규정에서는 급여식이 더 많이 귀속한다 (문단 70 취지).
+
+        근속 15년 상한이면 과거근속 10년의 급여식 귀속은 10/15 인데,
+        근속비례는 10/20 이다. 근속비례를 고르면 그 뜻대로 나와야 한다.
+        """
+        from pension.assumptions import Formula
+
+        def valued(method: str):
+            assumptions = make_assumptions(discount=0.05, salary=0.0)
+            assumptions.severance_benefit.formulas["정규직"] = Formula("MIN(t, 15)")
+            return value_member(self._member(), self._config(method), assumptions)
+
+        formula, prorata = valued(""), valued("근속비례")
+        # 정년 시 총근속 ≈ 20, 급여 = 15 × 임금. 급여식 귀속 10/15 > 근속비 10/20.
+        assert prorata.dbo < formula.dbo
+        past = prorata.past_service
+        total = past + 10
+        benefit = 15.0 * 1_000_000
+        assert prorata.dbo == pytest.approx(
+            benefit * (past / total) / 1.05**10, rel=1e-9)
+
+    def test_the_adjusted_scale_service_matches_the_reference_shape(self) -> None:
+        """가산근속 + 근속비례 = 참고 시스템의 모양.
+
+        배수는 (근속+가산)으로 찾고, 귀속은 실제 근속비로 — 참고 워크북
+        (B(t)/D(t) × D0, G = D + 가산)과 같은 구조가 되어야 한다.
+        """
+        member = self._member()
+        member.service_add_years = 1.5
+        result = value_member(member, self._config("근속비례"),
+                              make_assumptions(discount=0.05, salary=0.0))
+        past = result.past_service
+        total = past + 10
+        benefit = (total + 1.5) * 1_000_000          # 배수 = 근속 + 1.5
+        expected = benefit * (past / total) / 1.05**10
+        assert result.dbo == pytest.approx(expected, rel=1e-9)

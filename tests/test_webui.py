@@ -1370,3 +1370,31 @@ class TestPriorCheck:
             "op": "prior_check", "name": "없는산출", "roster": str(roster_path),
             "work": str(tmp_path)})))
         assert result["ok"] is False
+
+
+class TestAllocationChoice:
+    """지급규정의 '할당 방식' 이 파일을 오가며 살아남는지."""
+
+    def test_round_trip_and_config(self, tmp_path) -> None:
+        from pension.config import read_payout_rules
+        from pension.workbook import open_workbook
+
+        state = form.example_state(["정규직", "임원"])
+        state["payout"]["임원"]["allocation"] = "근속비례"
+        path = tmp_path / "기초율.xlsx"
+        assert call("state_write", state=state, path=str(path))["written"] is True
+
+        back = call("state_read", path=str(path))["state"]
+        assert back["payout"]["임원"]["allocation"] == "근속비례"
+        assert back["payout"]["정규직"]["allocation"] == "급여식"
+
+        book = open_workbook(path)
+        try:
+            rules = {r.mapped_name: r for r in read_payout_rules(book)}
+        finally:
+            book.close()
+        assert rules["임원"].allocation_method == "근속비례"
+        assert rules["정규직"].allocation_method in ("", "급여식")
+
+    def test_meta_offers_the_choices(self) -> None:
+        assert call("meta")["allocations"] == ["급여식", "근속비례"]
