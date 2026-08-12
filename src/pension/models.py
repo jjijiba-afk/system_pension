@@ -1,7 +1,6 @@
 """명부 도메인 모델.
 
-종전 규칙 는 항목마다 ``c_sabeon(1 To 100000)`` 처럼 10만 칸짜리 배열을 40개 넘게
-선언해 쓴다(모듈당 약 30MB 의 정적 배열). 여기서는 임직원 한 명을 한 객체로
+예전 방식은 항목마다 10만 칸짜리 배열을 수십 개 선언해 두고 썼다. 여기서는 임직원 한 명을 한 객체로
 묶어 명부 크기에 비례하는 메모리만 쓴다.
 """
 
@@ -20,7 +19,7 @@ class RateRules:
     """개인별로 확정된 기초율 규정명 묶음.
 
     ``Input`` 시트 G~N 열에 값이 있으면 직군 단위로 일괄 적용하고, 비어 있으면
-    명부의 해당 칼럼 값을 그대로 쓴다(종전 규칙 ``If toi_beta(jkn_j) = "" Then ...``).
+    명부의 해당 칼럼 값을 그대로 쓴다.
     """
 
     severance_benefit: str = ""
@@ -42,7 +41,7 @@ class ActiveMember:
     """재직자 한 명. ``재직자명부`` 26행 이후 한 행에 대응한다."""
 
     seq: int
-    """명부 내 순번(1-based). 종전 규칙 오류 메시지의 "N 번째 임직원" 과 같다."""
+    """명부 내 순번(1-based). 검증 메시지가 사람을 가리킬 때 쓴다."""
     row: int
     """원본 시트의 행 번호."""
 
@@ -76,10 +75,12 @@ class ActiveMember:
     """퇴직급여추계액(K-GAAP)."""
     daily_base_pay: float = 0.0
     """일 기본급(장기급여 휴가용). 0 이면 평균임금/30 으로 채운다."""
-    added_service_years: float = 0.0
-    """군경력 등 가산 근속연수."""
-    deducted_service_years: float = 0.0
-    """차감 근속연수(양수로 입력)."""
+    leave_days: float = 0.0
+    """근속에서 빼는 휴직 일수. 기산일을 그만큼 뒤로 민다.
+
+    인사에서 오는 값이 **일수** 다. 연수로 환산해 적게 하면 그 자리에서
+    자릿수를 틀리고, 월할·연할 기준에서는 단수까지 어긋난다.
+    """
 
     plan: BenefitPlan | None = None
     plan_raw: str = ""
@@ -101,9 +102,6 @@ class ActiveMember:
     명부에 ``2배`` / ``현재 3배`` 처럼 글자가 섞여 들어오므로 숫자만 뽑아 쓴다.
     비어 있으면 1배. 지급률 수식에서 ``배수`` 변수로 참조한다.
     """
-    extra_rate: float = 0.0
-    """가산(감소) 지급률."""
-
     # ── 기간별 지급률 분할 ───────────────────────────────────────
     # 호봉제(누진제)를 쓰다가 연봉제로 바꾼 회사는, 전환 전 근속분의 누진 배수를
     # 그대로 보전해 준다. 중간정산을 하지 않았으므로 근속은 이어지지만 배수만
@@ -178,7 +176,7 @@ class ActiveMember:
     def effective_daily_base_pay(self) -> float:
         """업로드 명부에 쓸 일 기본급.
 
-        종전 규칙: ``If c_kibonkp(jc) = 0 Then Round(c_imkm(jc) / 30, 0)``.
+        비어 있으면 30일 평균임금을 30 으로 나눠 쓴다.
         """
         if self.daily_base_pay:
             return self.daily_base_pay
@@ -210,8 +208,7 @@ class ActiveMember:
             return 0.0
         return _service_years(
             start, base_date,
-            added=self.added_service_years,
-            deducted=self.deducted_service_years,
+            leave_days=self.leave_days,
             basis=self.service_basis,
             fraction=fraction,
         )

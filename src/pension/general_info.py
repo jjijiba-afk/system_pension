@@ -1,4 +1,4 @@
-"""``1)일반사항`` 시트에서 지급규정 초안을 읽어낸다.
+"""``일반사항`` 시트에서 지급규정 초안을 읽어낸다.
 
 자료요청서 6번 항목(회사의 퇴직금 지급규정)은 담당자가 자유서술로 채운다.
 실제로 받은 여섯 건이 이런 식이었다.
@@ -185,7 +185,7 @@ class AssetMovement:
 
 @dataclass(slots=True)
 class GeneralInfo:
-    """``1)일반사항`` 에서 읽은 것 전부."""
+    """``일반사항`` 에서 읽은 것 전부."""
 
     raw: dict[str, str] = field(default_factory=dict)
     """항목 → 원문."""
@@ -623,7 +623,7 @@ def _rules_by_label(ws) -> dict[str, str]:
 
 
 def read_general_info(workbook) -> GeneralInfo:
-    """``1)일반사항`` 시트를 읽어 지급규정 초안을 만든다.
+    """``일반사항`` 시트를 읽어 지급규정 초안을 만든다.
 
     시트가 없으면 빈 :class:`GeneralInfo` 를 돌려준다(오류가 아니다 — 명부만
     보내오는 회사도 있다).
@@ -633,7 +633,7 @@ def read_general_info(workbook) -> GeneralInfo:
     info = GeneralInfo()
     # 옛 양식은 규정·자산·기간이 한 시트에 섞여 있었고, 새 양식은 뜻이 다른
     # 것을 갈라 두 시트로 나눴다. 어느 쪽이든 읽는다.
-    general = find_sheet(workbook, GENERAL_SHEET, "1)일반사항")
+    general = find_sheet(workbook, GENERAL_SHEET)
     money_ws = find_sheet(workbook, "사외적립자산") or general
     rules_ws = find_sheet(workbook, "퇴직급여규정") or general
     basics_ws = find_sheet(workbook, "기본정보") or general

@@ -957,7 +957,7 @@ def test_feature_pack_shows_a_table_not_a_wall_of_text(page) -> None:
     page.wait_for_selector("#feat-dialog[open]", timeout=10_000)
     body = page.inner_text("#feat-body")
     assert "특이사항 하나" in body
-    for word in ("가산근속", "중간정산", "DC전환"):
+    for word in ("휴직차감", "중간정산", "DC전환"):
         assert word in body, word
     # 명부마다 카드가 하나씩. 기준 + 특이사항들.
     assert page.locator("#feat-dialog .feat-card").count() >= 11

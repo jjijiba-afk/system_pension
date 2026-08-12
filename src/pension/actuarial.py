@@ -101,18 +101,20 @@ def service_years(
     start: _dt.date,
     end: _dt.date,
     *,
-    added: float = 0.0,
-    deducted: float = 0.0,
+    leave_days: float = 0.0,
     basis: str = SERVICE_DAILY,
     fraction: str = FRACTION_KEEP,
 ) -> float:
     """근속연수(년).
 
+    :param leave_days: 근속에서 빼는 휴직 일수. **기산일을 그만큼 뒤로 민다** —
+        연 단위로 빼면 월할·연할 기준에서 단수가 어긋나기 때문이다. 인사에서
+        오는 값이 일수이므로 연수로 환산해 적어 넣는 과정도 없앤다.
     :param basis: ``일할`` / ``월할`` / ``분기할`` / ``반기할`` / ``연할``.
     :param fraction: 단수 처리 — ``그대로`` / ``절사`` / ``절상`` / ``반올림``.
-        가산·차감 연수를 더한 **뒤** 적용한다. 군경력 가산이 단수에 영향을 주기
-        때문이다.
     """
+    if leave_days > 0:
+        start = start + _dt.timedelta(days=int(round(leave_days)))
     if end < start:
         return 0.0
 
@@ -127,7 +129,7 @@ def service_years(
     else:
         raw = (end - start).days / DAYS_PER_YEAR
 
-    return max(0.0, apply_fraction(raw + added - deducted, fraction))
+    return max(0.0, apply_fraction(raw, fraction))
 
 
 def round_amount(value: float, unit: int = 0, mode: str = FRACTION_HALF) -> float:

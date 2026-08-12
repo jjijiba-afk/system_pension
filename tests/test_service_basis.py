@@ -79,14 +79,28 @@ class TestFraction:
         end = start + _dt.timedelta(days=round(5.4 * 365))
         assert service_years(start, end, fraction=FRACTION_HALF) == 5.0
 
-    def test_added_years_are_applied_before_the_fraction(self) -> None:
-        """군경력 가산이 단수 판정에 영향을 준다."""
+    def test_leave_shifts_the_start_before_the_fraction(self) -> None:
+        """휴직은 **기산일을 미는 것** 이라 단수 판정까지 함께 움직인다.
+
+        연 단위로 빼면 월할·연할 기준에서 단수가 어긋난다. 일수로 밀어야
+        어느 기준을 쓰든 같은 답이 나온다.
+        """
         start = _dt.date(2020, 1, 1)
         end = start + _dt.timedelta(days=round(5.6 * 365))
-        assert service_years(start, end, added=0.5, fraction=FRACTION_DOWN) == 6.0
+        assert service_years(start, end, fraction=FRACTION_DOWN) == 5.0
+        # 219일(0.6년)을 밀면 5년에서 딱 걸린다.
+        assert service_years(start, end, leave_days=250, fraction=FRACTION_DOWN) == 4.0
 
-    def test_never_negative(self) -> None:
-        assert service_years(HIRE, BASE, deducted=99.0) == 0.0
+    def test_leave_longer_than_the_service_is_not_negative(self) -> None:
+        assert service_years(HIRE, BASE, leave_days=99_999) == 0.0
+
+    def test_leave_days_are_days_not_years(self) -> None:
+        """365 를 넣으면 한 해가 줄어야 한다 — 연수로 읽으면 365년이 준다."""
+        start = _dt.date(2015, 1, 1)
+        end = _dt.date(2025, 1, 1)
+        full = service_years(start, end)
+        assert service_years(start, end, leave_days=365) == pytest.approx(
+            full - 1.0, abs=0.01)
 
 
 class TestRoundAmount:

@@ -1,4 +1,4 @@
-"""``1)일반사항`` 6번 항목에서 지급규정 초안 읽기.
+"""``일반사항`` 6번 항목에서 지급규정 초안 읽기.
 
 실제 케이스 6건의 문구를 그대로 놓고 시험한다. 자유서술이라 기계가 확정할 수
 없으므로, **읽은 것과 못 읽은 것이 정확히 갈리는지** 가 핵심이다. 못 읽은 항목을
@@ -81,7 +81,7 @@ _ROWS = {
 def _workbook(values: dict[str, str], tmp_path):
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "1)일반사항"
+    ws.title = "일반사항"
     for key, row in _ROWS.items():
         ws.cell(row, 5, values.get(key, ""))
     # 명부 시트도 있어야 실제 파일과 비슷하다.
@@ -215,7 +215,7 @@ def _full_workbook(tmp_path, **kwargs):
     """자료요청서 전 항목이 채워진 워크북."""
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "1)일반사항"
+    ws.title = "일반사항"
     write_general_sheet(ws, payout=CASES["1"], **kwargs)
 
     roster = wb.create_sheet("2)재직자명부")
@@ -389,7 +389,7 @@ class TestAssetMovement:
         book = _full_workbook(tmp_path)
         book.close()
         wb = openpyxl.load_workbook(tmp_path / "자료요청서.xlsx")
-        ws = wb["1)일반사항"]
+        ws = wb["일반사항"]
         fee_row = next(
             r for r in range(60, 100) if ws.cell(r, 4).value == "운용관리수수료"
         )

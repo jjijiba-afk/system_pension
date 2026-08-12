@@ -47,7 +47,7 @@ RETIRED_SHEET: Final = "퇴직자명부"
 
 #: 같은 명부인데 통합문서마다 시트 이름이 다르다.
 ACTIVE_SHEET_ALIASES: Final = (ACTIVE_SHEET, "2)재직자명부", "재직자")
-RETIRED_SHEET_ALIASES: Final = (RETIRED_SHEET, "3)퇴직자명부", "퇴직자")
+RETIRED_SHEET_ALIASES: Final = (RETIRED_SHEET, "퇴직자")
 
 #: 재직자명부 데이터 시작 행. 종전 규칙 ``jc1 = jc + 25``.
 ACTIVE_FIRST_ROW: Final = 26
@@ -91,8 +91,7 @@ ACTIVE_COLUMNS: Final[dict[str, _Col]] = {
     "honorary_wage": _Col(12, "명예퇴직 산정용 임금"),
     "accrued_benefit": _Col(13, "퇴직급여추계액"),
     "daily_base_pay": _Col(14, "일 기본급"),
-    "added_service_years": _Col(15, "가산 근속연수"),
-    "deducted_service_years": _Col(16, "차감 근속연수"),
+    "leave_days": _Col(15, "휴직차감일수"),
     "plan": _Col(17, "퇴직급여 제도구분"),
     "settlement_amount": _Col(18, "중간정산 지급금액"),
     "longterm_target": _Col(19, "장기급여 산출대상여부"),
@@ -103,7 +102,6 @@ ACTIVE_COLUMNS: Final[dict[str, _Col]] = {
     "transfer_in_amount": _Col(24, "전입액"),
     "payout_multiple": _Col(25, "퇴직금 지급배수"),
     "note": _Col(26, "비고"),
-    "extra_rate": _Col(27, "가산(감소) 지급률"),
     "severance_benefit": _Col(28, "퇴직급여 지급률 규정"),
     "longterm_benefit": _Col(29, "장기급여 지급률 규정"),
     "severance_withdrawal": _Col(30, "퇴직급여 중도(사망)퇴직률 규정"),
@@ -387,13 +385,11 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.honorary_wage = _number(get("honorary_wage"))
         member.accrued_benefit = _number(get("accrued_benefit"))
         member.daily_base_pay = _number(get("daily_base_pay"))
-        member.added_service_years = _number(get("added_service_years"))
-        member.deducted_service_years = _number(get("deducted_service_years"))
+        member.leave_days = abs(_number(get("leave_days")))
         member.settlement_amount = _number(get("settlement_amount"))
         member.longterm_amount = _number(get("longterm_amount"))
         member.declared_nra = int(_number(get("declared_nra")))
         member.transfer_in_amount = _number(get("transfer_in_amount"))
-        member.extra_rate = _number(get("extra_rate"))
         member.extra_pay_base_wage = _number(get("extra_pay_base_wage"))
         member.progressive_service = _number(get("progressive_service"))
         member.progressive_rate = _number(get("progressive_rate"))

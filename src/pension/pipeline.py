@@ -133,9 +133,9 @@ class RunOptions:
     shocks: tuple[Shock, ...] = DEFAULT_SHOCKS
     prior: PriorPeriod = field(default_factory=PriorPeriod)
     plan_assets: PlanAssetInput = field(default_factory=PlanAssetInput)
-    """사외적립자산. 비우면 명부의 ``1)일반사항`` 5번 표에서 읽어 온다."""
+    """사외적립자산. 비우면 명부의 ``일반사항`` 5번 표에서 읽어 온다."""
     read_general_info: bool = True
-    """``1)일반사항`` 의 회계기간·사외적립자산·추계액 변동내역을 자동으로 쓸지.
+    """``일반사항`` 의 회계기간·사외적립자산·추계액 변동내역을 자동으로 쓸지.
 
     담당자가 이미 채워 보낸 표를 화면에 다시 옮겨 적게 할 이유가 없다. 명시적으로
     넣은 값이 있으면 그쪽이 이긴다."""
@@ -163,7 +163,7 @@ class PensionRun:
     projection: Projection | None = None
     """차년도 예측. 산출을 마치면 늘 만든다."""
     general_info: Any = None
-    """``1)일반사항`` 에서 읽은 것. 시트가 없으면 ``None``."""
+    """``일반사항`` 에서 읽은 것. 시트가 없으면 ``None``."""
     active_upload: list[list[Any]] = field(default_factory=list)
     retired_upload: list[list[Any]] = field(default_factory=list)
 
@@ -278,7 +278,7 @@ def load_inputs(
 
 
 def _read_general_sheet(wb):
-    """``1)일반사항`` 을 읽는다. 없거나 깨졌으면 ``None``.
+    """``일반사항`` 을 읽는다. 없거나 깨졌으면 ``None``.
 
     일반사항이 없는 명부(업로드용으로 변환한 것 등)도 많으므로, 못 읽는다고
     산출을 막지는 않는다.

@@ -115,13 +115,13 @@ CASES: Final[tuple[CaseSpec, ...]] = (
             "· DC 가입자는 확정급여채무에서 빠지고, 중간정산자는 정산일부터 근속을 다시 셉니다.",
             "· 임금피크 대상자가 있어 정년연령이 그 연령으로 당겨집니다.",
             "· 정년을 넘겨 재고용된 사람이 있어 '정년초과 가산연령' 이 실제로 쓰입니다.",
-            "· 전입자·가산근속·개별 지급배수가 섞여 있습니다.",
+            "· 전입자·휴직차감·개별 지급배수가 섞여 있습니다.",
         ),
         flags={
             "dc_share": 0.14, "settlement_share": 0.10, "wage_peak_share": 0.35,
             "over_nra_share": 0.05, "transfer_in_share": 0.05,
             "multiple_share": 0.05,
-            "added_service_share": 0.06, "longterm_share": 0.55,
+            "leave_share": 0.06, "longterm_share": 0.55,
         },
     ),
     CaseSpec(
@@ -140,14 +140,14 @@ CASES: Final[tuple[CaseSpec, ...]] = (
             "· 다른 하나는 **자료는 옳은데 산출이 까다로운 경우** 입니다. 비고란을 보세요.",
             "  임원 세법한도 프로즌(같은 사번 두 줄) · 연봉제 전환 누진 보전 ·",
             "  프로즌 DC전환자 · DC전환 후 퇴직(재직·퇴직 사번 중복) · 퇴직예정자 ·",
-            "  명예퇴직 예정자 · 정년 시 기본급 추가지급 · 가산근속 · 사망 정액 가산 ·",
+            "  명예퇴직 예정자 · 정년 시 기본급 추가지급 · 휴직차감 · 사망 정액 가산 ·",
             "  명예퇴직 위로금 · 임금 단위 혼재 · 장기급여 대상 표기 혼재.",
             "· 평균임금 체크금액을 1,000,000원으로 두어 그 미만인 사람도 걸립니다.",
         ),
         flags={
             "dirty": True, "practice": True, "dc_share": 0.06,
             "settlement_share": 0.05, "longterm_share": 0.35,
-            "added_service_share": 0.04, "multiple_share": 0.03,
+            "leave_share": 0.04, "multiple_share": 0.03,
         },
     ),
 )
@@ -305,11 +305,8 @@ def _make_active(
             row["transfer_in_date"] = moved.isoformat()
             row["transfer_in_amount"] = int(wage * rng.uniform(1.5, 6.0) / 1_000) * 1_000
 
-    if rng.random() < flags.get("added_service_share", 0):
-        if rng.random() < 0.6:
-            row["added_service_years"] = rng.choice((0.5, 1, 1.5, 2))
-        else:
-            row["deducted_service_years"] = rng.choice((0.5, 1))
+    if rng.random() < flags.get("leave_share", 0):
+        row["leave_days"] = rng.choice((30, 90, 180, 365))
 
     if rng.random() < flags.get("multiple_share", 0):
         row["payout_multiple"] = rng.choice((1.5, 2.0, 2.5))
@@ -355,8 +352,8 @@ def _ensure_special_cases(
          "transfer_in_share"),
         ("payout_multiple", lambda r: True,
          lambda r: rng.choice((1.5, 2.0, 2.5)), "multiple_share"),
-        ("added_service_years", lambda r: True,
-         lambda r: rng.choice((0.5, 1, 2)), "added_service_share"),
+        ("leave_days", lambda r: True,
+         lambda r: rng.choice((30, 180, 365)), "leave_share"),
     ]
     for key, pick, make, share in wanted:
         if not spec.flags.get(share):
@@ -470,8 +467,8 @@ PRACTICE_CASES: Final[tuple[tuple[str, str], ...]] = (
      "명예퇴직 산정용 임금이 따로 적혀 있다."),
     ("정년퇴직 시 기본급 추가지급",
      "정년으로 나가는 사람에게 기본급을 얹어 준다(전장직원 예우)."),
-    ("가산근속(법정제)",
-     "군경력·휴직 보전으로 근속을 더해 준다."),
+    ("휴직 차감",
+     "휴직한 날수만큼 근속 기산일을 뒤로 민다."),
     ("사망 추가지급",
      "재직 중 사망하면 정액 가산금을 얹는다."),
     ("명예퇴직 위로금",
@@ -574,11 +571,11 @@ def _add_practice_cases(
     extra["note"] = "정년퇴직 시 기본급 추가지급 대상"
     planted["정년퇴직 시 기본급 추가지급"] = extra["employee_id"]
 
-    # ── 가산근속(법정제) ─────────────────────────────────────────
+    # ── 휴직 차감 ────────────────────────────────────────────────
     added = take(actives)
-    added["added_service_years"] = rng.choice((1, 1.5, 2))
-    added["note"] = "군경력 가산근속"
-    planted["가산근속(법정제)"] = added["employee_id"]
+    added["leave_days"] = rng.choice((180, 365, 540))
+    added["note"] = "휴직 차감 대상"
+    planted["휴직 차감"] = added["employee_id"]
 
     # ── 사망 추가지급 · 명예퇴직 위로금 ──────────────────────────
     if len(retirees) >= 2:
@@ -721,8 +718,7 @@ def _case_report(
         ("중간정산자 (정산일부터 근속을 다시 셈)", count(actives, "settlement_date")),
         ("임금피크 대상 (정년연령이 그 연령으로 당겨짐)", count(actives, "wage_peak_age")),
         ("전입자 (전입일·전입액 있음)", count(actives, "transfer_in_date")),
-        ("가산 근속연수 있음", count(actives, "added_service_years")),
-        ("차감 근속연수 있음", count(actives, "deducted_service_years")),
+        ("휴직차감일수 있음", count(actives, "leave_days")),
         ("개별 지급배수 지정", count(actives, "payout_multiple")),
         ("장기급여 산출대상 (Y)",
          sum(1 for row in actives if row.get("longterm_target") == "Y")),

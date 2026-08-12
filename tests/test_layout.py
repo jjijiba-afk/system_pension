@@ -31,7 +31,7 @@ class TestNormalizeHeader:
             ("30일 평균임금", "30일평균임금"),
             ("1日기본급", "1일기본급"),
             ("성별\n(남자/여자)", "성별"),
-            ("군경력등 \n가산 근속연수", "군경력등가산근속연수"),
+            ("휴직 \n차감일수", "휴직차감일수"),
             ("퇴직금  지급배수", "퇴직금지급배수"),
             (None, ""),
         ],
@@ -83,16 +83,21 @@ class TestShiftedColumns:
             "중간정산일", "30일 평균임금", "명예퇴직 산정용 임금", "퇴직급여추계액",
             "1日기본급",
             "연봉제 전환 추계일", "누진적용 근속연수", "누진적용 율",   # ← 끼어든 세 열
-            "군경력등 가산 근속연수", "차감근속연수", "퇴직급여 제도구분",
+            "휴직차감일수", "퇴직급여 제도구분",
         ]
         ws = _sheet(headers, [])
         log = IssueLog()
         defaults = {name: col.index for name, col in ACTIVE_COLUMNS.items()}
         layout = resolve_layout(ws, ACTIVE_HEADER_ALIASES, defaults, REQUIRED_ACTIVE, log)
 
-        # 제도구분은 표준 서식에서 17열이지만 이 서식에서는 20열이다.
-        assert layout.columns["plan"] == 20
-        assert layout.columns["monthly_wage"] == 11
+        # 제도구분은 표준 자리가 아니라 **머리글이 실제로 있는 자리** 로 잡혀야
+        # 한다. 앞에 세 열이 끼어들었으므로 목록에서의 자리 그대로다.
+        # 머리글은 2열부터 놓이므로 목록에서의 자리 + 2 가 실제 열이다.
+        def where(title: str) -> int:
+            return headers.index(title) + 2
+
+        assert layout.columns["plan"] == where("퇴직급여 제도구분")
+        assert layout.columns["monthly_wage"] == where("30일 평균임금")
         assert not log.has_errors()
 
     def test_absent_columns_are_not_faked_with_defaults(self) -> None:
@@ -136,7 +141,7 @@ class TestSheetAliases:
     def test_finds_numbered_sheet_names(self, tmp_path: Path) -> None:
         wb = openpyxl.Workbook()
         wb.active.title = "2)재직자명부"
-        wb.create_sheet("3)퇴직자명부")
+        wb.create_sheet("퇴직자명부")
         path = tmp_path / "명부.xlsx"
         wb.save(path)
 

@@ -249,7 +249,7 @@ class CalcTab(ttk.Frame):
         self._check_table.grid_remove()
 
     def _assets(self, parent: tk.Misc) -> None:
-        box = section(parent, "5. 사외적립자산 (비우면 명부 '1)일반사항' 에서 읽습니다)")
+        box = section(parent, "5. 사외적립자산 (비우면 명부 [일반사항] 에서 읽습니다)")
         pairs = (
             ("기초 공정가치", self.asset_open), ("기말 공정가치", self.asset_close),
             ("당기 부담금 납입액", self.asset_contrib), ("차년도 예상 부담금", self.asset_expected),

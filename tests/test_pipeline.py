@@ -171,13 +171,20 @@ class TestValidationCatchesBadData:
 
 
 class TestUpload:
-    def test_column_counts_match_the_original_sheets(self, roster_path: Path) -> None:
+    def test_every_row_matches_its_headers(self, roster_path: Path) -> None:
+        """줄 길이가 머리글과 어긋나면 그 뒤 열이 통째로 한 칸씩 밀린다.
+
+        갯수를 숫자로 못박지 않는다 — 열을 하나 더하거나 뺄 때 시험이 먼저
+        틀려 버리면, 정작 봐야 할 '머리글과 줄이 맞는가' 를 못 본다.
+        """
         config, roster, _ = read_all(roster_path)
         active, retired = build_upload(roster, config)
-        assert len(ACTIVE_UPLOAD_HEADERS) == 36
-        assert len(RETIRED_UPLOAD_HEADERS) == 23
-        assert all(len(row) == 36 for row in active)
-        assert all(len(row) == 23 for row in retired)
+        assert active and retired
+        assert all(len(row) == len(ACTIVE_UPLOAD_HEADERS) for row in active)
+        assert all(len(row) == len(RETIRED_UPLOAD_HEADERS) for row in retired)
+        # 머리글에 같은 이름이 두 번 들어가면 어느 열인지 가릴 수 없다.
+        assert len(set(ACTIVE_UPLOAD_HEADERS)) == len(ACTIVE_UPLOAD_HEADERS)
+        assert len(set(RETIRED_UPLOAD_HEADERS)) == len(RETIRED_UPLOAD_HEADERS)
 
     def test_daily_base_pay_defaults_to_a_thirtieth_of_the_wage(self, roster_path: Path) -> None:
         config, roster, _ = read_all(roster_path)
@@ -318,12 +325,12 @@ def test_load_inputs_returns_all_four_pieces(
 
 
 class TestGeneralSheetIsUsed:
-    """``1)일반사항`` 에 이미 적혀 온 것은 다시 입력받지 않는다."""
+    """``일반사항`` 에 이미 적혀 온 것은 다시 입력받지 않는다."""
 
     @staticmethod
     def _with_general(roster_path: Path, **kwargs) -> Path:
         wb = openpyxl.load_workbook(roster_path)
-        write_general_sheet(wb.create_sheet("1)일반사항"), **kwargs)
+        write_general_sheet(wb.create_sheet("일반사항"), **kwargs)
         path = roster_path.with_name("일반사항포함.xlsx")
         wb.save(path)
         return path

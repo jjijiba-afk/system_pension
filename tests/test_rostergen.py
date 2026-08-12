@@ -299,7 +299,7 @@ class TestPracticeCases:
         assert active_ids & retired_ids, "양쪽에 걸친 사번이 없다"
 
     def test_practice_cases_reach_the_valuation(self, pack, tmp_path) -> None:
-        """가산근속·추가지급·개별배수가 실제 산출 결과에 나타나야 한다."""
+        """휴직차감·추가지급·개별배수가 실제 산출 결과에 나타나야 한다."""
         run = _run(pack, "자료불량", tmp_path, force=True)
         members = run.valuation.members
         assert any(m.extra_payment for m in members), "추가지급 기본급이 안 잡혔다"

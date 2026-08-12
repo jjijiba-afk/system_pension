@@ -769,7 +769,7 @@ class _JobGroupMapTab(ttk.Frame):
 class _PayoutRuleTab(ttk.Frame):
     """회사 지급규정 탭 — 직군별 가입자격·정년·근속 산정방법·반올림.
 
-    자료요청서 `1)일반사항` 6번 항목에 자유서술로 적혀 오는 내용을 산출 설정으로
+    자료요청서 `일반사항` 6번 항목에 자유서술로 적혀 오는 내용을 산출 설정으로
     옮기는 자리다. 문구가 회사마다 달라(‘월할 계산’, ‘근로기준법 일수’,
     ‘단수개월 절사’) 자유입력으로 두면 오타 하나가 채무를 바꾼다. 그래서 고를 수
     있는 것만 버튼으로 두었다.
@@ -782,7 +782,7 @@ class _PayoutRuleTab(ttk.Frame):
 
         ttk.Label(
             self,
-            text="자료요청서 '1)일반사항' 6번(퇴직금 지급규정)을 여기에 옮깁니다. "
+            text="자료요청서 [일반사항] 6번(퇴직금 지급규정)을 여기에 옮깁니다. "
                  "규정 문구가 애매하면 담당자에게 확인하세요.",
             style="Hint.TLabel", wraplength=hidpi.px(self, 840), justify="left",
         ).pack(anchor="w", pady=(0, 8))
@@ -801,7 +801,7 @@ class _PayoutRuleTab(ttk.Frame):
         self.rebuild(self.job_groups)
 
     def _load_from_general_info(self) -> None:
-        """자료요청서 `1)일반사항` 6번을 읽어 초안을 채운다.
+        """자료요청서 `일반사항` 6번을 읽어 초안을 채운다.
 
         기계가 확정할 수 없는 자유서술이므로 **초안** 만 채우고 근거 문구를
         보여 준다. 읽지 못한 항목은 손대지 않고 그대로 둔다.

@@ -566,7 +566,7 @@ function buildPayoutTab(page) {
   table.append(payoutBody);
   page.append(
     el("div", { class: "hint" },
-       "자료요청서 '1)일반사항' 6번(퇴직금 지급규정)을 여기에 옮깁니다. " +
+       "자료요청서 [일반사항] 6번(퇴직금 지급규정)을 여기에 옮깁니다. " +
        "Base-up·승급률·퇴직률·사망률을 '미반영'으로 두면 그 직군에서 해당 요율을 0으로 봅니다 " +
        "— 임원을 정년까지 근무한다고 보는 경우 등."),
     toolbar, el("div", { class: "scroll-x" }, table));
@@ -2880,7 +2880,7 @@ function useGenerated(item) {
   $("loaded-run-banner").style.display = "block";
   $("roster-hint").textContent = "시험 명부를 사용합니다. 새 파일을 고르면 대체됩니다.";
   $("tab-calc").click();
-  // 시험 명부에도 '1)일반사항' 이 들어 있다. 올린 파일과 똑같이 채워 준다.
+  // 시험 명부에도 [일반사항] 이 들어 있다. 올린 파일과 똑같이 채워 준다.
   fillFromGeneralSheet();
   status(`시험 명부 '${item.title}' 을(를) 산출 탭에 넣었습니다. [산출 실행]을 누르세요.`);
 }

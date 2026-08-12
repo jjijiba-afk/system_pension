@@ -114,7 +114,7 @@ A1 셀을 `연령` ↔ `근속` 으로 바꾸면 조회 기준이 바뀝니다.
 | `개인별산출` | 1인 1행. 검산과 원가배분용 |
 | `장기급여` | 기타장기종업원급여 개인별 산출 |
 | `검증리포트` | 명부 이슈 전체 (시트·행·열·사번 포함) |
-| `UpLoad_Jae` / `UpLoad_Toi` | 산출이 읽은 형태로 정리한 명부 |
+| `업로드 재직` / `업로드 퇴직` | 산출이 읽은 형태로 정리한 명부 |
 
 ---
 
@@ -153,7 +153,7 @@ src/pension/
   config.py        Input 시트 → 산출기준·직군 규칙
   readers.py       명부 읽기 (열 배치 표)
   validation.py    검증 (오류 일괄 수집)
-  upload.py        UpLoad_Jae / UpLoad_Toi 생성
+  upload.py        업로드 재직 / 업로드 퇴직 생성
   assumptions.py   기초율 로딩 및 양식 생성
   members.py       개인별 결과 내보내기 (원가코드·직군별 집계)
   editor.py        산출 가정 입력 화면

@@ -107,7 +107,7 @@ def render_html(
     :param kind: ``severance`` 퇴직급여 / ``longterm`` 장기종업원급여.
     :param client: 표지에 올릴 단체 이름.
     :param period_start: 산출 기간의 시작(직전 결산일 다음 날). 명부의
-        ``1)일반사항`` 회계기간이 있으면 그쪽을 먼저 쓴다.
+        ``일반사항`` 회계기간이 있으면 그쪽을 먼저 쓴다.
     """
     if kind not in REPORT_KINDS:
         raise ValueError(f"보고서 종류는 {' / '.join(REPORT_KINDS)} 입니다: {kind}")
@@ -826,7 +826,7 @@ def _longterm_sections(run: Any, sections: list, period: str) -> None:
             ("5. 기말 확정급여채무의 현재가치", _won(lt.dbo)),
         ]
         move_note = ("기시 채무는 산출 화면에 전기 장기급여채무를 넣으면 채워집니다. "
-                     "장기급여 지급액은 명부의 1)일반사항에서 읽었습니다.")
+                     "장기급여 지급액은 명부의 일반사항에서 읽었습니다.")
     sections.append(("공시사항", f"""
 <h3>확정급여채무의 변동내역</h3>
 {_kv_table(move_rows)}

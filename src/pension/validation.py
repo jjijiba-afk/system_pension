@@ -4,7 +4,7 @@
 
 * 종전 규칙이 메시지를 띄우고 산출을 멈추던 치명적
   오류(사번 중복, 직군 미매칭, 연령 범위, 평균임금 하한, 입사일 > 기준일 등).
-* ``검증요약`` 시트가 수식으로 집계하던 항목(필수값 누락, 날짜 선후관계,
+* 요약 시트가 수식으로 집계하던 항목(필수값 누락, 날짜 선후관계,
   사외자산 지급액 > 총지급액 등).
 
 종전 규칙은 첫 오류에서 멈추지만 여기서는 전부 모아 한 번에 돌려준다. 담당자가
@@ -416,12 +416,13 @@ def validate_active(
                         column=_col(sheet, "accrued_benefit"),
                         value=member.accrued_benefit, **kw)
 
-        if member.deducted_service_years < 0:
+        if member.leave_days and not 0 < member.leave_days <= 3_650:
             log.warning(
-                "JAE_DEDUCT_NEGATIVE",
-                "차감근속연수는 양수로 입력해야 합니다 (음수는 가산으로 처리됨)",
-                column=_col(sheet, "deducted_service_years"),
-                value=member.deducted_service_years, **kw,
+                "JAE_LEAVE_DAYS_RANGE",
+                f"휴직차감일수 {member.leave_days:,.0f}일이 상식 밖입니다. "
+                "**연수가 아니라 일수** 로 적어야 합니다 (10년치 3,650일까지 봅니다)",
+                column=_col(sheet, "leave_days"),
+                value=member.leave_days, **kw,
             )
 
         _check_progressive_split(member, config, sheet, log, kw)

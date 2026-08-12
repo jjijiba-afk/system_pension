@@ -78,7 +78,7 @@ class TestOnePopulation:
 class TestOneFeatureEach:
     def test_the_baseline_carries_none_of_them(self, pack) -> None:
         """기준 명부에는 특이사항 칸이 하나도 차 있지 않아야 한다."""
-        columns = ("가산 근속연수", "중간정산일", "임금피크 연령", "개인 지급배수",
+        columns = ("휴직차감일수", "중간정산일", "임금피크 연령", "개인 지급배수",
                    "정년연령", "명예퇴직 기준임금", "추가지급 기본급")
         rows = _rows(pack / f"{BASE_SPEC.title}.xlsx")
         for column in columns:

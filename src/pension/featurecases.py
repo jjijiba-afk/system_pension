@@ -104,10 +104,10 @@ def _in_group(row: dict[str, Any], scope: str) -> bool:
 # 손대는 것은 명부 칸뿐이다. 산출 쪽은 건드리지 않는다 — 회사가 그렇게 적어
 # 보낸 명부를 그대로 재현하는 것이 목적이다.
 
-def _added_service(rows: list[dict[str, Any]], base: _dt.date) -> None:
+def _leave(rows: list[dict[str, Any]], base: _dt.date) -> None:
     for row in rows:
-        row["added_service_years"] = 1.5
-        row["note"] = "군경력 가산근속 1.5년"
+        row["leave_days"] = 365
+        row["note"] = "휴직 차감 365일"
 
 
 def _settlement(rows: list[dict[str, Any]], base: _dt.date) -> None:
@@ -177,7 +177,7 @@ def _thousand_won(rows: list[dict[str, Any]], base: _dt.date) -> None:
 
 
 _APPLY: Final[dict[str, Callable[[list[dict[str, Any]], _dt.date], None]]] = {
-    "가산근속": _added_service,
+    "휴직차감": _leave,
     "중간정산": _settlement,
     "임금피크": _wage_peak,
     "지급배수": _multiple,
@@ -192,10 +192,10 @@ _APPLY: Final[dict[str, Callable[[list[dict[str, Any]], _dt.date], None]]] = {
 
 FEATURES: Final[tuple[FeatureSpec, ...]] = (
     FeatureSpec(
-        key="가산근속", title="가산근속 (군경력·휴직 보전)",
-        detail="전원에게 근속 1.5년을 더해 준다.",
-        scope="전원", expect=UP,
-        why="근속이 늘면 지급률도 귀속액도 늘어난다. 예외 없이 증가한다.",
+        key="휴직차감", title="휴직 차감 (365일)",
+        detail="전원의 근속 기산일을 365일 뒤로 민다.",
+        scope="전원", expect=DOWN,
+        why="근속이 한 해 줄면 지급률도 귀속액도 준다. 예외 없이 감소한다.",
     ),
     FeatureSpec(
         key="중간정산", title="전원 중간정산",
