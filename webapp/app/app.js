@@ -1582,6 +1582,35 @@ $("roster-save").addEventListener("click", async () => {
   }
 });
 
+// 받아 온 명부를 우리 양식으로 되돌려 준다. 회사마다 열 순서와 머리글이
+// 달라 매 결산 눈으로 맞춰야 했는데, 한 번 올린 것을 이 모양으로 되받아
+// 다음 해에 그것을 채워 달라고 하면 어긋날 자리가 없다.
+$("roster-export").addEventListener("click", async () => {
+  const button = $("roster-export");
+  button.disabled = true;
+  try {
+    status("명부를 표준양식으로 옮기는 중…");
+    const path = await rosterIntoFS();
+    const name = currentRosterName().replace(/\.(xls|xlsx|xlsm)$/i, "");
+    const made = py("roster_export", { path, name });
+    download(made.path, made.file);
+    status(`표준양식으로 옮겼습니다 — ${made.summary}`);
+    if (made.carried.length) {
+      // 우리 열로 못 들어간 것은 버리지 않고 오른쪽에 붙였다. 어느 열인지
+      // 말해 주지 않으면 '왜 여기 있지' 로 끝난다.
+      alert("알아보지 못한 열은 오른쪽에 그대로 붙였습니다.\n"
+            + "회사가 쓰는 열이면 그대로 두셔도 되고, 우리 열과 같은 뜻이면 "
+            + "머리글을 우리 이름으로 고쳐 주세요.\n\n"
+            + made.carried.join("\n"));
+    }
+  } catch (error) {
+    status("");
+    alert("표준양식으로 옮기지 못했습니다.\n\n" + error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // ═════════ 산출 ══════════════════════════════════════════════════
 // 보통 쓰는 것은 명부와 기초율 둘뿐이고, 기준일·옵션·전기·자산은 손대지 않는
 // 회차가 많다. 접어 두되 **무엇이 설정돼 있는지는 접힌 채로 보여야** 한다 —

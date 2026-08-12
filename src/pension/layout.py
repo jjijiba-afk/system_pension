@@ -202,7 +202,14 @@ def find_data_start(sheet, header_row: int, *, limit: int = 12) -> int:
     순번이 어느 열인지는 서식마다 다르다 — 첫 열을 비워 두고 둘째 열에 순번을
     적는 것이 있고, 첫 열이 곧 순번인 것이 있다. 앞 세 열을 함께 보아 어느 쪽이든
     잡는다. 여기서 한 줄을 잘못 잡으면 그만큼의 사람이 조용히 빠진다.
+
+    순번 열이 아예 없는 명부도 온다(사번부터 시작하는 인사시스템 출력이 그렇다).
+    그때 예전에는 ``머리글 + 3`` 으로 물러섰는데, 그러면 맨 앞 두 사람이 아무
+    말 없이 빠졌다 — 사람이 빠져도 총액만 조금 작아져 눈에 띄지 않는 쪽이다.
+    지금은 **글자라도 적힌 첫 줄** 로 물러선다. 안내 줄을 사람으로 잘못 세면
+    검증에서 시끄럽게 걸리므로, 조용히 빠지는 것보다 낫다.
     """
+    first_filled = 0
     for row in range(header_row + 1, min(sheet.max_row, header_row + limit) + 1):
         for column in (1, 2, 3):
             value = sheet.cell(row, column).value
@@ -210,7 +217,12 @@ def find_data_start(sheet, header_row: int, *, limit: int = 12) -> int:
                 continue
             if isinstance(value, (int, float)) and value >= 1:
                 return row
-    return header_row + 3
+        if not first_filled and any(
+            str(sheet.cell(row, column).value or "").strip()
+            for column in range(1, min(sheet.max_column, 12) + 1)
+        ):
+            first_filled = row
+    return first_filled or header_row + 3
 
 
 def _match(seen: dict[str, int], aliases: tuple[str, ...]) -> int | None:

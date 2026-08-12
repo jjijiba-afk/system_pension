@@ -159,6 +159,33 @@ def test_upload_run_download(page, tmp_path) -> None:
     assert payload[:2] == b"PK"
 
 
+def test_an_uploaded_roster_comes_back_in_our_template(page, tmp_path) -> None:
+    """올린 명부를 우리 양식 그대로 되받는다.
+
+    회사마다 열 순서와 머리글이 달라 매 결산 눈으로 맞춰야 했다. 한 번 올린
+    것을 이 모양으로 되받아 다음 해에 그것을 채워 달라고 하면 어긋날 자리가
+    없다 — 그 되받기가 브라우저에서 실제로 되는지 여기서 본다.
+    """
+    import openpyxl
+
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+
+    page.set_input_files("#roster", str(roster))
+    with page.expect_download(timeout=120_000) as captured:
+        page.click("#roster-export")
+    download = captured.value
+    assert download.suggested_filename.endswith("_표준양식.xlsx")
+
+    got = tmp_path / "되받은.xlsx"
+    download.save_as(got)
+    book = openpyxl.load_workbook(got)
+    assert "재직자명부" in book.sheetnames
+    assert book["재직자명부"].cell(3, 2).value == "사번"
+
+
 def test_roster_fills_the_asset_boxes(page, tmp_path) -> None:
     """명부를 고르면 [사외적립자산] 시트의 값이 입력칸에 들어가야 한다.
 

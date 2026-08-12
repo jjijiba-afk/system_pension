@@ -1268,6 +1268,32 @@ def _template_make(request: dict) -> dict[str, Any]:
     return {"path": str(path), "file": name}
 
 
+def _roster_export(request: dict) -> dict[str, Any]:
+    """올린 명부를 지금 양식으로 옮겨 내려받을 파일을 만든다.
+
+    받아 온 명부는 열 순서도 머리글도 회사마다 다르다. 그것을 매 결산마다
+    눈으로 맞추는 대신, 한 번 올린 것을 우리 양식으로 되받아 다음 해에 그것을
+    채워 보내면 어긋날 자리가 없다.
+    """
+    from .rosterexport import relayout_roster
+
+    source = Path(request["path"])
+    folder = Path(request.get("work", "/work")) / "양식"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    stem = text(request.get("name")) or source.stem
+    name = f"{stem}_표준양식.xlsx"
+    path = folder / name
+    report = relayout_roster(source, path)
+    return {
+        "path": str(path), "file": name, "summary": report.summary(),
+        "active": report.active.rows, "retired": report.retired.rows,
+        # 알아보지 못해 오른쪽에 그대로 붙인 열. 회사가 쓰는 열이 우리 자리로
+        # 안 들어갔다는 뜻이므로, 숨기지 말고 이름 그대로 보여 준다.
+        "carried": report.active.carried + report.retired.carried,
+    }
+
+
 _OPS = {
     "meta": _meta,
     "state_new": _state_new,
@@ -1293,6 +1319,7 @@ _OPS = {
     "gen_case_register": _gen_case_register,
     "roster_scan": _roster_scan,
     "roster_groups": _roster_groups,
+    "roster_export": _roster_export,
     "general_info": _general_info,
     "run": _run,
     "run_save": _run_save,
