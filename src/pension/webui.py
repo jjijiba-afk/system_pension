@@ -391,7 +391,8 @@ def _roster_columns(path: Path) -> dict[str, Any]:
     from .workbook import find_sheet, open_workbook
 
     empty: dict[str, Any] = {
-        "rules": [], "blank": 0, "extra_pay": 0,
+        "rules": [], "longterm_rules": [], "job_groups": [],
+        "blank": 0, "extra_pay": 0,
         "rule_column": "", "rule_header": "", "headers": [],
     }
     book = open_workbook(path)
@@ -419,9 +420,9 @@ def _roster_columns(path: Path) -> dict[str, Any]:
                     return found
             return 0
 
-        rule_columns = [c for c in (column_of("severance_benefit"),
-                                    column_of("longterm_benefit")) if c]
         severance = column_of("severance_benefit")
+        longterm = column_of("longterm_benefit")
+        job_column = column_of("job_group")
         extra_column = column_of("extra_pay_base_wage")
         anchor = column_of("employee_id") or column_of("birth_date")
         where = {
@@ -430,18 +431,20 @@ def _roster_columns(path: Path) -> dict[str, Any]:
                             if severance else ""),
             "headers": written,
         }
-        if not rule_columns and not extra_column:
-            return {**empty, **where}
-
         rules: list[str] = []
+        longterm_rules: list[str] = []
+        job_groups: list[str] = []
         blank = extra_pay = 0
         for row in range(find_data_start(sheet, header_row), sheet.max_row + 1):
             if anchor and not text(sheet.cell(row, anchor).value):
                 continue                       # 사람이 없는 줄
-            for column in rule_columns:
+            for column, into in ((severance, rules), (longterm, longterm_rules),
+                                 (job_column, job_groups)):
+                if not column:
+                    continue
                 value = text(sheet.cell(row, column).value)
-                if value and value not in rules:
-                    rules.append(value)
+                if value and value not in into:
+                    into.append(value)
             if severance and not text(sheet.cell(row, severance).value):
                 blank += 1
             if extra_column:
@@ -450,26 +453,31 @@ def _roster_columns(path: Path) -> dict[str, Any]:
                         extra_pay += 1
                 except (TypeError, ValueError):
                     pass
-        return {"rules": rules, "blank": blank, "extra_pay": extra_pay, **where}
+        return {"rules": rules, "longterm_rules": longterm_rules,
+                "job_groups": job_groups,
+                "blank": blank, "extra_pay": extra_pay, **where}
     finally:
         book.close()
 
 
 def _roster_groups(request: dict) -> dict[str, Any]:
-    """가정 표의 열 머리글이 될 이름들. '명부에서 불러오기' 용.
+    """'명부에서 불러오기' — 직군 축과 규정 축을 **따로** 돌려준다.
 
-    두 곳에서 모은다.
+    직군과 지급규정은 별개의 축이다(경우의수 곱). 직군은 퇴직률·승급률·
+    사망률·정년을 정하고, 규정(재직자명부 I열)은 퇴직급여 지급률을 정한다.
+    장기급여는 장기급여 지급률 규정 열을 따른다(보통 직군 단위).
 
-    ``기본정보`` 의 변환 직군명
-        직군 단위로 지급률이 갈리는 회사.
+    ``groups`` (직군 축)
+        [기본정보] 의 산출 직군. 없으면 재직자명부 직군 열에 적혀 온 값.
+        퇴직률·승급률 표의 열 머리글과 [지급규정] 의 줄이 된다.
 
-    ``재직자명부`` 의 **규정명 칸**
-        한 직군 안에서도 사람마다 다른 규정이 걸리는 회사. 명부에 이름을
-        적어 놓고 화면에 그 열이 없으면, 적어 놓은 규정에 지급률을 넣을
-        자리가 없다 — 이름은 있는데 값이 없으니 법정 퇴직금으로 떨어진다.
+    ``scale_rules`` (규정 축)
+        재직자명부 규정명 칸(I열)에 적혀 온 이름들. [지급률] 표의 추가 열이
+        된다 — 화면에 그 열이 없으면 적어 놓은 규정에 지급률을 넣을 자리가
+        없어 법정 퇴직금으로 떨어진다.
 
-    규정명이 하나라도 적혀 있으면 **규정 단위** 로 간다. 직군 열과 섞어 두면
-    같은 사람에게 두 열이 걸린 것처럼 보여 어느 쪽이 쓰였는지 알기 어렵다.
+    ``longterm_rules``
+        장기급여 지급률 규정 열의 이름들. [장기급여지급률] 의 추가 열이 된다.
     """
     from .config import read_config
     from .workbook import open_workbook
@@ -477,34 +485,43 @@ def _roster_groups(request: dict) -> dict[str, Any]:
     path = Path(request["path"])
     book = open_workbook(path)
     try:
-        config = read_config(book)
+        # [기본정보] 도 작성기준일도 없는 명부에서 read_config 는 기준일을 못
+        # 정해 죽는다. 여기서는 직군 이름만 있으면 되므로 조용히 비워 두고
+        # 명부 직군 열로 넘어간다.
+        try:
+            config = read_config(book)
+            names = list(dict.fromkeys(
+                r.mapped_name for r in config.job_group_rules if r.mapped_name))
+        except Exception:
+            names = []
     finally:
         book.close()
-    names = list(dict.fromkeys(
-        r.mapped_name for r in config.job_group_rules if r.mapped_name))
 
     try:
         found = _roster_columns(path)
     except Exception:
-        found = {"rules": [], "blank": 0, "extra_pay": 0,
+        found = {"rules": [], "longterm_rules": [], "job_groups": [],
+                 "blank": 0, "extra_pay": 0,
                  "rule_column": "", "rule_header": "", "headers": []}
-    rules = found["rules"]
 
-    columns = list(rules) if rules else list(names)
+    groups = names or found["job_groups"]
+    scale_rules = [r for r in found["rules"] if r not in groups]
 
     # 명부에 추가지급 기본급이 적힌 사람이 있으면 그 몫을 걸 자리가 있어야
     # 한다. 금액은 사람마다 명부에 있지만 **얼마를 어떻게 얹을지** 는 규정이
-    # 정하므로, 열 하나를 만들어 두고 [퇴직사유] 에서 가산 규정으로 고르게 한다.
-    if found["extra_pay"] and EXTRA_PAY_COLUMN not in columns:
-        columns.append(EXTRA_PAY_COLUMN)
+    # 정하므로, 지급률 열 하나를 만들어 두고 [퇴직사유] 의 가산 규정으로
+    # 고르게 한다.
+    if found["extra_pay"] and EXTRA_PAY_COLUMN not in scale_rules + groups:
+        scale_rules.append(EXTRA_PAY_COLUMN)
 
     return {
-        "groups": columns,
+        "groups": groups,
         "job_groups": names,
-        "rules": rules,
-        # 규정 단위로 갔는데 규정명이 빈 사람은 직군으로 되돌아가 지급률을
-        # 찾는다 — 그 열이 없으니 법정 퇴직금으로 떨어진다. 몇 명인지 알린다.
-        "blank_rule": found["blank"] if rules else 0,
+        "rules": found["rules"],
+        "scale_rules": scale_rules,
+        "longterm_rules": [r for r in found["longterm_rules"] if r not in groups],
+        # 규정명이 빈 사람은 직군으로 되돌아가 지급률을 찾는다. 몇 명인지 알린다.
+        "blank_rule": found["blank"] if found["rules"] else 0,
         "extra_pay": found["extra_pay"],
         "extra_pay_column": EXTRA_PAY_COLUMN,
         # 규정명 칸을 어디서 읽었는지. 못 찾았으면 빈 문자열이고, 그때는

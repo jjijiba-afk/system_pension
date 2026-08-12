@@ -973,9 +973,7 @@ let mapSummary = null;
 function buildMapTab(page) {
   const toolbar = el("div", { class: "toolbar" },
     el("button", { class: "small", type: "button", onclick: scanRoster },
-       "명부에서 직군 읽어오기"),
-    el("button", { class: "small", type: "button", onclick: applySuggestions },
-       "제안대로 채우기"));
+       "명부에서 직군 읽어오기"));
   mapSummary = el("div", { class: "hint" }, "명부를 읽으면 조합이 나타납니다. " +
     "(명부 파일은 [산출] 탭에서 고른 것을 씁니다)");
   mapTable = el("tbody");
@@ -983,32 +981,30 @@ function buildMapTab(page) {
   table.append(mapTable);
   page.append(
     el("div", { class: "hint" },
-       "명부의 직급·직군을 산출에 쓸 묶음으로 배정합니다. 묶음 이름은 위 " +
-       "'직군별 규정' 칸에서 바꾸세요. 같은 '촉탁사원'이라도 회사에 따라 계약직일 " +
-       "수도, 임원일 수도 있으니 제안을 그대로 믿지 말고 규정을 확인하세요."),
+       "명부 직군이 곧 산출 직군입니다 — 퇴직률·승급률·사망률·정년이 이 " +
+       "단위로 걸립니다. 지급률 규정(재직자명부 I열)은 별개의 축이라 여기와 " +
+       "무관하게 [지급률] 열로 갑니다. 임원 판정만 여기서 확인하세요."),
     toolbar, mapSummary, el("div", { class: "scroll-x" }, table));
 }
 
 function renderMap() {
-  const headers = ["명부 직군", "임직원구분", "임원 판정", "재직", "퇴직", "→ 변환 직군"];
+  // 변환(묶음 배정) 열은 없앴다 — 명부 직군이 곧 산출 직군이다. 직군과
+  // 지급규정이 별개의 축이 되면서, 직군을 합성해 만들 이유가 사라졌다.
+  const headers = ["명부 직군", "임직원구분", "임원 판정", "재직", "퇴직"];
   mapTable.replaceChildren(el("tr", {}, ...headers.map((h) => el("th", {}, h))));
   for (const row of mapData) {
-    if (!groups.includes(row.target)) row.target = row.suggest || groups[0] || "";
-    const select = makeSelect(groups, row.target);
-    select.addEventListener("change", () => { row.target = select.value; });
+    row.target = row.source;
     mapTable.append(el("tr", {},
       el("td", { class: "name" }, row.source || "(빈 값)"),
       el("td", { class: "name" }, row.kind || "(빈 값)"),
       el("td", { class: "name" }, row.normalized || ""),
       el("td", { class: "num" }, String(row.active ?? "")),
-      el("td", { class: "num" }, String(row.retired ?? "")),
-      el("td", {}, select)));
+      el("td", { class: "num" }, String(row.retired ?? ""))));
   }
   if (mapData.length) {
-    const used = [...new Set(mapData.map((r) => r.target))];
     const people = mapData.reduce((n, r) => n + (r.active || 0) + (r.retired || 0), 0);
     mapSummary.textContent =
-      `조합 ${mapData.length}개 · 인원 ${people.toLocaleString()}명 → 묶음 ${used.length}개 (${used.join(", ")})`;
+      `조합 ${mapData.length}개 · 인원 ${people.toLocaleString()}명`;
   }
 }
 
@@ -1032,11 +1028,6 @@ async function scanRoster() {
   }
 }
 
-function applySuggestions() {
-  for (const row of mapData) row.target = row.suggest || row.target;
-  renderMap();
-}
-
 // ── state 모으기 / 되그리기 ──
 function collectState() {
   const grids = {};
@@ -1055,7 +1046,7 @@ function collectState() {
     benefit_rules: ruleValues(),
     longterm_rules: longtermValues(),
     exit_causes: causeValues(),
-    mapping: mapData.map((r) => [r.source, r.kind, r.target]),
+    mapping: mapData.map((r) => [r.source, r.kind, r.source]),
   };
 }
 
@@ -1134,34 +1125,50 @@ $("ed-groups-roster").addEventListener("click", async () => {
     const path = await rosterIntoFS();
     const result = py("roster_groups", { path });
     if (!result.groups.length) {
-      alert("명부에서 직군도 규정명도 찾지 못했습니다.\n\n"
-            + "[기본정보] 의 직군 규칙, 또는 재직자명부의 [규정명] 칸을 확인하세요.");
+      alert("명부에서 직군을 찾지 못했습니다.\n\n"
+            + "[기본정보] 의 직군 규칙, 또는 재직자명부의 [직군] 칸을 확인하세요.");
       return;
     }
+    // 직군과 지급규정은 별개의 축이다. 직군은 퇴직률·승급률·정년(지급규정)
+    // 의 줄이 되고, 명부 I열의 규정명은 [지급률] 표의 열이 된다 — 같은
+    // 목록에 섞으면 규정 이름으로 퇴직률을 묻는 꼴이 된다.
     applyGroups(result.groups);
-    // **어느 칸에서 읽었는지** 를 먼저 말한다. 규정명 칸을 못 찾으면 화면은
-    // 조용히 직군으로 물러서는데, 그러면 사람마다 다른 규정이 통째로 뭉개진
-    // 채로 산출이 끝난다 — 오류 없이 그럴듯한 숫자가 나오는 쪽이다.
-    const rules = result.rules || [];
-    $("ed-status").textContent = rules.length
-      ? `재직자명부 ${result.rule_column}열 [${result.rule_header}] 에서 `
-        + `규정 ${rules.length}개를 가져왔습니다 — ${rules.join(", ")}. `
-        + "규정마다 지급률을 넣으세요."
-      : (result.job_groups?.length
-         ? `명부에 규정명 칸이 없어 직군 ${result.job_groups.length}개로 `
-           + "가져왔습니다."
-         : "");
+    const state = collectState();
+    const addExtras = (sheet, names) => {
+      const grid = state.grids[sheet];
+      const have = new Set([...state.job_groups, ...(grid.extra || [])]);
+      for (const name of names || []) {
+        if (have.has(name)) continue;
+        grid.extra = [...(grid.extra || []), name];
+        grid.rows = grid.rows.map((row) => [...row, ""]);
+        have.add(name);
+      }
+    };
+    addExtras(benefitSheet(), result.scale_rules);
+    addExtras("장기급여지급률", result.longterm_rules);
+    renderState(state);
+    saveEditorLocal();
+
+    const from = [`직군 ${result.groups.length}개 (${result.groups.join(", ")})`];
+    if (result.scale_rules?.length) {
+      from.push(`지급률 규정 ${result.scale_rules.length}개`
+                + (result.rule_column
+                   ? ` — ${result.rule_column}열 [${result.rule_header}]`
+                   : "") + ` (${result.scale_rules.join(", ")})`);
+    }
+    if (result.longterm_rules?.length) {
+      from.push(`장기급여 규정 ${result.longterm_rules.length}개`);
+    }
+    $("ed-status").textContent = "명부에서 " + from.join(" · ")
+      + " 을(를) 가져왔습니다. 규정 열마다 지급률을 넣으세요.";
 
     // 명부에 적혀 왔지만 규정에 옮겨 적기 전에는 산출에 들어가지 않는 것들.
     // 여기서 말해 주지 않으면 '적었는데 왜 안 들어갔나' 로 끝난다.
     const notes = [];
-    if (!rules.length) {
-      notes.push("재직자명부에서 규정명 칸을 찾지 못해 직군으로 가져왔습니다.\n"
-                 + "사람마다 다른 규정이 걸리는 회사라면, 그 칸의 머리글이 "
+    if (result.rules?.length && !result.rule_column) {
+      notes.push("재직자명부에서 규정명 칸을 찾지 못했습니다. 그 칸의 머리글이 "
                  + "아래에 있는지 확인하세요.\n\n"
-                 + (result.headers?.length
-                    ? result.headers.join("\n")
-                    : "(머리글 행을 찾지 못했습니다 — 명부 3행을 확인하세요)"));
+                 + (result.headers?.length ? result.headers.join("\n") : ""));
     }
     if (result.blank_rule) {
       notes.push(`규정명이 빈 줄이 ${result.blank_rule}명 있습니다. `

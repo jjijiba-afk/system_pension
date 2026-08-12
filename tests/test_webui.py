@@ -778,8 +778,10 @@ class TestRosterOps:
         executive = next(f for f in found if f["kind"] == "임원")
         assert executive["suggest"] == "임원"
 
-        groups = call("roster_groups", path=str(roster_path))["groups"]
-        assert groups == ["2임원", "1정규직", "3계약직"]
+        result = call("roster_groups", path=str(roster_path))
+        # 직군 축 — [기본정보] 의 산출 직군 그대로.
+        assert result["groups"] == ["2임원", "1정규직", "3계약직"]
+        assert result["scale_rules"] == []
 
     def _named_rule_column(self, tmp_path, header: str, values: list[str]) -> Path:
         """규정 칸의 머리글을 ``header`` 로 바꾼 재직자명부."""
@@ -806,12 +808,15 @@ class TestRosterOps:
         못 찾으면 조용히 직군으로 물러서고, 사람마다 다른 규정이 통째로
         뭉개진 채 산출이 끝난다. 오류 없이 그럴듯한 숫자가 나오는 쪽이라
         머리글을 넉넉히 알아봐야 한다.
+
+        직군과 지급규정은 별개의 축이다 — 규정명은 ``scale_rules`` 로 오고,
+        ``groups`` (직군 축)에는 섞이지 않는다.
         """
         path = self._named_rule_column(tmp_path, "지급규정", ["임원규정", "직원규정"])
 
         result = call("roster_groups", path=str(path))
-        assert result["rules"] == ["임원규정", "직원규정"]
-        assert result["groups"][:2] == ["임원규정", "직원규정"]
+        assert result["scale_rules"] == ["임원규정", "직원규정"]
+        assert "임원규정" not in result["groups"]
 
     def test_the_scan_says_which_column_it_read(self, tmp_path) -> None:
         """어느 칸을 읽었는지 말해 주지 않으면 잘못 읽힌 것을 알 길이 없다."""
@@ -829,6 +834,21 @@ class TestRosterOps:
         result = call("roster_groups", path=str(roster_path))
         assert result["rules"] == []
         assert result["rule_column"] == ""
+
+    def test_without_basics_the_groups_come_from_the_roster_column(
+        self, tmp_path
+    ) -> None:
+        """[기본정보] 직군 규칙이 없으면 명부 직군 열에 적혀 온 값이 직군이다."""
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "명부.xlsx")
+        book = openpyxl.load_workbook(path)
+        del book["기본정보"]
+        book.save(path)
+
+        result = call("roster_groups", path=str(path))
+        # 양식 작성 예시 두 줄의 직군: 정규직·임원.
+        assert result["groups"] == ["정규직", "임원"]
 
 
 class TestRunOp:
