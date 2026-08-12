@@ -186,6 +186,47 @@ def test_an_uploaded_roster_comes_back_in_our_template(page, tmp_path) -> None:
     assert book["재직자명부"].cell(3, 2).value == "사번"
 
 
+def test_payout_rules_show_how_many_people_they_reach(page, tmp_path) -> None:
+    """[지급규정]에 건 직군이 **실제 명부의 몇 사람에게 닿는지** 보여야 한다.
+
+    직군 이름 한 글자가 명부와 다르면 그 규정은 아무에게도 걸리지 않는데,
+    숫자가 안 보이면 산출이 끝날 때까지 알 길이 없다. 0 명이면 눈에 띄어야
+    한다 — 오류 없이 그럴듯한 숫자가 나오는 쪽이라 더 그렇다.
+    """
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+
+    page.set_input_files("#roster", str(roster))
+    page.click("#tab-edit")
+    page.click("#ed-groups-roster")
+    page.wait_for_function(
+        "() => document.querySelector('#ed-status')?.textContent.includes('직군')",
+        timeout=120_000)
+
+    # 양식 작성 예시는 정규직 1명 · 임원 1명.
+    counts = page.evaluate("""() => {
+      const out = {};
+      for (const tr of [...payoutBody.children].slice(1)) {
+        out[tr.dataset.group] = tr.children[1].textContent;
+      }
+      return out;
+    }""")
+    assert counts["정규직"] == "1명", counts
+    assert counts["임원"] == "1명", counts
+
+    # 명부에 없는 이름을 걸면 0 명으로 뜨고, 짝이 안 맞는다고 알려 준다.
+    page.evaluate("() => applyGroups(['정규직', '임원', '없는직군'])")
+    zero = page.evaluate("""() => {
+      const tr = [...payoutBody.children].find((t) => t.dataset.group === '없는직군');
+      return tr.children[1].textContent;
+    }""")
+    assert zero == "0명"
+    # 구획이 접혀 있어도 내용은 채워져 있어야 한다(inner_text 는 숨으면 빈다).
+    assert "없는직군" in page.text_content("#payout-coverage")
+
+
 def test_roster_fills_the_asset_boxes(page, tmp_path) -> None:
     """명부를 고르면 [사외적립자산] 시트의 값이 입력칸에 들어가야 한다.
 

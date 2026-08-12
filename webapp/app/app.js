@@ -243,6 +243,7 @@ let groups = [];            // 현재 직군 묶음
 let gridBodies = {};        // 시트명 → {spec, keySelect, tbody, table}
 let payoutBody = null;      // 지급규정 tbody — 행마다 위젯 참조를 붙인다
 let mapData = [];           // 직군 매핑 행 [{source, kind, normalized, active, retired, target, suggest}]
+let mapScanned = false;     // 명부를 실제로 훑었는지. 복원된 매핑에는 인원이 없다.
 const MIN_ROWS = 8;
 
 /** (명부직군, 임직원구분) 짝을 Map 키로. 이름에 무엇이 들어와도 겹치지 않게 JSON 으로. */
@@ -307,9 +308,14 @@ function buildEditor() {
 
   // 입력이 바뀌면 잠시 뒤 브라우저에 임시 저장한다. 탭을 닫아도 살아 있도록.
   // 칸을 빠져나가거나(change) 목록을 고르면 기다리지 않고 바로 저장한다.
+  // 세 가지 모두 **디바운스** 한다. 종전에는 change·focusout 에서 즉시
+  // 저장했는데, 그 한 번이 표 전체를 훑어 state 를 모으고 JSON 으로 만들어
+  // localStorage 에 **동기로** 쓴다. 칸을 옮길 때마다 그 일이 벌어지니 표가
+  // 커질수록(직군 6 × 규정 6 열) 타자가 밀렸다. 잃을 걱정은 없다 — 탭을
+  // 옮기거나 앱이 배경으로 가면 아래에서 확정 저장한다.
   $("page-edit").addEventListener("input", scheduleEditorSave);
-  $("page-edit").addEventListener("change", flushEditor);
-  $("page-edit").addEventListener("focusout", flushEditor);
+  $("page-edit").addEventListener("change", scheduleEditorSave);
+  $("page-edit").addEventListener("focusout", scheduleEditorSave);
 }
 
 /** 패널 이름 → 그리는 함수. 파이썬이 이름만 넘기고 그리기는 여기서 한다. */
@@ -335,8 +341,11 @@ function flushEditor() {
 function saveEditorLocal() {
   if (!META || !payoutBody) return;   // 화면이 아직 만들어지기 전
   try {
-    localStorage.setItem(EDITOR_STORE, JSON.stringify(collectState()));
-    syncEditorHint();
+    const state = collectState();
+    localStorage.setItem(EDITOR_STORE, JSON.stringify(state));
+    // 힌트가 필요한 것은 할인율 줄 수뿐이다. 방금 모은 state 에 이미 들어
+    // 있으므로 표를 다시 훑지 않는다.
+    syncEditorHint(state);
   } catch { /* 저장 공간 부족은 치명적이지 않다 */ }
 }
 
@@ -519,6 +528,8 @@ function renderGrid(sheet, key, rows, extra, columnValues) {
       ...[keyLabel, ...columns].map((_, c) =>
         el("td", {}, el("input", { type: "text", value: (rows[r] || [])[c] || "" })))));
   }
+  // 되그린 뒤 한 번만. 세부줄 펼침과 배지가 값과 어긋나지 않게 한다.
+  refreshGridBadges(sheet);
 }
 
 function relabelGrid(sheet) {
@@ -526,21 +537,30 @@ function relabelGrid(sheet) {
   grid.tbody.querySelector("th").textContent = grid.keySelect.value;
 }
 
+/** 표의 값만 읽는다. **부수효과 없음** — 저장 경로에서 자주 불린다. */
 function gridRows(sheet) {
   const rows = [];
   for (const tr of gridBodies[sheet].tbody.querySelectorAll("tr[data-row]")) {
     const values = [...tr.querySelectorAll("input")].map((i) => i.value.trim());
     if (values.some(Boolean)) rows.push(values);
   }
-  syncDetailRows(gridBodies[sheet]);
-  const badge = gridBodies[sheet].countEl;
-  if (badge) badge.textContent = rows.length ? `${rows.length}줄` : "비어 있음";
   return rows;
+}
+
+/** 배지 숫자와 세부줄 펼침을 지금 값에 맞춘다. 표를 한 번 더 훑으므로
+ *  되그린 뒤나 사람이 무엇을 누른 뒤에만 부른다. */
+function refreshGridBadges(sheet) {
+  const grid = gridBodies[sheet];
+  syncDetailRows(grid);
+  if (grid.countEl) {
+    const n = gridRows(sheet).length;
+    grid.countEl.textContent = n ? `${n}줄` : "비어 있음";
+  }
 }
 
 /** 접힌 구획의 제목 옆 숫자를 지금 값으로 맞춘다. */
 function refreshSectionCounts() {
-  for (const sheet of Object.keys(gridBodies)) gridRows(sheet);
+  for (const sheet of Object.keys(gridBodies)) refreshGridBadges(sheet);
 }
 
 function addGridRow(sheet) {
@@ -548,6 +568,7 @@ function addGridRow(sheet) {
   const width = grid.tbody.firstChild.children.length;
   grid.tbody.append(el("tr", { "data-row": "" },
     ...Array.from({ length: width }, () => el("td", {}, el("input", { type: "text" })))));
+  refreshGridBadges(sheet);
 }
 
 function compactGrid(sheet) {
@@ -561,6 +582,7 @@ function buildPayoutTab(page) {
     el("button", { class: "small", type: "button", onclick: loadGeneralInfo },
        "명부 일반사항에서 규정 읽어오기"),
     el("span", { class: "hint", id: "payout-evidence" }));
+  const coverage = el("div", { class: "hint", id: "payout-coverage" });
   const table = el("table", { class: "grid" });
   payoutBody = el("tbody");
   table.append(payoutBody);
@@ -569,14 +591,14 @@ function buildPayoutTab(page) {
        "자료요청서 [일반사항] 6번(퇴직금 지급규정)을 여기에 옮깁니다. " +
        "Base-up·승급률·퇴직률·사망률을 '미반영'으로 두면 그 직군에서 해당 요율을 0으로 봅니다 " +
        "— 임원을 정년까지 근무한다고 보는 경우 등."),
-    toolbar, el("div", { class: "scroll-x" }, table));
+    toolbar, coverage, el("div", { class: "scroll-x" }, table));
 }
 
 function renderPayout(payout) {
   // 임원은 그 자체가 직군 줄이라 정년을 직원/임원으로 나눌 이유가 없다.
   // 파일 서식과 엔진은 그대로 두고(옛 파일이 그대로 읽혀야 한다) 화면만
   // 한 칸으로 합친다 — 저장할 때 임원 정년에도 같은 값을 넣는다.
-  const headers = ["직군", "산출 제외", "가입자격(년)", "정년",
+  const headers = ["직군", "명부 인원", "산출 제외", "가입자격(년)", "정년",
     "가산연령", "근속 산정", "단수 처리", "지급액 반올림", "할당",
     "Base-up", "승급률", "퇴직률", "사망률"];
   payoutBody.replaceChildren(el("tr", {}, ...headers.map((h) => el("th", {}, h))));
@@ -598,13 +620,54 @@ function renderPayout(payout) {
       mortality: makeSelect(META.apply_choices, item.mortality || "반영"),
     };
     row.excluded.checked = Boolean(item.excluded);
+    // 이 직군 이름이 명부의 몇 사람에게 실제로 닿는지. 0 이면 규정을 아무리
+    // 잘 채워도 산출에 쓰이지 않는다 — 이름이 틀린 것이다.
+    const headcount = rosterHeadcount(group);
+    const countCell = el("td", { class: "num" },
+      headcount === null ? "—" : `${headcount.toLocaleString()}명`);
+    if (headcount === 0) {
+      countCell.style.color = "#B42318";
+      countCell.title = "명부에 이 이름의 직군이 없습니다. 규정이 아무에게도 걸리지 않습니다.";
+    }
     const tr = el("tr", {},
       el("td", { class: "name" }, group),
+      countCell,
       ...Object.values(row).map((widget) => el("td", {}, widget)));
     tr.dataset.group = group;
     tr.widgets = row;
     payoutBody.append(tr);
   }
+  const note = $("payout-coverage");
+  if (note) {
+    note.textContent = payoutCoverage();
+    note.style.color = note.textContent ? "#B42318" : "";
+  }
+}
+
+/** 명부에서 이 직군 이름에 걸리는 재직자 수. 아직 안 훑었으면 ``null``. */
+function rosterHeadcount(group) {
+  if (!mapScanned || !mapData.length) return null;
+  return mapData
+    .filter((r) => (r.source || "") === group)
+    .reduce((n, r) => n + (r.active || 0), 0);
+}
+
+/** 규정과 명부가 서로 닿는지. 한쪽에만 있는 이름을 말해 준다. */
+function payoutCoverage() {
+  if (!mapScanned || !mapData.length) return "";
+  const inRoster = [...new Set(mapData.map((r) => r.source || ""))].filter(Boolean);
+  const orphanRules = groups.filter((g) => !inRoster.includes(g));
+  const orphanPeople = mapData.filter((r) => !groups.includes(r.source || ""));
+  const notes = [];
+  if (orphanRules.length) {
+    notes.push(`규정만 있고 명부에 없는 직군: ${orphanRules.join(", ")}`);
+  }
+  if (orphanPeople.length) {
+    const n = orphanPeople.reduce((a, r) => a + (r.active || 0), 0);
+    notes.push(`명부에만 있는 직군: ${[...new Set(orphanPeople.map((r) => r.source))]
+      .join(", ")} (${n.toLocaleString()}명) — 이 사람들은 첫 직군 규정으로 산출됩니다`);
+  }
+  return notes.join(" · ");
 }
 
 function payoutValues() {
@@ -982,7 +1045,7 @@ function buildMapTab(page) {
   page.append(
     el("div", { class: "hint" },
        "명부 직군이 곧 산출 직군입니다 — 퇴직률·승급률·사망률·정년이 이 " +
-       "단위로 걸립니다. 지급률 규정(재직자명부 I열)은 별개의 축이라 여기와 " +
+       "단위로 걸립니다. 지급률 규정(재직자명부 [규정명] 칸)은 별개의 축이라 " +
        "무관하게 [지급률] 열로 갑니다. 임원 판정만 여기서 확인하세요."),
     toolbar, mapSummary, el("div", { class: "scroll-x" }, table));
 }
@@ -1018,7 +1081,9 @@ async function scanRoster() {
       active: f.active, retired: f.retired, suggest: f.suggest,
       target: previous.get(pairKey(f.source, f.kind)) || f.suggest,
     }));
+    mapScanned = true;
     renderMap();
+    renderPayout(payoutValues());   // 직군마다 몇 명이 걸리는지 숫자를 채운다
     // 인원을 이제 알게 됐으니 표준률 규모를 다시 제안한다. 손으로 고른
     // 뒤라면 건드리지 않는다.
     if (!$("ed-size").dataset.touched) $("ed-size").value = suggestedSize();
@@ -1074,7 +1139,6 @@ function renderState(state) {
     renderGrid(spec.sheet, item.key || spec.key, item.rows || [], item.extra || [],
                state[PANEL_SOURCE[spec.column_panel]] || {});
   }
-  renderPayout(state.payout || {});
   renderCauses(state.exit_causes || []);
   const scanned = new Map(mapData.map((r) => [pairKey(r.source, r.kind), r]));
   mapData = (state.mapping || []).map(([source, kind, target]) => {
@@ -1084,6 +1148,8 @@ function renderState(state) {
              retired: seen?.retired || 0, suggest: seen?.suggest || target };
   });
   renderMap();
+  // 인원을 알고 난 뒤에 그린다 — 직군마다 몇 사람이 걸리는지가 표에 뜬다.
+  renderPayout(state.payout || {});
   refreshSectionCounts();
   syncEditorHint();
 }
@@ -1130,9 +1196,21 @@ $("ed-groups-roster").addEventListener("click", async () => {
       return;
     }
     // 직군과 지급규정은 별개의 축이다. 직군은 퇴직률·승급률·정년(지급규정)
-    // 의 줄이 되고, 명부 I열의 규정명은 [지급률] 표의 열이 된다 — 같은
+    // 의 줄이 되고, 명부 [규정명] 칸의 값은 [지급률] 표의 열이 된다 — 같은
     // 목록에 섞으면 규정 이름으로 퇴직률을 묻는 꼴이 된다.
     applyGroups(result.groups);
+    // 인원도 함께 훑어 둔다. 직군을 걸어 놓고 정작 그 이름의 사람이 명부에
+    // 없으면 그 규정은 아무에게도 닿지 않는데, 숫자가 안 보이면 알 길이 없다.
+    try {
+      const { found } = py("roster_scan", { path, groups: result.groups });
+      mapData = found.map((f) => ({
+        source: f.source, kind: f.kind, normalized: f.normalized,
+        active: f.active, retired: f.retired, suggest: f.suggest,
+        target: f.source,
+      }));
+      mapScanned = true;
+      renderMap();
+    } catch { /* 인원은 못 세도 규정은 걸린다 */ }
     const state = collectState();
     const addExtras = (sheet, names) => {
       const grid = state.grids[sheet];
@@ -1340,8 +1418,10 @@ $("ed-save").addEventListener("click", () => {
   }
 });
 
-function syncEditorHint() {
-  const rows = gridBodies["할인율"] ? gridRows("할인율") : [];
+function syncEditorHint(state) {
+  const rows = state
+    ? (state.grids?.["할인율"]?.rows || [])
+    : (gridBodies["할인율"] ? gridRows("할인율") : []);
   const hint = $("editor-state-hint");
   if (rows.length) {
     hint.textContent = `— 직군 ${groups.length}개 · 할인율 ${rows.length}행 입력됨`;
