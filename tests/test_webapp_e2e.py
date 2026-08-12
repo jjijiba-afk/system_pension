@@ -1025,6 +1025,40 @@ def test_it_runs_on_a_galaxy_phone(browser, app_url, tmp_path) -> None:
     galaxy.close()
 
 
+def test_no_phone_width_pushes_the_screen_sideways(browser, app_url) -> None:
+    """갤럭시 기종별 폭에서 화면이 좌우로 밀리지 않아야 한다.
+
+    레이아웃을 정하는 것은 물리 화소가 아니라 **CSS 폭** 이다. S23 은
+    1080×2340 이지만 배율이 3 이라 브라우저가 보는 폭은 360 이고, Ultra 는
+    412 다. 삼성 기기는 [디스플레이 크기] 를 키우면 이 폭이 더 줄어 320 까지
+    내려간다 — 눈이 어두워 글씨를 키운 사람이 곧 가장 좁은 화면을 쓴다.
+    """
+    for width, label in (
+        (320, "화면을 크게 설정한 S23"),
+        (360, "S23 · S24 · S25 기본"),
+        (384, "S23+ · S24+"),
+        (412, "S23 Ultra · S24 Ultra"),
+    ):
+        context = browser.new_context(
+            viewport={"width": width, "height": 780},
+            is_mobile=True, has_touch=True)
+        page = context.new_page()
+        page.goto(app_url)
+        dismiss_intro(page)
+        page.wait_for_selector("#run:not([disabled])", timeout=180_000)
+
+        for tab in ("tab-calc", "tab-edit", "tab-dash", "tab-report",
+                    "tab-member", "tab-runs", "tab-lib"):
+            page.click(f"#{tab}")
+            over = page.evaluate(
+                "document.documentElement.scrollWidth"
+                " - document.documentElement.clientWidth")
+            assert over <= 1, f"{label}({width}px) 의 {tab} 이 {over}px 밀린다"
+
+        page.close()
+        context.close()
+
+
 def test_the_home_screen_icon_fits_android(page) -> None:
     """안드로이드 홈 화면 아이콘이 흰 판에 얹히거나 잘리지 않아야 한다.
 
