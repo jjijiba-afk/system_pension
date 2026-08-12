@@ -656,30 +656,32 @@ def value_member(
         )
         withdrawal = min(max(withdrawal, 0.0), 1.0)
 
-        is_final = t == years
-        if is_final:
-            # 정년 도달자는 전원 퇴직한다.
-            timing = float(t)
-            exits = ((CAUSE_NORMAL, survival),)
-        else:
-            timing = t - 0.5
-            # 두 탈퇴원인을 갈라 놓는다. 사유별로 지급률이 다르면 뭉뚱그린
-            # ``1-(1-w)(1-q)`` 로는 어느 규정을 적용할지 정할 수 없다.
-            # 연중 균등발생을 가정하면 두 몫의 합은 원래 확률 그대로다.
-            exits = (
-                (CAUSE_VOLUNTARY, survival * withdrawal * (1.0 - mortality / 2.0)),
-                (CAUSE_DEATH, survival * mortality * (1.0 - withdrawal / 2.0)),
-            )
-        total_service = service_at(timing)
+        # 중도·사망은 연중에 일어난다고 보아 그 해 한가운데에 둔다. 두 원인을
+        # 갈라 놓는 것은, 사유별로 지급률이 다르면 뭉뚱그린 ``1-(1-w)(1-q)``
+        # 로는 어느 규정을 적용할지 정할 수 없기 때문이다. 연중 균등발생을
+        # 가정하면 두 몫의 합은 원래 확률 그대로다.
+        exits = [
+            (CAUSE_VOLUNTARY, t - 0.5,
+             survival * withdrawal * (1.0 - mortality / 2.0)),
+            (CAUSE_DEATH, t - 0.5,
+             survival * mortality * (1.0 - withdrawal / 2.0)),
+        ]
+        if t == years:
+            # 마지막 해라고 중도퇴직·사망이 멈추는 것이 아니다. 그 해를 넘긴
+            # 사람만 정년을 맞는다. 마지막 해를 통째로 정년으로 두면 정년
+            # 지급률이 더 높은 회사에서 그만큼 채무가 부풀고, 마지막 해의
+            # 중도퇴직 급부가 통째로 사라진다.
+            exits.append((CAUSE_NORMAL, float(t),
+                          survival * (1.0 - withdrawal) * (1.0 - mortality)))
 
-        # 퇴직 시점의 연령·근속으로 평가한다. 정년 임박자 감액 같은 규정이
-        # 기준일이 아니라 실제 퇴직 시점을 보고 판단해야 하기 때문이다.
-        exit_age = member.age + timing
-        discount = assumptions.discount.discount_factor(timing)
-
-        for cause_name, exit_probability in exits:
+        for cause_name, timing, exit_probability in exits:
             if exit_probability <= 0.0:
                 continue
+            # 퇴직 시점의 연령·근속으로 평가한다. 정년 임박자 감액 같은 규정이
+            # 기준일이 아니라 실제 퇴직 시점을 보고 판단해야 하기 때문이다.
+            total_service = service_at(timing)
+            exit_age = member.age + timing
+            discount = assumptions.discount.discount_factor(timing)
             attributed, unit = weigh(cause_name, total_service, exit_age, wage)
             benefit = benefit_at(
                 total_service, exit_age, wage, causes.get(rule, cause_name)

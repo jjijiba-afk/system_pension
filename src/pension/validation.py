@@ -493,7 +493,8 @@ def validate_active(
                 contract_years=member.remaining_contract_years,
             )
             member.longterm_nra = longterm_retirement_age(
-                member.age, rule, contract_years=member.remaining_contract_years
+                member.age, rule, contract_years=member.remaining_contract_years,
+                declared_nra=member.declared_longterm_nra,
             )
 
             if (

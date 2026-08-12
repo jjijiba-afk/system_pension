@@ -416,6 +416,7 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.settlement_amount = _number(get("settlement_amount"))
         member.longterm_amount = _number(get("longterm_amount"))
         member.declared_nra = int(_number(get("declared_nra")))
+        member.declared_longterm_nra = int(_number(get("declared_longterm_nra")))
         member.transfer_in_amount = _number(get("transfer_in_amount"))
         member.extra_pay_base_wage = _number(get("extra_pay_base_wage"))
         member.progressive_service = _number(get("progressive_service"))

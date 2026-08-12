@@ -537,3 +537,47 @@ class TestSplitBenefitColumn:
         causes = load_assumptions(tmp_path / "기초율.xlsx").exit_causes
         assert causes.get("정규직", CAUSE_NORMAL).benefit_rule == "정규직·정년"
         assert causes.get("정규직", CAUSE_DEATH).benefit_rule == "정규직·사망"
+
+
+class TestTheFinalYearStillHasMidYearExits:
+    """마지막 해라고 중도퇴직·사망이 멈추지는 않는다.
+
+    정년까지 3년 남은 사람은 0.5·1.5·2.5년에 중도로 나갈 수 있고, 그 해를
+    넘긴 사람만 3.0년에 정년을 맞는다. 마지막 해를 통째로 정년으로 두면
+    2.5년의 급부가 통째로 사라지고, 정년 지급률이 더 높은 회사에서는 그만큼
+    채무가 부푼다.
+    """
+
+    def _trace(self, config, **kwargs):
+        member = make_member(age=54, past_service=24.0, wage=7_856_560, nra=57)
+        assumptions = make_assumptions(
+            discount=0.03, salary=0.02, withdrawal=0.08, mortality=0.0004)
+        trace: list[dict] = []
+        result = value_member(member, config, assumptions, trace=trace, **kwargs)
+        return result, trace
+
+    def test_every_year_has_a_mid_year_exit(self, config) -> None:
+        _result, trace = self._trace(config)
+        assert sorted({row["timing"] for row in trace}) == [0.5, 1.5, 2.5, 3.0]
+
+    def test_the_last_year_pays_all_three_causes(self, config) -> None:
+        _result, trace = self._trace(config)
+        final = {row["cause"] for row in trace if row["t"] == 3}
+        assert final == {CAUSE_VOLUNTARY, CAUSE_DEATH, CAUSE_NORMAL}
+
+    def test_only_the_survivors_reach_the_retirement_age(self, config) -> None:
+        """정년 몫은 마지막 해의 탈퇴를 뺀 나머지다 — 이중으로 세면 안 된다."""
+        _result, trace = self._trace(config)
+        assert sum(row["exit_probability"] for row in trace) == pytest.approx(1.0)
+
+    def test_the_normal_retirement_share_shrank_by_the_last_year_exits(
+        self, config
+    ) -> None:
+        _result, trace = self._trace(config)
+        normal = next(r for r in trace if r["cause"] == CAUSE_NORMAL)
+        leavers = sum(r["exit_probability"] for r in trace if r["t"] == 3
+                      and r["cause"] != CAUSE_NORMAL)
+        assert leavers > 0
+        # 마지막 해 시작 시점의 재직확률에서 그 해 탈퇴자를 뺀 것이 정년 몫이다.
+        assert normal["survival"] == pytest.approx(
+            normal["exit_probability"] + leavers)

@@ -161,7 +161,13 @@ class ActiveMember:
     def has_period(self) -> bool:
         return self.period_start is not None or self.period_end is not None
     declared_nra: int = 0
-    """명부에 개인별로 적어 온 정년연령. 0 이면 직군 규정을 따른다."""
+    """명부에 개인별로 적어 온 퇴직급여 정년연령. 0 이면 직군 규정을 따른다."""
+    declared_longterm_nra: int = 0
+    """명부에 개인별로 적어 온 장기급여 정년연령. 0 이면 직군 규정을 따른다.
+
+    퇴직급여 정년과 다른 회사가 많다 — 임원은 퇴직급여 정년이 55세인데
+    근속포상은 60세까지 받는 식이다. 한 칸으로 뭉뚱그리면 그 차이가 사라진다.
+    """
     extra_pay_base_date: _dt.date | None = None
     """전별금 등 추가지급 기준일."""
     extra_pay_base_wage: float = 0.0

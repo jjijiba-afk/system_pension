@@ -197,15 +197,20 @@ def normal_retirement_age(
 
 
 def longterm_retirement_age(
-    age: int, rule: JobGroupRule, *, contract_years: float = 0.0
+    age: int, rule: JobGroupRule, *, contract_years: float = 0.0,
+    declared_nra: int = 0,
 ) -> int:
     """장기급여 정년연령.
 
     퇴직급여와 달리 임금피크 연령을 보지 않는다. 계약 만료는 근무 자체가 끝나는
     것이라 여기에도 걸린다 — 계약이 끝난 뒤의 근속포상은 받을 수 없다.
+
+    ``declared_nra`` 는 명부의 [장기급여 정년연령] 칸이다. 퇴직급여 정년과
+    다른 회사가 많아(임원 퇴직급여 55세 / 근속포상 60세) 따로 받는다.
     """
     if contract_years > 0:
         return age + max(1, int(math.ceil(contract_years)))
-    if age >= rule.longterm_nra:
+    nra = declared_nra if declared_nra > 0 else rule.longterm_nra
+    if age >= nra:
         return age + rule.over_nra_add_age
-    return rule.longterm_nra
+    return nra
