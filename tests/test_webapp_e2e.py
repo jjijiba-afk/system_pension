@@ -902,7 +902,7 @@ def test_prior_roster_comparison_runs_before_the_valuation(page, tmp_path) -> No
 def test_intro_dialog_points_at_the_library(browser, app_url) -> None:
     """앱을 처음 열면 [자료실] 안내가 뜨고, 끄면 다시 뜨지 않아야 한다.
 
-    받은 명부가 없는 사람은 첫 화면에서 더 갈 곳이 없다. 양식·시험명부·금리표가
+    받은 명부가 없는 사람은 첫 화면에서 더 갈 곳이 없다. 양식·시험 명부·문서가
     이미 들어 있다는 것을 눌러 보기 전에는 알 수 없기 때문이다.
     """
     fresh = browser.new_context()
@@ -911,7 +911,7 @@ def test_intro_dialog_points_at_the_library(browser, app_url) -> None:
 
     page.wait_for_selector("#intro-dialog[open]", timeout=30_000)
     text = page.inner_text("#intro-dialog")
-    for word in ("자료실", "명부 양식", "시험명부", "금리표", "표준률"):
+    for word in ("자료실", "명부 양식", "시험 명부 만들기", "문서", "금리표"):
         assert word in text, f"안내에 '{word}' 가 없다"
 
     # [자료실 열기] 는 그 탭으로 데려가야 한다.
@@ -1298,7 +1298,9 @@ def test_every_template_downloads_from_the_library(page, tmp_path) -> None:
     page.click("#tab-lib")
     page.wait_for_selector("#template-list .lib-line", timeout=30_000)
     buttons = page.locator("#template-list button")
-    assert buttons.count() >= 6
+    # 개수를 박아 두면 양식을 하나 뺄 때마다 여기가 깨진다. 목록이 내주는
+    # 것을 **전부** 받아 보는 것이 이 시험의 뜻이다.
+    assert buttons.count() >= 1
 
     for index in range(buttons.count()):
         with page.expect_download(timeout=120_000) as got:
@@ -1308,3 +1310,34 @@ def test_every_template_downloads_from_the_library(page, tmp_path) -> None:
         saved = tmp_path / made.suggested_filename
         made.save_as(str(saved))
         assert saved.stat().st_size > 4_000, made.suggested_filename
+
+
+def test_the_manuals_download_from_the_library(page, tmp_path) -> None:
+    """사용설명서·계리방법론을 화면에서 받을 수 있어야 한다.
+
+    받는 사람에게 그대로 보낼 파일이다. 화면에서 읽는 것(물음표)과 **같은
+    원본** 이라, 한쪽만 고쳐져 갈라지는 일이 없다.
+    """
+    page.click("#tab-lib")
+    open_section(page, "#lib-docs")
+
+    for name in ("사용설명서.md", "계리방법론.md"):
+        link = page.locator(f'#lib-docs a[download="{name}"]')
+        assert link.count() == 1, name
+        with page.expect_download(timeout=60_000) as got:
+            link.click()
+        made = got.value
+        saved = tmp_path / name
+        made.save_as(str(saved))
+        text = saved.read_text(encoding="utf-8")
+        assert len(text.splitlines()) > 100, name
+        # 주소가 실려 나가면 문서만 돌아다녀도 주소까지 같이 돈다.
+        assert "http" not in text, name
+
+    # 물음표 안의 설명과 같은 문서여야 한다.
+    manual = (tmp_path / "사용설명서.md").read_text(encoding="utf-8")
+    page.click("#help-open")
+    page.wait_for_selector("#help:not([hidden])", timeout=10_000)
+    shown = page.inner_text("#help-body")
+    for heading in ("명부 만들기", "검증 읽는 법", "기억할 것"):
+        assert heading in manual and heading in shown, heading

@@ -1090,20 +1090,12 @@ _TEMPLATES: Final = (
     ("roster", "명부_양식.xlsx",
      "받는 명부 양식. 작성요령·기본정보·퇴직급여규정·사외적립자산과 "
      "재직자·퇴직자명부가 들어 있습니다", "write_roster_template"),
-    ("roster_sample", "시험명부.xlsx",
-     "같은 양식에 난수 자료를 채운 것. 실제 명부 없이 두드려 볼 때",
-     "write_default_roster"),
     ("rates_blank", "기초율_빈양식.xlsx",
-     "산출가정 워크북 빈 양식", "write_template"),
-    ("rates_default", "기초율_기본값.xlsx",
-     "표준률과 기본 가정이 채워진 산출가정 워크북. 여기서 시작하면 빠릅니다",
-     "write_standard_assumptions"),
+     "산출가정 워크북 빈 양식. 표준률은 [산출가정 입력] 에서 불러옵니다",
+     "write_template"),
     ("curve", "금리표_양식.xlsx",
      "등급별 기간구조를 적는 양식. 결산일 곡선을 여기에 옮기면 할인율이 "
      "한 번에 채워집니다", "write_curve_template"),
-    ("standard", "표준률_원표.xlsx",
-     "퇴직률·승급률·사망률 표준률 원표. 사업장 규모별로 나뉘어 있습니다",
-     "write_standard_table"),
 )
 
 

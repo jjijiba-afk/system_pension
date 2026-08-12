@@ -413,6 +413,27 @@ class TestPagesDeploy:
         for word in ("홈 화면에 추가", "브라우저", "보관함"):
             assert word in text, word
 
+    def test_the_help_and_the_download_come_from_one_file(self) -> None:
+        """화면에서 읽는 설명과 받아 가는 파일이 같아야 한다.
+
+        둘을 따로 두면 한쪽만 고쳐진다. 그러면 화면에는 있는 안내가 받아 간
+        파일에는 없고, 받은 사람은 그것이 최신인 줄 안다.
+        """
+        source = build.ROOT / "webapp" / "build.py"
+        text = source.read_text(encoding="utf-8")
+        assert '("사용설명서.md", "웹앱-사용설명서.md")' in text
+        # 물음표(help.html)도 같은 원본을 쓴다.
+        assert 'ROOT / "docs" / "웹앱-사용설명서.md"' in text
+
+    @pytest.mark.skipif(not (ROOT / "webapp/dist/help.html").exists(),
+                        reason="webapp/build.py 를 먼저 실행")
+    def test_the_downloaded_manual_matches_the_source(self) -> None:
+        shipped = ROOT / "webapp/dist/사용설명서.md"
+        assert shipped.exists(), "빌드가 사용설명서를 배포본에 넣지 않았습니다"
+        assert shipped.read_text(encoding="utf-8") == (
+            ROOT / "docs/웹앱-사용설명서.md").read_text(encoding="utf-8")
+        assert (ROOT / "webapp/dist/계리방법론.md").exists()
+
     @pytest.mark.skipif(not (ROOT / "webapp/dist/help.html").exists(),
                         reason="webapp/build.py 를 먼저 실행")
     def test_the_shipped_help_is_the_web_one(self) -> None:

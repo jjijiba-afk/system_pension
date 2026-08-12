@@ -53,11 +53,12 @@
   <ul id="intro-list">
     <li><b>명부 양식</b> — 회사에 그대로 보내면 되는 서식.
       작성요령·기본정보·퇴직급여규정·사외적립자산·재직자명부·퇴직자명부</li>
-    <li><b>시험명부</b> — 같은 양식에 난수 자료를 채운 것. 실제 명부 없이 연습할 때</li>
-    <li><b>기초율 양식·기본값</b> — 산출가정 워크북. 기본값에서 시작하면 빠릅니다</li>
+    <li><b>시험 명부 만들기</b> — 난수 명부를 그 자리에서 만듭니다. 받은 명부가
+      없어도 연습할 수 있습니다</li>
+    <li><b>문서</b> — 사용설명서·계리방법론. 받는 사람에게 그대로 보내도 됩니다</li>
+    <li><b>기초율 빈양식</b> — 산출가정 워크북. 표준률은 화면에서 불러옵니다</li>
     <li><b>금리표</b> — 최근 결산일 곡선이 <b>이미 등록</b>되어 있습니다.
       산출기준일과 다르면 화면이 알려 줍니다</li>
-    <li><b>표준률 원표</b> — 퇴직률·승급률·사망률. 사업장 규모별로 나뉘어 있습니다</li>
   </ul>
   <p class="hint">올린 명부와 등록한 자료는 <b>이 기기 안에만</b> 남습니다.
   어디로도 전송되지 않습니다.</p>
@@ -481,54 +482,6 @@
 <div id="template-list"></div>
 </div></details>
 
-<details class="section" id="sec-lib-preset"><summary>가정세트 (지급률·지급규정 포함 산출가정 한 벌)<span class="count"></span></summary>
-<div class="section-body">
-<div class="lib-line">
-    <input type="file" id="lib-preset-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
-    <input type="text" id="lib-preset-name" placeholder="등록 이름 (예: A사 퇴직금규정)" style="min-width:180px">
-    <button class="small primary" id="lib-preset-add">등록</button>
-  </div>
-  <div class="hint">[산출가정 입력] 탭에서 [현재 가정 저장] 을 눌러도 여기에 쌓입니다.
-  기초율 워크북 파일을 직접 올려도 됩니다.</div>
-  <div id="lib-preset-list"></div>
-</div></details>
-
-<details class="section" id="sec-lib-curve"><summary>금리표 (KIS-Net 등급별 기간구조)<span class="count"></span></summary>
-<div class="section-body">
-<div class="lib-line">
-    <input type="file" id="lib-curve-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
-    <input type="text" id="lib-curve-name" placeholder="등록 이름 (예: KIS_20261231)" style="min-width:180px">
-    <button class="small primary" id="lib-curve-add">등록</button>
-  </div>
-  <div id="lib-curve-list"></div>
-</div></details>
-
-<details class="section" id="sec-lib-roster"><summary>명부 (올렸던 명부 보관)<span class="count"></span></summary>
-<div class="section-body">
-<div class="lib-line">
-    <input type="file" id="lib-roster-file" accept=".xls,.xlsx,.xlsm" style="flex:1;min-width:200px">
-    <input type="text" id="lib-roster-name" placeholder="등록 이름 (예: 1번단체 2412)" style="min-width:180px">
-    <button class="small primary" id="lib-roster-add">등록</button>
-  </div>
-  <div class="hint">여기 등록한 명부는 [산출] 탭의 <b>저장된 명부</b> 목록에서 골라
-  쓸 수 있습니다. 산출 탭에서 파일을 고른 뒤 [이 파일을 목록에 저장] 을 눌러도
-  같습니다. 개인정보가 들어 있으므로 기기 잠금을 걸어 두세요.</div>
-  <div id="lib-roster-list"></div>
-</div></details>
-
-<details class="section" id="sec-lib-rates"><summary>표준률 (퇴직률·승급률·사망률 기초율 워크북)<span class="count"></span></summary>
-<div class="section-body">
-<div class="lib-line">
-    <input type="file" id="lib-rates-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
-    <input type="text" id="lib-rates-name" placeholder="등록 이름 (예: 2026 표준률)" style="min-width:180px">
-    <button class="small primary" id="lib-rates-add">등록</button>
-  </div>
-  <div class="hint">기초율 워크북 서식(할인율·승급률·퇴직률·사망률·지급률 시트)이면
-  됩니다. [산출가정 입력]에서 만들어 저장한 파일을 그대로 등록해도 됩니다.
-  등록이 없어도 <b>내장 표준률</b>은 항상 쓸 수 있습니다.</div>
-  <div id="lib-rates-list"></div>
-</div></details>
-
 <details class="section" id="lib-gen"><summary>시험 명부 만들기<span class="count"></span></summary>
 <div class="section-body">
 <p class="notice">난수로 만든 시험용 명부 세 벌입니다. 프로그램이 제대로 도는지
@@ -575,6 +528,74 @@
 </fieldset>
 
 <div id="feat-cases"></div>
+</div></details>
+
+<details class="section" id="lib-docs"><summary>문서 내려받기<span class="count"></span></summary>
+<div class="section-body">
+<p class="hint">받는 사람에게 그대로 보내도 되는 파일입니다. 화면에서 읽으려면
+오른쪽 위 <b>물음표</b> 를 누르세요 — 사용설명서와 같은 내용입니다.</p>
+<div class="lib-line">
+  <div style="flex:1;min-width:180px">
+    <b>사용설명서.md</b>
+    <div class="hint">여는 법부터 결과 보는 법까지. 명부 칸 하나하나가 무엇인지 적혀 있습니다</div>
+  </div>
+  <a class="small primary" href="사용설명서.md" download="사용설명서.md" role="button">내려받기</a>
+</div>
+<div class="lib-line">
+  <div style="flex:1;min-width:180px">
+    <b>계리방법론.md</b>
+    <div class="hint">산출 로직. "이 채무가 왜 이 값인가" 를 물었을 때 답할 근거입니다</div>
+  </div>
+  <a class="small primary" href="계리방법론.md" download="계리방법론.md" role="button">내려받기</a>
+</div>
+</div></details>
+
+<details class="section" id="sec-lib-preset"><summary>가정세트 (지급률·지급규정 포함 산출가정 한 벌)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
+    <input type="file" id="lib-preset-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-preset-name" placeholder="등록 이름 (예: A사 퇴직금규정)" style="min-width:180px">
+    <button class="small primary" id="lib-preset-add">등록</button>
+  </div>
+  <div class="hint">[산출가정 입력] 탭에서 [현재 가정 저장] 을 눌러도 여기에 쌓입니다.
+  기초율 워크북 파일을 직접 올려도 됩니다.</div>
+  <div id="lib-preset-list"></div>
+</div></details>
+
+<details class="section" id="sec-lib-curve"><summary>금리표 (KIS-Net 등급별 기간구조)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
+    <input type="file" id="lib-curve-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-curve-name" placeholder="등록 이름 (예: KIS_20261231)" style="min-width:180px">
+    <button class="small primary" id="lib-curve-add">등록</button>
+  </div>
+  <div id="lib-curve-list"></div>
+</div></details>
+
+<details class="section" id="sec-lib-roster"><summary>명부 (올렸던 명부 보관)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
+    <input type="file" id="lib-roster-file" accept=".xls,.xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-roster-name" placeholder="등록 이름 (예: 1번단체 2412)" style="min-width:180px">
+    <button class="small primary" id="lib-roster-add">등록</button>
+  </div>
+  <div class="hint">여기 등록한 명부는 [산출] 탭의 <b>저장된 명부</b> 목록에서 골라
+  쓸 수 있습니다. 산출 탭에서 파일을 고른 뒤 [이 파일을 목록에 저장] 을 눌러도
+  같습니다. 개인정보가 들어 있으므로 기기 잠금을 걸어 두세요.</div>
+  <div id="lib-roster-list"></div>
+</div></details>
+
+<details class="section" id="sec-lib-rates"><summary>표준률 (퇴직률·승급률·사망률 기초율 워크북)<span class="count"></span></summary>
+<div class="section-body">
+<div class="lib-line">
+    <input type="file" id="lib-rates-file" accept=".xlsx,.xlsm" style="flex:1;min-width:200px">
+    <input type="text" id="lib-rates-name" placeholder="등록 이름 (예: 2026 표준률)" style="min-width:180px">
+    <button class="small primary" id="lib-rates-add">등록</button>
+  </div>
+  <div class="hint">기초율 워크북 서식(할인율·승급률·퇴직률·사망률·지급률 시트)이면
+  됩니다. [산출가정 입력]에서 만들어 저장한 파일을 그대로 등록해도 됩니다.
+  등록이 없어도 <b>내장 표준률</b>은 항상 쓸 수 있습니다.</div>
+  <div id="lib-rates-list"></div>
 </div></details>
 
 <details class="section" id="lib-backup"><summary>보관함 — 기기 밖에 저장<span class="count"></span></summary>

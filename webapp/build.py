@@ -323,6 +323,32 @@ def _write_help(target: Path) -> None:
     target.write_text(_markdown(source.read_text(encoding="utf-8")), encoding="utf-8")
 
 
+#: 자료실에서 내려받는 문서. (배포본 파일명, 원본)
+_DOCS: Final = (
+    ("사용설명서.md", "웹앱-사용설명서.md"),
+    ("계리방법론.md", "계리방법론.md"),
+)
+
+
+def _copy_docs(target: Path) -> None:
+    """자료실에서 내려받을 문서를 배포본에 넣는다.
+
+    화면 안(물음표)에서 읽는 것과 **같은 원본** 을 쓴다. 파일을 따로 만들어
+    두면 화면에 보이는 설명과 받아 간 파일이 서서히 갈라진다.
+
+    받는 사람이 그대로 남에게 보낼 수 있어야 하므로 주소는 적지 않는다 —
+    문서만 돌아다녀도 주소까지 같이 돌지는 않게 한다.
+    """
+    for name, origin in _DOCS:
+        source = ROOT / "docs" / origin
+        if not source.exists():
+            raise FileNotFoundError(f"{source} 가 없습니다")
+        (target / name).write_text(
+            source.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    print(f"  문서 {len(_DOCS)}개")
+
+
 
 def _write_cname(target: Path) -> None:
     """맞춤 도메인을 배포본에 넣는다.
@@ -370,6 +396,7 @@ def build() -> Path:
     for name in ("index.html", "app.css", "app.js", "manifest.webmanifest"):
         shutil.copy2(APP / name, DIST / name)
     _write_help(DIST / "help.html")
+    _copy_docs(DIST)
     _write_cname(DIST / "CNAME")
     (DIST / "icon-180.png").write_bytes(_png(180))
     (DIST / "icon-512.png").write_bytes(_png(512))
