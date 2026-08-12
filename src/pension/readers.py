@@ -26,9 +26,10 @@ from .layout import (
 from .models import ActiveMember, RateRules, RetiredMember, Roster
 from .jobgroup import decide_employee_type
 from .normalize import (
+    Gender,
     from_resident_number,
     normalize_benefit_plan,
-    normalize_gender,
+    read_gender,
     normalize_retirement_reason,
     normalize_yes_no,
     text,
@@ -340,7 +341,11 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.employee_type = decide_employee_type(member.employee_type_raw)
         member.name = text(get("name"))
         member.resident_number = text(get("resident_number"))
-        member.gender = normalize_gender(get("gender"))
+        # 성별 칸이 있으면 그것을 먼저 본다. 못 정했으면 남자로 두되 **정하지
+        # 못했다는 사실을 남긴다** — 사망률이 성별로 갈리기 때문이다.
+        told = read_gender(get("gender"))
+        member.gender = told if told is not None else Gender.MALE
+        member.gender_known = told is not None
 
         kw = dict(sheet=ACTIVE_SHEET, row=row, seq=seq, employee_id=employee_id)
         member.birth_date = _read_date(
@@ -354,8 +359,9 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
             born, sex = from_resident_number(member.resident_number)
             if member.birth_date is None:
                 member.birth_date = born
-            if sex is not None and not text(get("gender")):
+            if sex is not None and not member.gender_known:
                 member.gender = sex
+                member.gender_known = True
         member.hire_date = _read_date(
             get("hire_date"), config, log, col=_col_of(cols, "hire_date"),
             code="JAE_HIRE_DATE", required=True, **kw,
@@ -493,7 +499,11 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
         member.employee_type = decide_employee_type(member.employee_type_raw)
         member.name = text(get("name"))
         member.resident_number = text(get("resident_number"))
-        member.gender = normalize_gender(get("gender"))
+        # 성별 칸이 있으면 그것을 먼저 본다. 못 정했으면 남자로 두되 **정하지
+        # 못했다는 사실을 남긴다** — 사망률이 성별로 갈리기 때문이다.
+        told = read_gender(get("gender"))
+        member.gender = told if told is not None else Gender.MALE
+        member.gender_known = told is not None
 
         kw = dict(sheet=RETIRED_SHEET, row=row, seq=seq, employee_id=employee_id)
         member.birth_date = _read_date(
@@ -507,8 +517,9 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
             born, sex = from_resident_number(member.resident_number)
             if member.birth_date is None:
                 member.birth_date = born
-            if sex is not None and not text(get("gender")):
+            if sex is not None and not member.gender_known:
                 member.gender = sex
+                member.gender_known = True
         member.hire_date = _read_date(
             get("hire_date"), config, log, col=_col_of(cols, "hire_date"),
             code="TOI_HIRE_DATE", required=True, **kw,

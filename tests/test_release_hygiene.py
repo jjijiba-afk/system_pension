@@ -601,3 +601,38 @@ class TestPagesDeploy:
         worker = (ROOT / "webapp/dist/sw.js").read_text(encoding="utf-8")
         assert '"/index.html"' not in worker
         assert '"./index.html"' in worker
+
+
+class TestPrintablePages:
+    """문서를 PDF 로 만드는 길.
+
+    PDF 를 프로그램이 직접 만들지 않는다. PDF 안에 글자를 그리려면 글꼴을 파일에
+    통째로 넣어야 하는데 한글 글꼴은 5~15MB 다 — 배포본이 그만큼 무거워지고,
+    빠뜨리면 글자가 네모로 나온다. 브라우저에 맡기면 기기 글꼴을 쓰므로 그
+    문제가 아예 없다. 대신 **인쇄용 한 장** 이 반드시 나와야 한다.
+    """
+
+    def test_the_printable_page_comes_from_the_same_source(self) -> None:
+        text = (ROOT / "webapp/build.py").read_text(encoding="utf-8")
+        # 인쇄용을 따로 만들면 내려받는 문서와 갈라진다. 같은 원본에서 낸다.
+        assert "_PRINT_PAGE.format(" in text
+        assert "_markdown(text)" in text
+
+    @pytest.mark.skipif(not (ROOT / "webapp/dist/index.html").exists(),
+                        reason="webapp/build.py 를 먼저 실행")
+    def test_every_document_has_one(self) -> None:
+        for name in ("사용설명서", "계리방법론"):
+            page = ROOT / f"webapp/dist/{name}.html"
+            assert page.exists(), name
+            html = page.read_text(encoding="utf-8")
+            assert "window.print()" in html
+            assert "@page" in html                 # 인쇄 여백이 잡혀 있어야 한다
+            assert "<table" in html or "<h1" in html
+
+    @pytest.mark.skipif(not (ROOT / "webapp/dist/index.html").exists(),
+                        reason="webapp/build.py 를 먼저 실행")
+    def test_the_library_links_to_them(self) -> None:
+        page = (ROOT / "webapp/dist/index.html").read_text(encoding="utf-8")
+        for name in ("사용설명서", "계리방법론"):
+            assert f'href="{name}.html"' in page, name
+            assert f'download="{name}.md"' in page, name

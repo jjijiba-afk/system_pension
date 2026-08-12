@@ -57,6 +57,8 @@ class TestRoundTrip:
         # 주민등록번호 앞 7자리에서 생년월일과 성별을 읽어 낸다.
         assert roster.active[1].birth_date == _dt.date(1972, 8, 15)
         assert roster.active[1].gender.value == "여자"
+        # 넘겨짚은 것이 아니라 **정한** 것이라는 표시가 남아야 한다.
+        assert roster.active[1].gender_known
 
     def test_standard_assumptions_load(self, pack) -> None:
         from pension.assumptions import load_assumptions

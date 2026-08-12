@@ -2522,6 +2522,12 @@ $("prior-check").addEventListener("click", async () => {
 
 function priorCheckTables(found) {
   const made = [];
+  // 저장본이 지금과 다른 세대면 아래 차이를 곧이곧대로 읽으면 안 된다.
+  // 자료가 달라진 것인지 서식이 바뀐 것인지 가릴 수 없기 때문이다.
+  if (found.schema_gap) {
+    made.push(el("div", { class: "notice bad-text" },
+      el("b", {}, "이 저장본은 지금과 다른 판입니다. "), found.schema_gap));
+  }
   made.push(el("div", { class: "hint" },
     `전기 재직 ${found.prior_active.toLocaleString()}명 · `
     + `당기 재직 ${found.current_active.toLocaleString()}명 · `
@@ -2622,6 +2628,45 @@ function refreshRuns() {
   applyRuns(py("run_list"));
 }
 
+const BACKUP_AT = "backup-at";
+
+/** 보관함을 내보낸 날을 적어 둔다. 안 내보냈다는 사실을 알려면 기록이 있어야 한다. */
+function markBackedUp() {
+  try {
+    localStorage.setItem(BACKUP_AT, new Date().toISOString());
+  } catch (err) {
+    /* 저장을 못 하는 브라우저에서도 내보내기 자체는 끝났다 */
+  }
+}
+
+/**
+ * 산출 내역이 이 기기에만 있다는 것을 알린다.
+ *
+ * 저장한 산출은 브라우저 안에만 남는다. 기기를 바꾸거나 브라우저 자료를
+ * 지우면 결산 근거가 통째로 사라지는데, 보관함 내보내기는 **손으로 눌러야**
+ * 하는 일이라 안 하면 그만이다. 며칠째 안 했는지 눈에 보이게 한다.
+ */
+function backupNotice(count) {
+  if (!count) return null;
+  let saved = "";
+  try {
+    saved = localStorage.getItem(BACKUP_AT) || "";
+  } catch (err) {
+    return null;             // 저장을 못 읽으면 겁줄 근거도 없다
+  }
+  if (!saved) {
+    return el("div", { class: "notice bad-text" },
+      el("b", {}, "아직 한 번도 보관함으로 내보내지 않았습니다. "),
+      `산출 ${count}건이 이 기기 안에만 있습니다 — 기기를 바꾸거나 브라우저 `
+      + "자료를 지우면 사라집니다. [자료실] → 보관함에서 내보내 두세요.");
+  }
+  const days = Math.floor((Date.now() - Date.parse(saved)) / 86400000);
+  if (!(days >= 14)) return null;
+  return el("div", { class: "notice" },
+    `보관함으로 내보낸 지 ${days}일 지났습니다. 그 뒤에 저장한 산출은 이 기기 `
+    + "안에만 있습니다.");
+}
+
 function renderRuns(runs) {
   const target = $("runs-list");
 
@@ -2660,8 +2705,11 @@ function renderRuns(runs) {
         el("button", { class: "small", type: "button",
           onclick: () => deleteRun(run.name) }, "삭제")));
   });
-  target.replaceChildren(el("div", { class: "scroll-x" },
-    el("table", { class: "data" }, header, ...rows)));
+  const notice = backupNotice(runs.length);
+  target.replaceChildren(
+    ...(notice ? [notice] : []),
+    el("div", { class: "scroll-x" },
+      el("table", { class: "data" }, header, ...rows)));
 }
 
 function restoreRun(name) {
@@ -2776,6 +2824,7 @@ $("backup-export").addEventListener("click", async () => {
     await persistHome();
     const result = py("backup_export", { work: "/work" });
     download(result.path, result.filename, "application/zip");
+    markBackedUp();
     refreshLibrary();
     status(`보관함 ${result.filename} (${(result.size / 1e6).toFixed(1)}MB) 을(를) ` +
            "내려받았습니다. 공유 → 파일에 저장 → iCloud Drive 에 두세요.");

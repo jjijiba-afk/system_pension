@@ -491,3 +491,98 @@ class TestReportAuditTrail:
             assert expected in cells, f"'{expected}' 이(가) 적용가정 시트에 없다"
         # 직군 규칙의 적용 여부가 값으로 남아야 한다.
         assert "반영" in cells
+
+
+class TestSilentZeroesAreCaught:
+    """조용히 0 이 되는 길목을 막는다.
+
+    수식이 있는데 계산된 값이 없는 칸은 **빈 칸과 똑같이 보인다.** 숫자 칸이면
+    0 이 되고, 추계액이 0 이 되면 `추계액대비` 검산이 소리 없이 꺼진다.
+    """
+
+    def test_an_uncalculated_formula_is_reported(self, tmp_path: Path) -> None:
+        import openpyxl
+
+        from pension.workbook import uncalculated_formulas
+
+        book = openpyxl.Workbook()
+        sheet = book.active
+        sheet.title = "재직자명부"
+        sheet["A1"] = 1
+        sheet["B1"] = "=A1*2"          # 엑셀이 계산한 적 없는 수식
+        sheet["C1"] = "글자"
+        path = tmp_path / "계산안된.xlsx"
+        book.save(path)
+
+        cells, total = uncalculated_formulas(path)
+        assert total == 1
+        assert cells == ["재직자명부!B1"]
+
+    def test_a_saved_value_is_not_reported(self, tmp_path: Path) -> None:
+        """엑셀이 값을 함께 저장해 둔 수식은 문제가 아니다."""
+        import openpyxl
+
+        from pension.workbook import uncalculated_formulas
+
+        book = openpyxl.Workbook()
+        book.active["A1"] = 3          # 수식이 아예 없는 파일
+        path = tmp_path / "값만.xlsx"
+        book.save(path)
+
+        assert uncalculated_formulas(path) == ([], 0)
+
+    def test_xls_is_skipped_rather_than_guessed(self, tmp_path: Path) -> None:
+        """`.xls` 는 수식을 꺼내 볼 수 없다. 없는 것을 있다고 하지 않는다."""
+        from pension.workbook import uncalculated_formulas
+
+        path = tmp_path / "옛서식.xls"
+        path.write_bytes(b"not really an xls")
+        assert uncalculated_formulas(path) == ([], 0)
+
+
+class TestSavedRunsCarryTheirGeneration:
+    """저장본과 지금 프로그램이 같은 판인지 말할 수 있어야 한다.
+
+    전기 대비 검증이 저장본을 쓴다. 그 사이에 명부 서식이 바뀌었으면 차이가
+    자료 때문인지 프로그램 때문인지 가릴 수 없는데, 표시가 없으면 물어볼
+    방법조차 없다.
+    """
+
+    def test_a_fresh_save_matches(self) -> None:
+        from pension.runs import SCHEMA, schema_gap
+
+        assert schema_gap({"schema": SCHEMA}) == ""
+
+    def test_an_older_generation_is_called_out(self) -> None:
+        from pension.runs import SCHEMA, schema_gap
+
+        note = schema_gap({"schema": SCHEMA - 1})
+        assert str(SCHEMA) in note and "가릴 수 없" in note
+
+    def test_a_save_from_before_stamping_is_called_out(self) -> None:
+        note = __import__("pension.runs", fromlist=["x"]).schema_gap({"name": "옛것"})
+        assert "세대 표시가 없" in note
+
+
+class TestGenderIsNotGuessedSilently:
+    """성별을 모르면 모른다고 해야 한다.
+
+    사망률이 성별로 갈린다. 못 정한 채 남자로 두면 여성이 남성 사망률을 받는데,
+    아무 표시가 없으면 담당자는 그런 일이 있었다는 것조차 모른다.
+    """
+
+    def test_an_undecidable_cell_raises_a_warning(self, roster_path: Path) -> None:
+        book = openpyxl.load_workbook(roster_path)
+        sheet = book["재직자명부"]
+        sheet.cell(ACTIVE_FIRST_ROW, 7, "미상")      # 성별 칸
+        book.save(roster_path)
+
+        _config, roster, log = read_all(roster_path)
+        assert not roster.active[0].gender_known
+        assert roster.active[0].gender is Gender.MALE       # 계산은 이어진다
+        assert any(i.code == "JAE_GENDER_UNKNOWN" for i in log.warnings)
+
+    def test_a_stated_gender_is_quiet(self, roster_path: Path) -> None:
+        _config, roster, log = read_all(roster_path)
+        assert all(m.gender_known for m in roster.active)
+        assert not [i for i in log.warnings if i.code == "JAE_GENDER_UNKNOWN"]

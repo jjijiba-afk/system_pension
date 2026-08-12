@@ -62,6 +62,11 @@ class ActiveMember:
 
     name: str = ""
     gender: Gender = Gender.MALE
+    gender_known: bool = True
+    """성별을 실제로 정했는지. ``False`` 면 남자로 **넘겨짚은** 것이다.
+
+    사망률이 성별로 갈리므로, 모르는 채 계산한 사람은 이슈로 드러나야 한다.
+    """
     birth_date: _dt.date | None = None
     hire_date: _dt.date | None = None
     settlement_date: _dt.date | None = None
@@ -248,6 +253,11 @@ class RetiredMember:
 
     name: str = ""
     gender: Gender = Gender.MALE
+    gender_known: bool = True
+    """성별을 실제로 정했는지. ``False`` 면 남자로 **넘겨짚은** 것이다.
+
+    사망률이 성별로 갈리므로, 모르는 채 계산한 사람은 이슈로 드러나야 한다.
+    """
     birth_date: _dt.date | None = None
     hire_date: _dt.date | None = None
     resident_number: str = ""

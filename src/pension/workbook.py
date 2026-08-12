@@ -173,6 +173,60 @@ def open_workbook(path: str | Path) -> Workbook:
     )
 
 
+def uncalculated_formulas(
+    path: str | Path, *, limit: int = 30
+) -> tuple[list[str], int]:
+    """수식이 적혀 있는데 **계산된 값이 없는** 칸.
+
+    통합문서는 ``data_only=True`` 로 연다 — 수식이 아니라 값을 쓰기 위해서다.
+    그런데 엑셀은 계산 결과를 파일에 **함께 저장해 둘 때만** 그 값을 돌려준다.
+    파이썬·다른 도구로 만들었거나 엑셀에서 한 번도 열어 저장하지 않은 파일은
+    그 자리가 비어 있고, 우리는 ``None`` 을 받는다.
+
+    ``None`` 은 빈 칸과 구별되지 않으므로 **숫자 칸이면 조용히 0 이 된다.**
+    임금·날짜는 뒤에서 검증이 잡지만 추계액·중간정산 지급금액처럼 0 이어도
+    말이 되는 칸은 그냥 지나간다. 특히 추계액이 0 이 되면 `추계액대비` 검산이
+    **소리 없이 꺼진다** — 지급률을 잘못 걸어도 알아챌 마지막 수단이 사라진다.
+
+    :returns: ``(칸 목록, 전체 건수)``. 목록은 ``limit`` 개까지만 담는다.
+        ``.xls`` 는 수식을 꺼내 볼 수 없어 항상 빈 결과다.
+    """
+    path = Path(path)
+    if path.suffix.lower() not in (".xlsx", ".xlsm", ".xltx", ".xltm"):
+        return [], 0
+
+    import openpyxl
+
+    try:
+        formulas = openpyxl.load_workbook(path, data_only=False, read_only=True)
+        values = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    except Exception:
+        # 여기서 못 읽어도 산출을 막지 않는다. 본 읽기가 따로 오류를 낸다.
+        return [], 0
+
+    found: list[str] = []
+    total = 0
+    try:
+        for name in formulas.sheetnames:
+            if name not in values.sheetnames:
+                continue
+            fsheet, vsheet = formulas[name], values[name]
+            for frow, vrow in zip(fsheet.iter_rows(), vsheet.iter_rows()):
+                for fcell, vcell in zip(frow, vrow):
+                    text_value = fcell.value
+                    if not isinstance(text_value, str) or not text_value.startswith("="):
+                        continue
+                    if vcell.value is not None:
+                        continue
+                    total += 1
+                    if len(found) < limit:
+                        found.append(f"{name}!{fcell.coordinate}")
+    finally:
+        formulas.close()
+        values.close()
+    return found, total
+
+
 def find_sheet(workbook: Workbook, *aliases: str) -> Sheet | None:
     """별칭 중 하나에 해당하는 시트를 찾는다.
 

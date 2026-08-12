@@ -29,10 +29,22 @@ from .normalize import text
 __all__ = [
     "META", "ROSTER_SUFFIXES", "delete", "folder_of", "meta_of", "prior_link",
     "read_meta", "restore", "roster_of", "safe_name", "save", "saved_names",
+    "SCHEMA", "schema_gap",
     "summaries",
 ]
 
 META: Final = "meta.json"
+
+SCHEMA: Final = 2
+"""저장본 세대. **저장본이 뜻하는 바가 달라질 때 올린다.**
+
+명부 서식이나 엔진 규칙이 바뀌면, 옛 저장본과 새 산출을 맞대었을 때 나오는
+차이가 자료가 달라져서인지 프로그램이 달라져서인지 가릴 수 없다. 전기 대비
+검증이 이 저장본을 쓰므로 그 차이가 그대로 결산 판단으로 넘어간다.
+
+세대를 적어 두면 적어도 **물어볼 수는 있다** — 다르면 화면이 알려 준다.
+2: 명부에서 임직원구분·가산/차감 근속연수를 빼고 DB비율·잔여계약기간을 더한 판.
+"""
 ROSTER_SUFFIXES: Final = (".xlsx", ".xlsm", ".xls")
 _RESULTS: Final = ("산출결과.xlsx", "개인별결과.xlsx")
 
@@ -43,6 +55,31 @@ def safe_name(name: object) -> str:
     if not cleaned:
         raise ValueError("산출명을 입력하세요 (예: 2412 1번단체)")
     return cleaned
+
+
+def _engine_version() -> str:
+    from . import __version__
+
+    return __version__
+
+
+def schema_gap(meta: dict[str, Any] | None) -> str:
+    """저장본 세대가 지금과 다르면 그 사연. 같으면 빈 문자열.
+
+    세대가 없는 저장본은 세대를 적기 시작하기 **전** 에 저장된 것이다.
+    """
+    if not meta:
+        return ""
+    found = meta.get("schema")
+    if found == SCHEMA:
+        return ""
+    if found is None:
+        return ("이 저장본에는 세대 표시가 없습니다. 명부 서식이 바뀌기 전에 "
+                "저장된 것이라, 지금 명부와 맞대면 자료가 달라진 것인지 서식이 "
+                "달라진 것인지 가릴 수 없습니다")
+    return (f"저장본 세대가 {found} 이고 지금은 {SCHEMA} 입니다. 그 사이에 명부 "
+            "서식이나 산출 규칙이 바뀌었으므로, 차이가 자료 때문인지 프로그램 "
+            "때문인지 가릴 수 없습니다")
 
 
 def read_meta(folder: Path) -> dict[str, Any] | None:
@@ -100,6 +137,8 @@ def save(name: object, roster: Path | str, assumptions: Path | str, *,
             shutil.copy2(source, folder / result_name)
 
     payload = {
+        "schema": SCHEMA,
+        "engine": _engine_version(),
         "name": clean,
         "saved": text(saved) or _dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "roster_name": text(roster_name) or roster.name,

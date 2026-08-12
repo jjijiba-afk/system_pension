@@ -423,6 +423,17 @@ def validate_active(
                 value=member.payout_multiple, **kw,
             )
 
+        # 성별을 못 정한 채 넘어가면 여성이 남성 사망률로 계산된다. 사망률은
+        # 사망 지급률이 걸린 회사에서 채무를 직접 움직이고, 그렇지 않아도
+        # 생존확률을 통해 전 구간에 스며든다. 조용히 넘겨짚지 않는다.
+        if not member.gender_known:
+            log.warning(
+                "JAE_GENDER_UNKNOWN",
+                "성별을 정할 수 없어 **남자** 사망률로 계산합니다. "
+                "주민등록번호 앞 7자리(성별 한 자리까지) 또는 성별 칸을 채우세요",
+                column=_col(sheet, "gender"), **kw,
+            )
+
         # 앞 7자리만 달라고 적어 두었는데 13자리가 통째로 온다. 산출에는 아무
         # 지장이 없지만, 알려 주지 않으면 그 파일이 그대로 남는다.
         if len("".join(c for c in member.resident_number if c.isdigit())) > 7:
@@ -525,6 +536,16 @@ def validate_retired(
 
     for member in members:
         kw = dict(sheet=sheet, row=member.row, seq=member.seq, employee_id=member.employee_id)
+
+        # 퇴직자의 성별은 경험사망률을 낼 때 쓰인다. 모르는 것을 남자로 세면
+        # 그 통계가 조용히 기운다.
+        if not member.gender_known:
+            log.warning(
+                "TOI_GENDER_UNKNOWN",
+                "성별을 정할 수 없어 **남자** 로 셉니다. 경험사망률을 낼 때 "
+                "기웁니다 — 주민등록번호 앞 7자리나 성별 칸을 채우세요",
+                column=_col(sheet, "gender"), **kw,
+            )
 
         if member.job_group_index is None:
             if not config.job_group_rules:

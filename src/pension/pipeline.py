@@ -267,6 +267,7 @@ def load_inputs(
             # 직군 배정이 명부를 읽는 도중에 일어나므로 읽기 전에 바꿔 끼워야 한다.
             config = replace(config, job_group_rules=payout_rules, inferred=False)
         log = IssueLog()
+        _check_uncalculated(roster_path, log)
         _check_general_sheet(general, log)
         roster = read_roster(wb, config, log)
     finally:
@@ -275,6 +276,34 @@ def load_inputs(
     assumptions = load_assumptions(assumptions_path, label=label)
     validate_roster(roster, config, log)
     return config, roster, assumptions, log, general
+
+
+def _check_uncalculated(path: Path, log: IssueLog) -> None:
+    """계산되지 않은 수식 칸을 알린다.
+
+    엑셀에서 한 번도 열어 저장하지 않은 파일은 수식 자리에 값이 없다. 우리는
+    값을 읽으므로 그 칸이 **빈 칸과 똑같이** 보이고, 숫자 칸이면 0 이 된다.
+    조용히 0 이 되는 것이 문제라 여기서 한 번에 짚는다.
+    """
+    from .workbook import uncalculated_formulas
+
+    try:
+        cells, total = uncalculated_formulas(path)
+    except Exception:
+        return
+    if not total:
+        return
+
+    shown = ", ".join(cells)
+    more = f" 외 {total - len(cells)}칸" if total > len(cells) else ""
+    log.warning(
+        "FILE_FORMULA_NOT_CALCULATED",
+        f"수식이 있는데 계산된 값이 없는 칸이 {total}개입니다 ({shown}{more}). "
+        "이 칸들은 **빈 칸으로 읽혀 0 이 됩니다.** "
+        "엑셀에서 파일을 열어 한 번 저장한 뒤 다시 올리세요 — "
+        "추계액이 이렇게 0 이 되면 `추계액대비` 검산이 소리 없이 꺼집니다",
+        sheet=path.name,
+    )
 
 
 def _read_general_sheet(wb):

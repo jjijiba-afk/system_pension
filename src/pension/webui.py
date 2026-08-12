@@ -698,6 +698,9 @@ def _prior_check(request: dict) -> dict[str, Any]:
         "prior_active": result.prior_active,
         "matched": result.matched,
         "prior_name": (_run_meta(folder) or {}).get("name", ""),
+        # 저장본이 지금과 다른 세대면, 아래 차이가 자료 때문인지 서식이 바뀌어서
+        # 인지 가릴 수 없다. 그 사실을 결과와 함께 내보낸다.
+        "schema_gap": runs.schema_gap(_run_meta(folder)),
     }
 
 

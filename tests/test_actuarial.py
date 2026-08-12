@@ -117,6 +117,24 @@ class TestNormalizeGender:
     def test_everything_else_is_male(self, raw: object) -> None:
         assert normalize_gender(raw) is Gender.MALE
 
+    @pytest.mark.parametrize("raw", ["남자", "남", "M", 1, 3])
+    def test_read_gender_decides_male(self, raw: object) -> None:
+        from pension.normalize import read_gender
+
+        assert read_gender(raw) is Gender.MALE
+
+    @pytest.mark.parametrize("raw", ["", None, "미상", "X", "unknown", 0, 9])
+    def test_what_cannot_be_decided_is_not_guessed(self, raw: object) -> None:
+        """모르는 것을 남자로 넘겨짚으면 여성이 남성 사망률을 받는다.
+
+        `normalize_gender` 는 산출을 멈추지 않으려고 남자로 두지만, 정했는지
+        여부는 따로 알 수 있어야 검증이 알려 줄 수 있다.
+        """
+        from pension.normalize import read_gender
+
+        assert read_gender(raw) is None
+        assert normalize_gender(raw) is Gender.MALE   # 기본값은 그대로
+
 
 class TestResidentNumber:
     """주민등록번호 앞 7자리에서 생년월일과 성별을 읽는다.

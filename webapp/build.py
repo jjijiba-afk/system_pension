@@ -330,6 +330,55 @@ _DOCS: Final = (
 )
 
 
+#: 인쇄용 문서 한 장. 브라우저의 [인쇄 → PDF 로 저장] 으로 PDF 가 된다.
+#:
+#: PDF 를 프로그램이 직접 만들지 않는 이유는 **한글** 이다. PDF 안에 글자를
+#: 그리려면 글꼴을 파일에 통째로 넣어야 하고, 한글 글꼴은 5~15MB 다. 배포본이
+#: 그만큼 무거워지고, 빠뜨리면 글자가 전부 네모로 나온다. 브라우저에 맡기면
+#: 기기에 있는 글꼴을 쓰므로 그 문제가 아예 없다.
+_PRINT_PAGE = """<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+  :root {{ --ink:#1b1b1b; --line:#d7d7d7; --navy:#1f3864; }}
+  body {{ font-family:"맑은 고딕","Malgun Gothic",-apple-system,sans-serif;
+    color:var(--ink); line-height:1.7; max-width:820px; margin:0 auto;
+    padding:28px 20px 60px; }}
+  h1 {{ font-size:1.5rem; color:var(--navy); border-bottom:2px solid var(--navy);
+    padding-bottom:6px; margin-top:1.8em; }}
+  h2 {{ font-size:1.15rem; color:var(--navy); margin-top:1.6em; }}
+  h3 {{ font-size:1rem; margin-top:1.3em; }}
+  table {{ border-collapse:collapse; width:100%; margin:12px 0; font-size:.92rem; }}
+  th, td {{ border:1px solid var(--line); padding:6px 8px; text-align:left;
+    vertical-align:top; }}
+  th {{ background:#f2f4f8; }}
+  code {{ background:#f2f4f8; padding:1px 4px; border-radius:3px; }}
+  pre {{ background:#f7f8fa; border:1px solid var(--line); padding:10px;
+    overflow-x:auto; }}
+  blockquote {{ border-left:3px solid var(--navy); margin:12px 0; padding:2px 12px;
+    color:#444; }}
+  .bar {{ background:#f2f4f8; border:1px solid var(--line); border-radius:6px;
+    padding:10px 14px; margin-bottom:18px; font-size:.9rem; }}
+  .bar button {{ font:inherit; padding:5px 12px; border-radius:5px;
+    border:1px solid var(--navy); background:var(--navy); color:#fff;
+    cursor:pointer; }}
+  @media print {{
+    @page {{ size:A4 portrait; margin:15mm 14mm; }}
+    body {{ max-width:none; padding:0; font-size:10pt; }}
+    .bar {{ display:none; }}
+    h1, h2, h3 {{ page-break-after:avoid; }}
+    table, pre, blockquote {{ page-break-inside:avoid; }}
+  }}
+</style></head><body>
+<div class="bar">이 화면을 그대로 인쇄하면 PDF 가 됩니다 —
+  <button type="button" onclick="window.print()">인쇄 / PDF 로 저장</button>
+  <span>인쇄 대화상자에서 대상을 <b>PDF로 저장</b> 으로 고르세요.</span></div>
+{body}
+</body></html>
+"""
+
+
 def _copy_docs(target: Path) -> None:
     """자료실에서 내려받을 문서를 배포본에 넣는다.
 
@@ -343,10 +392,14 @@ def _copy_docs(target: Path) -> None:
         source = ROOT / "docs" / origin
         if not source.exists():
             raise FileNotFoundError(f"{source} 가 없습니다")
-        (target / name).write_text(
-            source.read_text(encoding="utf-8"), encoding="utf-8"
+        text = source.read_text(encoding="utf-8")
+        (target / name).write_text(text, encoding="utf-8")
+        # 같은 원본에서 인쇄용 한 장도 낸다. 따로 만들면 둘이 갈라진다.
+        (target / f"{Path(name).stem}.html").write_text(
+            _PRINT_PAGE.format(title=Path(name).stem, body=_markdown(text)),
+            encoding="utf-8",
         )
-    print(f"  문서 {len(_DOCS)}개")
+    print(f"  문서 {len(_DOCS)}개 (인쇄용 포함)")
 
 
 

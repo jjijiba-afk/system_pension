@@ -146,10 +146,32 @@ def from_resident_number(value: object) -> tuple[_dt.date | None, Gender | None]
     return born, gender
 
 
-def normalize_gender(value: object) -> Gender:
-    """성별 정규화. 판정되지 않는 값은 '남자' 로 본다."""
+_MALE_TOKENS: Final[frozenset[str]] = frozenset({"남", "남자", "남성", "m", "1", "3", "5", "7"})
+
+
+def read_gender(value: object) -> Gender | None:
+    """성별. **정할 수 없으면 ``None``** 이다.
+
+    빈 칸과 `미상`·`X` 같은 값을 남자로 넘겨짚지 않기 위해 따로 둔다. 성별은
+    사망률을 가르므로, 모르는 것을 아는 척하면 그 사람 채무가 조용히 틀린다.
+    호출부가 ``None`` 을 받아 이슈로 남긴다.
+    """
     token = text(value).lower()
-    return Gender.FEMALE if token in _FEMALE_TOKENS else Gender.MALE
+    if token in _FEMALE_TOKENS:
+        return Gender.FEMALE
+    if token in _MALE_TOKENS:
+        return Gender.MALE
+    return None
+
+
+def normalize_gender(value: object) -> Gender:
+    """성별 정규화. 판정되지 않는 값은 '남자' 로 본다.
+
+    산출을 멈추지 않기 위한 기본값일 뿐이다. **정했는지 여부까지 알아야 하는
+    자리에서는 :func:`read_gender` 를 쓰고 ``None`` 을 이슈로 남긴다.**
+    """
+    found = read_gender(value)
+    return found if found is not None else Gender.MALE
 
 
 def normalize_benefit_plan(value: object) -> BenefitPlan | None:
