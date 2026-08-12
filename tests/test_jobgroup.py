@@ -71,7 +71,7 @@ class TestSuggestGroup:
 
 
 class TestExecutiveNormalization:
-    """종전 규칙 는 완전일치만 보아 `임원(별정)` 을 직원으로 분류했다.
+    """완전일치만 보면 `임원(별정)` 이 직원으로 분류된다.
 
     임원은 정년·지급배수가 달라 그대로 두면 채무가 어긋난다.
     """

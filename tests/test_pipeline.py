@@ -147,7 +147,7 @@ class TestValidationCatchesBadData:
         assert any(i.code == "JAE_BIRTH_DATE" for i in log.errors)
 
     def test_issues_point_at_the_exact_cell(self, roster_path: Path) -> None:
-        """종전 규칙 는 'N 번째 임직원' 만 알려 줬다. 여기서는 시트·행·열까지 준다."""
+        """이슈는 시트·행·열까지 짚어 준다. 'N 번째 사람' 만으로는 못 찾는다."""
         self._corrupt(roster_path, ACTIVE_FIRST_ROW + 2, 11, 100)
         _, _, log = read_all(roster_path)
         issue = next(i for i in log.errors if i.code == "JAE_WAGE_BELOW_CHECK")
@@ -157,7 +157,7 @@ class TestValidationCatchesBadData:
         assert issue.seq == 3
 
     def test_all_errors_are_collected_not_just_the_first(self, roster_path: Path) -> None:
-        """종전 규칙 는 첫 오류에서 멈춘다. 여기서는 전부 모은다."""
+        """첫 오류에서 멈추지 않고 전부 모은다. 명부를 한 번에 손보기 위해서다."""
         wb = openpyxl.load_workbook(roster_path)
         ws = wb["재직자명부"]
         ws.cell(ACTIVE_FIRST_ROW, 17, "")           # 제도 누락

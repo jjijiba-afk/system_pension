@@ -194,11 +194,11 @@ class TestStandardTable:
 class TestDefaultRoster:
     """기본 명부는 **난수로 만든 가상 명부** 다.
 
-    전에는 실제 평가 사례의 명부를 그대로 넣었다. 성명은 없었지만 생년월일·
-    입사일·30일 평균임금이 사람마다 한 줄씩이라, 같은 회사 안에서는 특정될 수
-    있는 자료였다 — 프로그램을 남에게 건네면 그 자료도 같이 건네진다.
+    실제 명부를 넣으면 프로그램을 건네는 순간 그 자료도 같이 건네진다. 성명이
+    없어도 생년월일·입사일·30일 평균임금이 사람마다 한 줄씩이면 같은 회사
+    안에서는 특정될 수 있다.
 
-    난수로 바꾸되 **형태는 지킨다.** 작성 예시 두 줄짜리 양식으로는 DC 혼재·
+    난수로 만들되 **형태는 지킨다.** 작성 예시 두 줄짜리 양식으로는 DC 혼재·
     근속 1년 미만 퇴직자·임원의 직군 표기 같은 것을 볼 수 없다.
     """
 
@@ -216,9 +216,11 @@ class TestDefaultRoster:
             book.close()
 
     def test_reads_back_at_full_size(self, pack) -> None:
+        from pension.rostergen import DEFAULT_CASE
+
         roster = self._roster(pack)
-        assert len(roster.active) == 275
-        assert len(roster.retired) == 247
+        assert len(roster.active) == DEFAULT_CASE.active
+        assert len(roster.retired) == DEFAULT_CASE.retired
 
     def test_carries_the_shapes_a_two_row_sample_cannot(self, pack) -> None:
         """실제 명부에서 마주치는 형태가 들어 있어야 쓸모가 있다."""
@@ -309,7 +311,8 @@ class TestNoPersonalDataShips:
         from pension.samples import ROSTER_DEFAULT
 
         assert (pack / ROSTER_DEFAULT).is_file()
-        assert DEFAULT_CASE.active == 275 and DEFAULT_CASE.retired == 247
+        # 인원수는 지어낸 값이다. 실제 명부의 인원과 같으면 그 자체가 흔적이 된다.
+        assert DEFAULT_CASE.active > 100 and DEFAULT_CASE.retired > 0
 
 
 class TestSingleDiscountRate:
@@ -581,7 +584,7 @@ class TestByCause:
 
     사유마다 지급률이 다른 규정에서는 합계만으로 검산이 안 된다. 지급률 한 칸을
     잘못 넣어도 총액은 조금 움직일 뿐이라, 사유별로 갈라 놓아야 눈에 띈다.
-    원 조서(DBO 산출표)가 정년·중도·사망 열을 따로 세우는 이유와 같다.
+    DBO 산출표가 정년·중도·사망 열을 따로 세우는 이유와 같다.
     """
 
     def _run(self, pack, tmp_path):
@@ -608,7 +611,7 @@ class TestByCause:
 
         causes = self._run(pack, tmp_path).valuation.by_cause()
         assert set(causes) == {CAUSE_NORMAL, CAUSE_VOLUNTARY, CAUSE_DEATH}
-        # 정년이 맨 앞 — 원 조서의 열 차례다.
+        # 정년이 맨 앞 — 산출표를 볼 때의 열 차례다.
         assert list(causes)[0] == CAUSE_NORMAL
 
     def test_one_person_splits_the_same_way(self, pack, tmp_path) -> None:

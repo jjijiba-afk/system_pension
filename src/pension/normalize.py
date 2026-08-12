@@ -155,11 +155,9 @@ def normalize_gender(value: object) -> Gender:
 def normalize_benefit_plan(value: object) -> BenefitPlan | None:
     """제도구분 정규화.
 
-    ``퇴직자명부`` 시트 M14 셀에 수식 주석으로 남아 있던 변환 규칙을 옮긴 것이다::
-
-        IF(OR(x="", x="미가입", x="퇴직금"), "퇴직금제도",
-           IF(x="DC전환", "DC",
-              IF(OR(x="혼합", x="혼합형"), "DB", x)))
+    같은 제도를 회사마다 달리 적어 온다. ``미가입``·``퇴직금`` 은 퇴직금제도,
+    ``DC전환`` 은 DC, ``혼합``·``혼합형`` 은 DB 로 본다 — 혼합형은 DB 몫이
+    확정급여채무를 만들기 때문이다(그 비중은 `DB비율` 칸에서 따로 받는다).
 
     :returns: 표준 제도구분. 판정할 수 없으면 ``None``(호출부에서 오류 처리).
     """

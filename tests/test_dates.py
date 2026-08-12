@@ -1,4 +1,4 @@
-"""날짜 파싱. 종전 규칙 ``Select Case Len(datetr)`` 이식 결과를 형식별로 검증한다."""
+"""날짜 파싱. 자릿수로 형식을 가르는 규칙을 형식별로 못 박는다."""
 
 from __future__ import annotations
 
@@ -67,10 +67,10 @@ def test_two_digit_year_pivots_on_base_year() -> None:
 
 
 def test_yy_mm_d_with_suffix_reads_the_day_not_the_separator() -> None:
-    """종전 규칙 는 이 형식에서 구분자를 일자로 읽는 버그가 있었다.
+    """이 형식에서 일자를 6번째에서 읽으면 구분자를 읽게 된다.
 
-    '80.12.3일' 은 4번째부터 두 자리가 월(12), 7번째 한 자리가 일(3)이다.
-    원본은 생년월일·중간정산일 블록에서 6번째('.')를 읽어 항상 실패했다.
+    '80.12.3일' 은 4번째부터 두 자리가 월(12), **7번째** 한 자리가 일(3)이다.
+    6번째는 '.' 이라 거기서 읽으면 어떤 값을 넣어도 해석에 실패한다.
     """
     assert parse("80.12.3일") == dt.date(1980, 12, 3)
 
@@ -81,7 +81,7 @@ def test_datetime_and_date_pass_through() -> None:
 
 
 def test_numeric_cell_uses_digit_layout() -> None:
-    """종전 규칙 는 셀 값을 문자열 변수로 받으므로 숫자도 자릿수로 판정한다."""
+    """숫자로 들어온 셀도 자릿수로 판정한다 — 19801231 과 801231 이 같은 날이다."""
     assert parse(19801231) == dt.date(1980, 12, 31)
     assert parse(801231) == dt.date(1980, 12, 31)
 

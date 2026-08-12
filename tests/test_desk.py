@@ -280,8 +280,8 @@ class TestNumbersOnScreen:
     def test_money_is_in_won_with_brackets_for_minus(self) -> None:
         from pension.desk import theme
 
-        assert theme.money(1234567) == "1,234,567"
-        assert theme.money(-1234567) == "(1,234,567)"
+        assert theme.money(1234000) == "1,234,000"
+        assert theme.money(-1234000) == "(1,234,000)"
         assert theme.money(0) == "0"
         assert theme.money(None) == "-"
 

@@ -159,7 +159,7 @@ def restore(name: object, client: object = "") -> dict[str, Any]:
 
 
 def _as_number(token: object) -> float:
-    """'20,143,311,276 원' · '4.170% (수익률곡선기법…)' 처럼 서식이 붙은 값에서 숫자만."""
+    """'20,000,000,000 원' · '4.170% (수익률곡선기법…)' 처럼 서식이 붙은 값에서 숫자만."""
     match = re.search(r"-?[\d,]+(?:\.\d+)?", str(token))
     if match is None:
         return 0.0

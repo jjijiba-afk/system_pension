@@ -49,10 +49,10 @@ class TestStripping:
 
     def test_docstrings_and_comments_are_gone(self) -> None:
         stripped = self._strip(
-            '"""모듈 설명 — 종전 규칙를 옮긴 것이다."""\n'
+            '"""모듈 설명 — 어디서 가져왔는지 적어 둔 줄."""\n'
             "\n"
             "LIMIT = 25\n"
-            '"""원본 배열이 1 To 25 로 선언되어 있다."""\n'
+            '"""원본에 25 로 적혀 있던 값이다."""\n'
             "\n"
             "\n"
             "def add(a, b):\n"
@@ -94,7 +94,7 @@ class TestStripping:
             wheel = Path(tmp) / "pension_actuarial-0.0.0-py3-none-any.whl"
             with zipfile.ZipFile(wheel, "w") as archive:
                 archive.writestr("pension/data/명부.csv", "사번,생년월일\n1,1969-02-23\n")
-                archive.writestr("pension/메모.md", "종전 규칙 대응표")
+                archive.writestr("pension/메모.md", "설계 대응표")
                 archive.writestr("pension/engine.py", "X = 1\n")
             build._strip_engine_source(wheel)
             with zipfile.ZipFile(wheel) as archive:
@@ -109,17 +109,27 @@ class TestNothingIdentifiesAClient:
     같은 일이 되풀이되지 않는다.
     """
 
-    #: 특정 단체가 떠오르게 하는 말. 예시는 모양만 남기고 금액·직위를 뺀다.
+    #: 실제 자료가 예시로 되돌아오는 **꼴** 을 막는다.
     FORBIDDEN = (
-        "정액 가산금 5", "정액 가산금 50,000,000",
-        "임원 배수 별도, 임원 1.5배", "명부 통합문서.xlsm",
-        "modPension", "modUpload", "END_SANCHUL", "jkcnt", "MsgBox",
-        "재직 275", "퇴직 247", "18,500,000,000",
+        (r"\bmod[A-Z]\w+", "매크로 모듈 이름"),
+        (r"\b(?:MsgBox|Select Case|Cells\(|CountA\(|Mid\(\s*\w+\s*,)",
+         "매크로 구문"),
+        # 콤마가 둘 이상 — 백만 이상이어야 본다. `1,234` 같은 표기 예시는 통과.
+        (r"\b\d{1,3}(?:,\d{3})+,(?!000\b)\d{3}\b(?!,\d)",
+         "끝자리가 딱 떨어지지 않는 금액"),
     )
-    """예시에 실제 금액·직위·파일명이 다시 들어오는 것을 막는다.
+    """값이 아니라 **모양** 으로 막는다.
 
-    낱말 하나(예: '현물')를 막으면 멀쩡한 설명까지 걸린다. 그래서 **금액이
-    붙은 꼴** 과 매크로 식별자처럼 다른 뜻으로는 쓰이지 않는 것만 본다.
+    전에는 막을 문자열을 그대로 적어 두었다. 그러면 금지 목록 자체가 실제
+    매크로 이름과 금액을 담게 되어, 막으려던 것을 검사 파일이 대신 들고 있는
+    꼴이 된다. 정규식으로 바꾸면 목록에 실제 값을 적지 않아도 된다.
+
+    낱말 하나(예: '현물')를 막으면 멀쩡한 설명까지 걸린다. 그래서 매크로
+    문법처럼 다른 뜻으로는 쓰이지 않는 것만 본다.
+
+    금액은 **끝자리로** 가른다. 지어낸 예시는 ``5,000,000`` 처럼 딱 떨어지고,
+    실제 자료에서 옮겨 온 값은 ``13,922,406`` 처럼 끝이 남는다. 설명에 쓸
+    금액은 천원 단위로 맞춰 적으면 된다.
     """
 
     def _files(self):
@@ -134,14 +144,16 @@ class TestNothingIdentifiesAClient:
                 yield from (ROOT / folder).glob(pattern)
 
     def test_no_client_specific_wording(self) -> None:
+        import re
+
         found = []
         for path in self._files():
             if path.name == "test_release_hygiene.py":
                 continue
             text = path.read_text(encoding="utf-8")
-            for word in self.FORBIDDEN:
-                if word in text:
-                    found.append(f"{path.relative_to(ROOT)}: {word}")
+            for pattern, what in self.FORBIDDEN:
+                for hit in re.findall(pattern, text):
+                    found.append(f"{path.relative_to(ROOT)}: {what} — {hit!r}")
         assert found == [], found
 
     def test_no_original_macro_sources(self) -> None:
@@ -189,7 +201,7 @@ class TestPackagingLeavesNoTrail:
         """휠 METADATA 는 README 본문을 통째로 담는다. 개발용 문서다."""
         toml = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         assert "readme" not in toml
-        assert "종전 규칙" not in toml
+        assert "종전" not in toml
 
     def test_the_exe_drops_docstrings(self) -> None:
         spec = (ROOT / "pension.spec").read_text(encoding="utf-8")

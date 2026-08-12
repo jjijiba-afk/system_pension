@@ -26,8 +26,9 @@ K-IFRS 1019호 '종업원급여' 가 요구하는 예측단위적립방식(Proje
 
 중간정산·전입 처리
 ------------------
-근속연수는 중간정산일(있으면)부터 센다. 종전 규칙 가 중간정산일을 입사일로 갈음해
-채워 두므로 :attr:`~pension.models.ActiveMember.settlement_date` 하나만 보면 된다.
+근속연수는 중간정산일(있으면)부터 센다. 읽는 단계에서 중간정산일이 비면
+입사일로 채워 두므로 :attr:`~pension.models.ActiveMember.settlement_date`
+하나만 보면 된다.
 """
 
 from __future__ import annotations
@@ -177,8 +178,8 @@ class MemberValuation:
 
     사유마다 지급률이 다른 규정에서는 합계만으로는 검산이 안 된다. 어느 사유가
     채무를 얼마나 만들었는지 보이지 않으면, 지급률 한 칸을 잘못 넣어도 총액이
-    조금 움직일 뿐이라 알아채지 못한다. 원 조서(DBO 산출표)가 사유별로 열을
-    나눠 두는 이유도 같다.
+    조금 움직일 뿐이라 알아채지 못한다. DBO 산출표를 사유별로 나눠 두는 이유가
+    이것이다.
     """
 
     excluded_reason: str = ""
@@ -244,7 +245,7 @@ class ValuationResult:
                 into["service_cost"] += share["service_cost"]
                 into["benefit_pv"] += share["benefit_pv"]
                 into["n"] += 1
-        # 정년 → 중도 → 사망 차례. 원 조서가 그 순서로 열을 세운다.
+        # 정년 → 중도 → 사망 차례. 산출표를 볼 때 늘 이 순서로 읽는다.
         order = {CAUSE_NORMAL: 0, CAUSE_VOLUNTARY: 1, CAUSE_DEATH: 2}
         return dict(sorted(found.items(), key=lambda kv: (order.get(kv[0], 9), kv[0])))
 

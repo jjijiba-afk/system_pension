@@ -1,8 +1,9 @@
 """``재직자명부``/``퇴직자명부`` 시트 읽기.
 
-각 시트의 열 배치는 종전 규칙 가 ``Cells(jc1, 11).Value  ' 30일 평균임금`` 처럼 주석으로
-표시해 둔 것을 :data:`ACTIVE_COLUMNS` / :data:`RETIRED_COLUMNS` 에 명시적으로
-옮겼다. 열이 바뀌면 이 표만 고치면 된다.
+머리글이 있는 명부는 **머리글로 열을 찾는다**(:mod:`pension.layout`). 머리글이
+없는 옛 서식을 위해 고정 배치를 :data:`ACTIVE_COLUMNS` / :data:`RETIRED_COLUMNS`
+한 곳에 모아 두었다. 읽는 자리마다 열 번호를 흩어 놓으면 서식이 바뀔 때 고칠
+곳을 빠뜨린다.
 """
 
 from __future__ import annotations
@@ -50,13 +51,13 @@ RETIRED_SHEET: Final = "퇴직자명부"
 ACTIVE_SHEET_ALIASES: Final = (ACTIVE_SHEET, "2)재직자명부", "재직자")
 RETIRED_SHEET_ALIASES: Final = (RETIRED_SHEET, "퇴직자")
 
-#: 재직자명부 데이터 시작 행. 종전 규칙 ``jc1 = jc + 25``.
+#: 머리글 없는 옛 서식의 재직자명부 데이터 시작 행.
 ACTIVE_FIRST_ROW: Final = 26
 
-#: 퇴직자명부 데이터 시작 행. 종전 규칙 ``jc1 = jc + 21``.
+#: 머리글 없는 옛 서식의 퇴직자명부 데이터 시작 행.
 RETIRED_FIRST_ROW: Final = 22
 
-#: 명부 끝 판정 기준 열(생년월일). 종전 규칙 ``CountA(Range("h26:h100000"))``.
+#: 명부 끝 판정 기준 열(생년월일). 이 열이 비면 명부가 끝난 것으로 본다.
 _ANCHOR_COLUMN: Final = 8
 
 #: 앵커 열이 비어 있어도 명부가 이어질 수 있으므로 이만큼은 더 살펴본다.
@@ -198,10 +199,10 @@ def _optional_int(value: object) -> int | None:
 def _last_data_row(ws: Any, first_row: int, cols: dict[str, _Col] | None = None) -> int:
     """명부의 마지막 데이터 행.
 
-    종전 규칙 는 ``CountA(H:H)`` 로 **건수** 를 센 뒤 ``첫 행 + 건수`` 까지만 읽는다.
-    중간에 생년월일이 빈 행이 하나라도 있으면 명부 끝이 그만큼 잘려 마지막
-    사람들이 조용히 누락된다. 여기서는 실제 마지막 행을 찾고, 앵커 열이 비어도
-    다른 열에 값이 있으면 데이터로 취급한다.
+    값이 **몇 건인지** 세어 ``첫 행 + 건수`` 까지 읽으면 안 된다. 중간에
+    생년월일이 빈 행이 하나라도 있으면 명부 끝이 그만큼 잘려 마지막 사람들이
+    조용히 누락된다. 여기서는 실제 마지막 행을 찾고, 앵커 열이 비어도 다른
+    열에 값이 있으면 데이터로 취급한다.
     """
     if cols:
         anchor_col = cols["birth_date"].index if "birth_date" in cols else _ANCHOR_COLUMN
@@ -389,7 +390,8 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
             code="JAE_PERIOD_END", required=False, **kw,
         )
 
-        # 종전 규칙: 중간정산일이 비었거나 입사일보다 이르면 입사일로 맞춘다.
+        # 중간정산일이 비었거나 입사일보다 이르면 입사일로 맞춘다. 근속
+        # 기산일을 여기 하나로 모아 두면 뒤에서 두 날짜를 매번 견주지 않아도 된다.
         if member.hire_date is not None and (
             member.settlement_date is None or member.settlement_date < member.hire_date
         ):

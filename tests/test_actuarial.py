@@ -30,7 +30,7 @@ class TestAttainedAge:
         assert attained_age(dt.date(1980, 3, 15), dt.date(2025, 12, 31)) == 45
 
     def test_birthday_itself_counts_as_passed(self) -> None:
-        """종전 규칙 의 ``dd >= dd2`` 규칙. 통상 만나이와 갈리는 유일한 지점이다."""
+        """생일 당일은 지난 것으로 센다. 통상 만나이와 갈리는 유일한 지점이다."""
         assert attained_age(dt.date(1980, 12, 31), dt.date(2025, 12, 31)) == 45
 
     def test_day_before_birthday(self) -> None:
@@ -216,7 +216,7 @@ class TestNormalizeRetirementReason:
         assert normalize_retirement_reason("") is None
 
     def test_wage_peak_follows_vba_but_is_flagged(self) -> None:
-        """종전 규칙 는 4(정년), 시트 수식은 3(중간정산)으로 갈린다."""
+        """'임금피크제도에 따른 중간정산' 은 정년으로도 중간정산으로도 읽힌다."""
         raw = "임금피크제도에 따른 중간정산"
         assert normalize_retirement_reason(raw) is RetirementReason.NORMAL
         assert is_ambiguous_reason(raw)
