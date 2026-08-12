@@ -157,6 +157,7 @@ def normal_retirement_age(
     wage_peak_age: int | None = None,
     is_executive: bool = False,
     declared_nra: int = 0,
+    contract_years: float = 0.0,
 ) -> int:
     """퇴직급여 정년연령.
 
@@ -169,7 +170,14 @@ def normal_retirement_age(
     ``declared_nra`` 는 명부에 **개인별로** 적어 온 정년연령이다. 계약으로 정년을
     달리 정한 임원처럼 직군 규칙 한 줄로 담을 수 없는 경우가 있어, 값이 있으면
     직군 규정보다 우선한다. 정년을 이미 넘겼는지 판정도 이 값으로 한다.
+
+    ``contract_years`` 는 명부의 잔여계약기간이다. 정년이 아니라 **계약 만료**
+    로 나가는 사람이라, 1 년 남았으면 ``현재연령 + 1`` 세에 퇴직한다. 정년도
+    임금피크도 그 뒤의 이야기이므로 계약이 가장 세다 — 남은 근무기간의 상한이다.
     """
+    if contract_years > 0:
+        return age + max(1, int(math.ceil(contract_years)))
+
     nra = rule.severance_nra
     add_age = rule.over_nra_add_age
     if is_executive:
@@ -188,11 +196,16 @@ def normal_retirement_age(
     return nra
 
 
-def longterm_retirement_age(age: int, rule: JobGroupRule) -> int:
+def longterm_retirement_age(
+    age: int, rule: JobGroupRule, *, contract_years: float = 0.0
+) -> int:
     """장기급여 정년연령.
 
-    퇴직급여와 달리 임금피크 연령을 보지 않는다.
+    퇴직급여와 달리 임금피크 연령을 보지 않는다. 계약 만료는 근무 자체가 끝나는
+    것이라 여기에도 걸린다 — 계약이 끝난 뒤의 근속포상은 받을 수 없다.
     """
+    if contract_years > 0:
+        return age + max(1, int(math.ceil(contract_years)))
     if age >= rule.longterm_nra:
         return age + rule.over_nra_add_age
     return rule.longterm_nra

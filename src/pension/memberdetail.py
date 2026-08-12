@@ -64,6 +64,10 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
         "지급액 반올림 단위": result.rounding_unit,
         "정액 추가지급": result.extra_payment,
     }
+    if result.db_ratio != 1.0:
+        applied["DB 비중 (혼합형)"] = (
+            f"{result.db_ratio:.2f} — 급여의 이만큼만 채무로 잡습니다"
+        )
     if result.progressive_service:
         applied["누진 보전 구간"] = (
             f"{result.progressive_service:g}년까지 연 {result.progressive_rate:g}배"

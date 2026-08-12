@@ -63,6 +63,8 @@ _GIVEN_LAST: Final = (
 )
 
 #: 임직원구분 원문. 명부마다 표기가 다르다는 사실 자체가 시험 대상이다.
+#: 표준 양식에는 이 열이 없다 — 직군으로 갈린다. 직군과 어긋나는 사람만
+#: 회사가 덧붙여 보낸 열처럼 명부에 남는다(:func:`_declared_type`).
 _TYPE_STAFF: Final = "직원"
 _TYPE_EXEC: Final = "임원"
 
@@ -214,6 +216,31 @@ def _birth_for_age(rng: random.Random, age: int, base: _dt.date) -> _dt.date:
     return born
 
 
+def _resident(birth: _dt.date, male: bool) -> str:
+    """주민등록번호 **앞 7자리**. 뒷 여섯 자리는 만들지 않는다.
+
+    양식이 앞 7자리만 달라고 적어 두었으니 시험 자료도 그만큼만 갖춘다.
+    모양을 다 갖춰 두면 진짜 주민번호와 구별되지 않아, 이 파일이 어디로
+    흘러가든 곤란해진다.
+    """
+    marker = (1 if male else 2) if birth.year < 2000 else (3 if male else 4)
+    return f"{birth:%y%m%d}-{marker}"
+
+
+def _declared_type(row: dict[str, Any]) -> dict[str, Any]:
+    """직군으로 알 수 있는 임직원구분은 명부에서 지운다.
+
+    표준 양식에 임직원구분 열이 없기 때문이다 — 직군과 겹친다. 다만 직군은
+    '정규직' 인데 실제로는 임원인 사람은 직군만으로 갈라낼 수 없어, 그런
+    사람의 것만 남긴다. 회사가 자기네 열을 하나 덧붙여 보낸 모양이 되고,
+    머리글로 여분 열을 잡아내는 경로까지 시험 자료가 짚고 간다.
+    """
+    expected = _TYPE_EXEC if _is_executive(row.get("job_group", "")) else _TYPE_STAFF
+    if row.get("employee_type") == expected:
+        return {k: v for k, v in row.items() if k != "employee_type"}
+    return row
+
+
 def _hire_date(birth: _dt.date, service_years: float, base: _dt.date) -> _dt.date:
     days = int(service_years * 365.25)
     hired = base - _dt.timedelta(days=days)
@@ -276,7 +303,8 @@ def _make_active(
         "employee_type": _TYPE_EXEC if executive else _TYPE_STAFF,
         "job_group": group,
         "name": _name(rng),
-        "gender": "남" if rng.random() < (0.78 if executive else 0.62) else "여",
+        "resident_number": _resident(
+            birth, rng.random() < (0.78 if executive else 0.62)),
         "birth_date": birth.isoformat(),
         "hire_date": hire.isoformat(),
         "monthly_wage": wage,
@@ -406,7 +434,7 @@ def _make_retired(
         "employee_type": _TYPE_EXEC if executive else _TYPE_STAFF,
         "job_group": group,
         "name": _name(rng),
-        "gender": "남" if rng.random() < 0.62 else "여",
+        "resident_number": _resident(birth, rng.random() < 0.62),
         "birth_date": birth.isoformat(),
         "hire_date": hire.isoformat(),
         "exit_date": exit_date.isoformat(),
@@ -623,8 +651,14 @@ def _spoil_active(
     for row in sample(0.02):                       # 생년월일·입사일 역전
         row["birth_date"], row["hire_date"] = row["hire_date"], row["birth_date"]
 
-    for row in sample(0.03):                       # 성별 표기 혼재
-        row["gender"] = rng.choice(("M", "F", "1", "2", "남자", ""))
+    for row in sample(0.03):                       # 주민번호 표기 혼재
+        value = str(row.get("resident_number", ""))
+        row["resident_number"] = rng.choice((
+            value.replace("-", ""),      # 붙여 쓴 것 — 읽힌다
+            value[:6],                   # 성별 자리가 없다 — 생년월일만 읽힌다
+            "",                          # 아예 빈 칸
+            value + "******",            # 뒷자리까지 보내 왔다 — 지우라고 알린다
+        ))
 
     for row in sample(0.02):                       # 성명 누락
         row["name"] = ""
@@ -768,7 +802,7 @@ def _case_report(
             "  · 생년월일과 입사일이 뒤바뀐 사람",
             "  · 사번 중복 (같은 사번 4건)",
             "  · 입사일이 산출기준일보다 늦은 사람",
-            "  · 성별 표기 혼재 (M / F / 1 / 2 / 남자 / 빈 값)",
+            "  · 주민등록번호 표기 혼재 (하이픈 없음 / 앞 6자리만 / 빈 값 / 뒷자리까지)",
             "  · 성명 누락, 퇴직급여추계액 음수",
             "  · 규정에 없는 직군 (Input 직군 규칙에서 한 직군을 뺐습니다)",
             "  · 퇴직자: 총지급액 0, 사외자산 지급액이 총지급액 초과, 퇴사일이 입사일보다 이름",
@@ -1025,9 +1059,11 @@ def write_case_roster(
             _spoil_active(rng, actives, base)
             _spoil_retired(rng, retirees)
 
-    active_rows, active_extras = _laid_out(actives, tpl.ACTIVE, ACTIVE_HEADER_ALIASES)
+    active_rows, active_extras = _laid_out(
+        [_declared_type(row) for row in actives], tpl.ACTIVE, ACTIVE_HEADER_ALIASES
+    )
     retired_rows, retired_extras = _laid_out(
-        retirees, tpl.RETIRED, RETIRED_HEADER_ALIASES
+        [_declared_type(row) for row in retirees], tpl.RETIRED, RETIRED_HEADER_ALIASES
     )
     period_start = base.replace(year=base.year - 1) + _dt.timedelta(days=1)
 

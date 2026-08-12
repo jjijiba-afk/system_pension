@@ -165,6 +165,12 @@ class MemberValuation:
     """적용한 지급액 반올림 단위(원). 0 이면 반올림하지 않았다."""
     extra_payment: float = 0.0
     """전별금·위로금 등 정액 추가지급액. 명부에 금액이 적힌 사람만 대상이다."""
+    db_ratio: float = 1.0
+    """적용한 DB 비중. 혼합형이 아니면 1 이다.
+
+    1 이 아니면 이 사람의 급여가 그만큼만 채무로 잡혔다는 뜻이다. 결과만 보고는
+    왜 절반인지 알 수 없으므로 적용값을 남긴다.
+    """
 
     by_cause: dict[str, dict[str, float]] = field(default_factory=dict)
     """퇴직사유별 몫 — ``{사유: {"dbo": …, "service_cost": …, "benefit_pv": …}}``.
@@ -441,6 +447,13 @@ def value_member(
     extra_payment = max(0.0, member.extra_pay_base_wage)
     result.extra_payment = extra_payment
 
+    # 혼합형(DC 일부 + DB 일부)의 DB 몫. `DC 1% / DB 99%` 면 0.99 다.
+    # DC 로 나간 몫은 낸 순간 회사 손을 떠나므로 확정급여채무가 아니다. 규정이
+    # 내는 급여에만 걸고, 위로금 같은 정액 추가지급에는 걸지 않는다 — 제도
+    # 분할과 무관하게 전액을 회사가 주기 때문이다.
+    db_share = member.db_ratio if 0 < member.db_ratio <= 1 else 1.0
+    result.db_ratio = db_share
+
     causes = assumptions.exit_causes
 
     # 누진(호봉)제를 쓰다가 연봉제로 바꾼 회사는 전환 전 근속분의 누진 배수를
@@ -504,7 +517,7 @@ def value_member(
         extra = cause.extra_amount
         if cause.extra_rule:
             extra += multiple_at(service, age, cause.extra_rule) * wage
-        return base, extra
+        return base * db_share, extra * db_share
 
     def benefit_at(
         service: float, age: float, wage: float, cause: CauseBenefit = _NO_CAUSE

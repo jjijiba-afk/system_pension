@@ -23,12 +23,16 @@ __all__ = [
 # 머리글은 **회사에 보내는 명부 양식과 같은 말** 을 쓴다. 결과 파일을 열어
 # 원자료를 되짚는 사람과 명부를 채운 사람이 다른 말을 보면, 같은 칸인 줄
 # 모르고 다시 물어보게 된다. 열 자리와 순서는 그대로다.
+#
+# 주민등록번호 앞 7자리는 여기 쓰지 않는다. 받은 자리에서 생년월일·성별로
+# 풀어 두었으므로 더 쓸 데가 없고, 결과 파일에까지 옮겨 적으면 개인정보가
+# 한 부 더 늘어난다.
 ACTIVE_UPLOAD_HEADERS: Final[tuple[str, ...]] = (
     "순번", "사번", "임직원구분", "직군", "성명", "성별",
     "생년월일", "입사일자", "중간정산일",
-    "30일 평균임금", "명예퇴직 기준임금", "회사 추계액",
-    "1일 통상임금", "휴직차감일수",
-    "퇴직급여 제도구분", "중간정산 지급금액", "장기급여 대상", "임금피크 연령",
+    "30일 평균임금", "명예퇴직 기준임금", "추계액",
+    "1일 통상임금", "휴직차감일수", "잔여계약기간",
+    "퇴직급여 제도구분", "DB비율", "중간정산 지급금액", "장기급여 대상", "임금피크 연령",
     "전입일", "장기급여 기지급액", "전입 인수액", "비고",
     "정년연령", "장기급여 정년연령",
     "지급률 규정", "장기급여 지급률 규정",
@@ -101,7 +105,9 @@ def build_active_upload(
             member.accrued_benefit,
             member.effective_daily_base_pay(),
             member.leave_days,
+            member.remaining_contract_years,
             member.plan.value if member.plan else "",
+            member.db_ratio,
             member.settlement_amount,
             member.longterm_target,
             member.wage_peak_age if member.wage_peak_age is not None else "",

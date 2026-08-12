@@ -45,6 +45,8 @@ class MemberRow:
     gender: str = ""
     cost_code: str = ""
     plan: str = ""
+    db_ratio: float = 1.0
+    """DB 비중. 1 이 아니면 급여의 그만큼만 채무로 잡힌 것이다(혼합형)."""
 
     birth_date: _dt.date | None = None
     hire_date: _dt.date | None = None
@@ -89,6 +91,7 @@ _COLUMNS: tuple[tuple[str, str, str, int], ...] = (
     ("성별", "gender", "", 7),
     ("원가코드", "cost_code", "", 14),
     ("제도구분", "plan", "", 11),
+    ("DB비율", "db_ratio", "0.00", 9),
     ("생년월일", "birth_date", _DATE, 12),
     ("입사일자", "hire_date", _DATE, 12),
     ("근속기산일", "settlement_date", _DATE, 12),
@@ -133,6 +136,7 @@ def build_member_rows(run: PensionRun) -> list[MemberRow]:
             gender=member.gender,
             cost_code=member.cost_code,
             plan=member.plan,
+            db_ratio=member.db_ratio,
             birth_date=member.birth_date,
             hire_date=member.hire_date,
             settlement_date=member.settlement_date,

@@ -23,9 +23,10 @@ from .layout import (
     resolve_layout,
 )
 from .models import ActiveMember, RateRules, RetiredMember, Roster
+from .jobgroup import decide_employee_type
 from .normalize import (
+    from_resident_number,
     normalize_benefit_plan,
-    normalize_employee_type,
     normalize_gender,
     normalize_retirement_reason,
     normalize_yes_no,
@@ -331,16 +332,29 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member = ActiveMember(seq=seq, row=row)
         member.employee_id = employee_id
         member.employee_type_raw = text(get("employee_type"))
-        member.employee_type = normalize_employee_type(member.employee_type_raw)
         member.job_group_raw = text(get("job_group"))
+        # 임직원구분 열을 따로 받지 않는다 — 직군과 겹친다. 적혀 왔으면 그쪽을
+        # 쓰고, 없으면 **사람이 정한 직군 매핑** 이 정해진 뒤 다시 잡는다
+        # (validation 의 직군 확정 단계). 여기서 넘겨짚지 않는다.
+        member.employee_type = decide_employee_type(member.employee_type_raw)
         member.name = text(get("name"))
+        member.resident_number = text(get("resident_number"))
         member.gender = normalize_gender(get("gender"))
 
         kw = dict(sheet=ACTIVE_SHEET, row=row, seq=seq, employee_id=employee_id)
         member.birth_date = _read_date(
             get("birth_date"), config, log, col=_col_of(cols, "birth_date"),
-            code="JAE_BIRTH_DATE", required=True, **kw,
+            code="JAE_BIRTH_DATE", required=not member.resident_number, **kw,
         )
+        # 주민등록번호 앞 7자리를 받은 명부는 생년월일·성별 칸을 따로 두지
+        # 않는다. 빈 칸만 채운다 — 적혀 있는 값을 덮으면 어느 쪽이 맞는지
+        # 가릴 기회가 사라진다.
+        if member.resident_number:
+            born, sex = from_resident_number(member.resident_number)
+            if member.birth_date is None:
+                member.birth_date = born
+            if sex is not None and not text(get("gender")):
+                member.gender = sex
         member.hire_date = _read_date(
             get("hire_date"), config, log, col=_col_of(cols, "hire_date"),
             code="JAE_HIRE_DATE", required=True, **kw,
@@ -386,6 +400,11 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.accrued_benefit = _number(get("accrued_benefit"))
         member.daily_base_pay = _number(get("daily_base_pay"))
         member.leave_days = abs(_number(get("leave_days")))
+        member.remaining_contract_years = abs(_number(get("remaining_contract_years")))
+        # DB비율은 `0.99` 로도 `99` 로도 온다. 1 을 넘으면 백분율로 본다 —
+        # DB 비중이 1 배를 넘는 제도는 없다. 비어 있으면 전액 DB 다.
+        ratio = _number(get("db_ratio"))
+        member.db_ratio = (ratio / 100 if ratio > 1 else ratio) if ratio > 0 else 1.0
         member.settlement_amount = _number(get("settlement_amount"))
         member.longterm_amount = _number(get("longterm_amount"))
         member.declared_nra = int(_number(get("declared_nra")))
@@ -465,16 +484,29 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
         member = RetiredMember(seq=seq, row=row)
         member.employee_id = employee_id
         member.employee_type_raw = text(get("employee_type"))
-        member.employee_type = normalize_employee_type(member.employee_type_raw)
         member.job_group_raw = text(get("job_group"))
+        # 임직원구분 열을 따로 받지 않는다 — 직군과 겹친다. 적혀 왔으면 그쪽을
+        # 쓰고, 없으면 **사람이 정한 직군 매핑** 이 정해진 뒤 다시 잡는다
+        # (validation 의 직군 확정 단계). 여기서 넘겨짚지 않는다.
+        member.employee_type = decide_employee_type(member.employee_type_raw)
         member.name = text(get("name"))
+        member.resident_number = text(get("resident_number"))
         member.gender = normalize_gender(get("gender"))
 
         kw = dict(sheet=RETIRED_SHEET, row=row, seq=seq, employee_id=employee_id)
         member.birth_date = _read_date(
             get("birth_date"), config, log, col=_col_of(cols, "birth_date"),
-            code="TOI_BIRTH_DATE", required=True, **kw,
+            code="TOI_BIRTH_DATE", required=not member.resident_number, **kw,
         )
+        # 주민등록번호 앞 7자리를 받은 명부는 생년월일·성별 칸을 따로 두지
+        # 않는다. 빈 칸만 채운다 — 적혀 있는 값을 덮으면 어느 쪽이 맞는지
+        # 가릴 기회가 사라진다.
+        if member.resident_number:
+            born, sex = from_resident_number(member.resident_number)
+            if member.birth_date is None:
+                member.birth_date = born
+            if sex is not None and not text(get("gender")):
+                member.gender = sex
         member.hire_date = _read_date(
             get("hire_date"), config, log, col=_col_of(cols, "hire_date"),
             code="TOI_HIRE_DATE", required=True, **kw,

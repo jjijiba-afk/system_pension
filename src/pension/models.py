@@ -66,6 +66,11 @@ class ActiveMember:
     hire_date: _dt.date | None = None
     settlement_date: _dt.date | None = None
     """중간정산일(의 익일). 공란이면 입사일로 채운다."""
+    resident_number: str = ""
+    """주민등록번호 **앞 7자리**. 생년월일과 성별을 여기서 뽑을 수 있다.
+
+    뒷 여섯 자리는 받지 않는다 — 받는 순간 개인정보 등급이 올라간다.
+    """
 
     monthly_wage: float = 0.0
     """30일 평균임금."""
@@ -75,6 +80,19 @@ class ActiveMember:
     """퇴직급여추계액(K-GAAP)."""
     daily_base_pay: float = 0.0
     """일 기본급(장기급여 휴가용). 0 이면 평균임금/30 으로 채운다."""
+    db_ratio: float = 1.0
+    """혼합형 제도의 DB 비중(0~1). ``DC 1% / DB 99%`` 면 0.99.
+
+    확정급여채무는 이 비율만큼만 진다. 나머지는 DC 라 부담금으로 끝난다.
+    비어 있으면 1.0(전액 DB).
+    """
+    remaining_contract_years: float = 0.0
+    """잔여 계약기간(년). 정년이 아니라 **계약 만료** 로 나가는 사람.
+
+    값이 있으면 퇴직 시점을 ``현재연령 + 이 값`` 으로 본다. 직군 규칙의
+    정년보다 우선한다 — 2년 뒤 계약이 끝나는 사람을 정년 60세 규칙에 걸어
+    두면 그 채무를 20년 뒤 것으로 잡는다.
+    """
     leave_days: float = 0.0
     """근속에서 빼는 휴직 일수. 기산일을 그만큼 뒤로 민다.
 
@@ -232,6 +250,8 @@ class RetiredMember:
     gender: Gender = Gender.MALE
     birth_date: _dt.date | None = None
     hire_date: _dt.date | None = None
+    resident_number: str = ""
+    """주민등록번호 **앞 7자리**. 생년월일과 성별을 여기서 뽑을 수 있다."""
     exit_date: _dt.date | None = None
     """퇴사일(DC전환일, 전출일)."""
     fund_payment_date: _dt.date | None = None

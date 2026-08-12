@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 from pathlib import Path
 
 import openpyxl
@@ -47,8 +48,15 @@ class TestRoundTrip:
         # 머리글로 열을 찾았으므로 값이 제자리에 들어가야 한다.
         assert [m.employee_id for m in roster.active] == ["A0001", "A0002"]
         assert roster.active[0].monthly_wage == 5_000_000
-        assert roster.active[1].employee_type.value == "임원"
+        # 임원인지는 읽는 자리에서 넘겨짚지 않는다. 직군 칸에 '임원' 이라고
+        # 적혀 오면 그것을 그대로 들고 있다가, 사람이 정한 직군 매핑을
+        # 확인한 뒤 검증 단계에서 임원으로 올린다.
+        assert roster.active[1].job_group_raw == "임원"
         assert roster.retired[0].total_payment == 45_000_000
+
+        # 주민등록번호 앞 7자리에서 생년월일과 성별을 읽어 낸다.
+        assert roster.active[1].birth_date == _dt.date(1972, 8, 15)
+        assert roster.active[1].gender.value == "여자"
 
     def test_standard_assumptions_load(self, pack) -> None:
         from pension.assumptions import load_assumptions
@@ -79,7 +87,9 @@ class TestOutOfTheBox:
         ))
 
         assert not run.issues.has_errors()
-        assert not run.issues.warnings
+        # 작성 예시의 임원은 지급배수 2 를 달고 있다. 배수가 규정 위에 곱해진다는
+        # 안내가 한 줄 붙는 것은 맞다 — 그 밖의 경고는 없어야 한다.
+        assert [i.code for i in run.issues.warnings] == ["JAE_PAYOUT_MULTIPLE_APPLIED"]
         assert run.valuation.headcount == 2
         assert run.valuation.dbo > 0
         write_report(run, tmp_path / "결과.xlsx")

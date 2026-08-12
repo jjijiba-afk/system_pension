@@ -67,6 +67,37 @@ class TestRetirementAge:
         assert longterm_retirement_age(59, rule) == 61
 
 
+class TestContractExpiry:
+    """잔여계약기간은 근무기간의 **상한** 이다.
+
+    정년이 아니라 계약 만료로 나가는 사람이라, 정년도 임금피크도 그 뒤의
+    이야기다. 여기서 정년 쪽이 이기면 계약직이 정년까지 일하는 것으로 잡혀
+    채무가 몇 배로 부푼다.
+    """
+
+    def test_it_sets_the_exit_at_age_plus_the_years(self, rule: JobGroupRule) -> None:
+        assert normal_retirement_age(40, rule, contract_years=1) == 41
+        assert normal_retirement_age(40, rule, contract_years=3) == 43
+
+    def test_it_beats_the_rule_and_the_wage_peak(self, rule: JobGroupRule) -> None:
+        assert normal_retirement_age(
+            50, rule, wage_peak_age=57, declared_nra=63, contract_years=2
+        ) == 52
+
+    def test_a_part_year_still_runs_to_the_end_of_that_year(
+        self, rule: JobGroupRule
+    ) -> None:
+        """0.5년 남았어도 그 해에는 일한다. 0 년으로 깎으면 근무기간이 사라진다."""
+        assert normal_retirement_age(40, rule, contract_years=0.5) == 41
+
+    def test_empty_means_the_rule_still_decides(self, rule: JobGroupRule) -> None:
+        assert normal_retirement_age(40, rule, contract_years=0) == 60
+
+    def test_longterm_ends_with_the_contract_too(self, rule: JobGroupRule) -> None:
+        """계약이 끝난 뒤의 근속포상은 받을 수 없다."""
+        assert longterm_retirement_age(40, rule, contract_years=2) == 42
+
+
 class TestNormalizeEmployeeType:
     @pytest.mark.parametrize("raw", ["임원", "임", "Y", "y", 2, "2"])
     def test_executive_tokens(self, raw: object) -> None:
@@ -85,6 +116,61 @@ class TestNormalizeGender:
     @pytest.mark.parametrize("raw", ["남자", "남", 1, 3, "", None])
     def test_everything_else_is_male(self, raw: object) -> None:
         assert normalize_gender(raw) is Gender.MALE
+
+
+class TestResidentNumber:
+    """주민등록번호 앞 7자리에서 생년월일과 성별을 읽는다.
+
+    여기가 틀리면 연령이 100년 어긋나고, 그 사람은 이미 죽었거나 아직 태어나지
+    않은 것으로 잡힌다. 검증에 걸리기는 하지만 그 전에 맞게 읽어야 한다.
+    """
+
+    @pytest.mark.parametrize("raw", ["850305-1", "8503051", "850305 1", " 850305-1 "])
+    def test_it_reads_however_it_is_typed(self, raw: str) -> None:
+        from pension.normalize import from_resident_number
+
+        born, sex = from_resident_number(raw)
+        assert born == dt.date(1985, 3, 5)
+        assert sex is Gender.MALE
+
+    @pytest.mark.parametrize(
+        ("marker", "year", "sex"),
+        [
+            ("1", 1985, Gender.MALE), ("2", 1985, Gender.FEMALE),
+            ("3", 2085, Gender.MALE), ("4", 2085, Gender.FEMALE),
+        ],
+    )
+    def test_the_marker_says_the_century_and_the_sex(
+        self, marker: str, year: int, sex: Gender
+    ) -> None:
+        from pension.normalize import from_resident_number
+
+        born, read = from_resident_number(f"850305-{marker}")
+        # 2000년대 표기는 아직 오지 않은 날이라 100년 당겨진다.
+        expected = year if year <= dt.date.today().year else year - 100
+        assert born is not None and born.year == expected
+        assert read is sex
+
+    def test_six_digits_give_the_date_but_not_the_sex(self) -> None:
+        """성별 자리가 없으면 성별은 모르는 것이다. 남자로 넘겨짚지 않는다."""
+        from pension.normalize import from_resident_number
+
+        born, sex = from_resident_number("850305")
+        assert born == dt.date(1985, 3, 5)
+        assert sex is None
+
+    @pytest.mark.parametrize("raw", ["", None, "12345", "859905-1", "abc"])
+    def test_what_cannot_be_read_is_not_guessed(self, raw: object) -> None:
+        from pension.normalize import from_resident_number
+
+        assert from_resident_number(raw) == (None, None)
+
+    def test_it_never_returns_a_future_birth_date(self) -> None:
+        """`051231-1` 처럼 세기 자리를 잘못 적어 와도 연령이 음수가 되지 않는다."""
+        from pension.normalize import from_resident_number
+
+        born, _sex = from_resident_number("051231-3")
+        assert born is not None and born < dt.date.today()
 
 
 class TestNormalizeBenefitPlan:

@@ -78,8 +78,9 @@ class TestOnePopulation:
 class TestOneFeatureEach:
     def test_the_baseline_carries_none_of_them(self, pack) -> None:
         """기준 명부에는 특이사항 칸이 하나도 차 있지 않아야 한다."""
-        columns = ("휴직차감일수", "중간정산일", "임금피크 연령", "개인 지급배수",
-                   "정년연령", "명예퇴직 기준임금", "추가지급 기본급")
+        columns = ("휴직차감일수", "중간정산일", "임금피크 연령", "임원지급배수",
+                   "정년연령", "명예퇴직 기준임금", "추가지급 기본급",
+                   "DB비율", "잔여계약기간")
         rows = _rows(pack / f"{BASE_SPEC.title}.xlsx")
         for column in columns:
             assert not any(r.get(column) for r in rows), f"기준 명부에 '{column}' 이 있다"
@@ -95,7 +96,8 @@ class TestOneFeatureEach:
         if feature.scope == "전원":
             targets = rows
         elif feature.scope == "임원":
-            targets = [r for r in rows if str(r.get("임직원구분")) == "임원"]
+            # 임직원구분 열은 양식에서 뺐다 — 임원인지는 직군으로 안다.
+            targets = [r for r in rows if "임원" in str(r.get("직군"))]
         else:
             targets = [r for r in rows if str(r.get("직군")) == feature.scope]
 

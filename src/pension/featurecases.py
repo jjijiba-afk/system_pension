@@ -164,6 +164,18 @@ def _extra_pay(rows: list[dict[str, Any]], base: _dt.date) -> None:
         row["note"] = "정년퇴직 시 기본급 1개월분 추가지급"
 
 
+def _mixed_plan(rows: list[dict[str, Any]], base: _dt.date) -> None:
+    for row in rows:
+        row["db_ratio"] = 0.5
+        row["note"] = "혼합형 — DC 50% / DB 50%"
+
+
+def _contract_end(rows: list[dict[str, Any]], base: _dt.date) -> None:
+    for row in rows:
+        row["remaining_contract_years"] = 2
+        row["note"] = "계약 만료까지 2년 — 정년이 아니라 그때 나간다"
+
+
 def _to_dc(rows: list[dict[str, Any]], base: _dt.date) -> None:
     for row in rows:
         row["plan"] = "DC"
@@ -186,6 +198,8 @@ _APPLY: Final[dict[str, Callable[[list[dict[str, Any]], _dt.date], None]]] = {
     "명예퇴직임금": _honorary,
     "추가지급": _extra_pay,
     "DC전환": _to_dc,
+    "혼합형": _mixed_plan,
+    "계약만료": _contract_end,
     "임금단위": _thousand_won,
 }
 
@@ -254,6 +268,23 @@ FEATURES: Final[tuple[FeatureSpec, ...]] = (
         detail="계약직 전원이 DC 로 전환했다.",
         scope="계약직", expect=DOWN,
         why="DC 가입자는 확정급여채무에서 통째로 빠진다.",
+    ),
+    FeatureSpec(
+        key="혼합형", title="혼합형 DB 50%",
+        detail="전원이 혼합형이고 DB 비중이 절반이다.",
+        scope="전원", expect=DOWN,
+        why="DC 로 낸 몫은 낸 순간 회사 손을 떠나 확정급여채무가 아니다. "
+            "DB 비중만 남으므로 채무는 대략 절반이 된다 — 정액 위로금이 없는 "
+            "명부라 여기서는 거의 정확히 절반이어야 한다.",
+    ),
+    FeatureSpec(
+        key="계약만료", title="계약직 잔여계약기간 2년",
+        detail="계약직 전원이 정년이 아니라 2년 뒤 계약 만료로 나간다.",
+        scope="계약직", expect=UP,
+        why="지급 시점이 정년에서 2년 뒤로 크게 당겨진다. 임금상승률이 할인율보다 "
+            "낮으면 잔여연수가 짧아질수록 현가가 커지고(임금피크와 같은 이치), "
+            "그 사이에 중도퇴직·사망으로 빠질 틈도 줄어 도달확률이 오른다. "
+            "둘 다 같은 쪽을 가리키므로 증가한다.",
     ),
     FeatureSpec(
         key="임금단위", title="임금 단위 혼재 (천원)",

@@ -140,6 +140,39 @@ class TestSingleDecrementCase:
         # 배수는 급여만 키운다. 귀속비율은 분자·분모가 같이 커져 그대로다.
         assert doubled.past_service == plain.past_service
 
+    def test_the_db_share_scales_the_whole_benefit(
+        self, config: CalculationConfig
+    ) -> None:
+        """혼합형의 DC 몫은 확정급여채무가 아니다.
+
+        `DC 1% / DB 99%` 인 회사에서 전액을 채무로 잡으면 1% 만큼 과대계상된다.
+        비중이 클수록(DC 50%) 티가 나야 정상이다.
+        """
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        full = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+
+        member.db_ratio = 0.5
+        half = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+
+        assert half.db_ratio == 0.5
+        assert half.dbo == pytest.approx(full.dbo / 2, rel=1e-9)
+        assert half.service_cost == pytest.approx(full.service_cost / 2, rel=1e-9)
+        # 비중은 급여만 깎는다. 귀속비율은 분자·분모가 같이 줄어 그대로다.
+        assert half.past_service == full.past_service
+
+    def test_an_empty_db_share_means_the_whole_benefit(
+        self, config: CalculationConfig
+    ) -> None:
+        """비운 칸을 0 으로 읽으면 그 사람 채무가 통째로 사라진다."""
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        full = value_member(member, config, make_assumptions(discount=0.05, salary=0.0))
+
+        for bad in (0.0, -1.0, 1.5):
+            member.db_ratio = bad
+            assert value_member(
+                member, config, make_assumptions(discount=0.05, salary=0.0)
+            ).dbo == pytest.approx(full.dbo, rel=1e-9)
+
     def test_a_formula_that_already_uses_the_multiple_is_not_scaled_twice(
         self, config: CalculationConfig
     ) -> None:

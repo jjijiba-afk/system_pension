@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import datetime as _dt
+
 from enum import Enum
 from typing import Final
 
@@ -109,6 +111,39 @@ def normalize_employee_type(value: object) -> EmployeeType:
     if token.startswith("임원") or token.startswith("이사") or token.startswith("등기임원"):
         return EmployeeType.EXECUTIVE
     return EmployeeType.STAFF
+
+
+def from_resident_number(value: object) -> tuple[_dt.date | None, Gender | None]:
+    """주민등록번호 **앞 7자리** 에서 (생년월일, 성별).
+
+    ``850305-1`` / ``8503051`` / ``850305 1`` 을 모두 읽는다. 뒷자리 한 자가
+    세기와 성별을 함께 말해 준다 — 1·2 는 1900년대, 3·4 는 2000년대이고
+    홀수가 남자다. 그 한 자가 없으면 성별을 정할 수 없으므로 ``None`` 을
+    돌려준다(남자로 넘겨짚지 않는다).
+
+    **뒷 여섯 자리는 보지 않는다.** 명부에 그것까지 적어 보내면 개인정보가
+    한 단계 올라가므로, 양식도 앞 7자리만 달라고 적어 둔다.
+    """
+    digits = "".join(ch for ch in text(value) if ch.isdigit())
+    if len(digits) < 6:
+        return None, None
+
+    marker = digits[6] if len(digits) > 6 else ""
+    century = 2000 if marker in ("3", "4", "7", "8") else 1900
+    try:
+        born = _dt.date(century + int(digits[0:2]), int(digits[2:4]), int(digits[4:6]))
+    except ValueError:
+        return None, None
+
+    # 아직 오지 않은 날이 생년월일일 수는 없다. 세기 자리를 잘못 적어 온
+    # 것으로 보고 100년 당긴다 — 그대로 두면 연령이 음수가 된다.
+    if born > _dt.date.today():
+        born = born.replace(year=born.year - 100)
+
+    if not marker:
+        return born, None
+    gender = Gender.MALE if int(marker) % 2 == 1 else Gender.FEMALE
+    return born, gender
 
 
 def normalize_gender(value: object) -> Gender:

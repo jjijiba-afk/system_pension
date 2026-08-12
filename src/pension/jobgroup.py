@@ -56,6 +56,30 @@ _EXECUTIVE_TOKENS: Final[tuple[str, ...]] = (
 )
 
 
+def decide_employee_type(
+    employee_type: object = "", mapped_group: object = ""
+) -> EmployeeType:
+    """이 사람이 임원인지.
+
+    임직원구분 열을 명부에서 받지 않는다 — 직군과 겹치는 칸이라, 둘이 어긋나면
+    어느 쪽을 믿을지 정할 수 없다. 대신 **사람이 정한 직군 매핑** 을 따른다.
+    명부의 '상무'·'등기이사' 를 어느 묶음으로 볼지는 [직군 규칙] 에서 사람이
+    정하고, 그 결과가 ``mapped_group`` 이다.
+
+    자동으로 넘겨짚지 않는 이유는 같은 '촉탁사원' 이라도 정년 후 재고용이면
+    계약직, 임원 예우 재고용이면 임원인 회사가 있기 때문이다. :func:`suggest_group`
+    이 제안은 하되 확정은 화면에서 한다.
+
+    임직원구분이 적혀 온 옛 명부는 그쪽을 먼저 본다.
+    """
+    raw = text(employee_type)
+    if raw:
+        return normalize_employee_type(raw)
+    mapped = text(mapped_group)
+    return (EmployeeType.EXECUTIVE if mapped and GROUP_EXECUTIVE in mapped
+            else EmployeeType.STAFF)
+
+
 @dataclass(slots=True)
 class RosterGroup:
     """명부에서 실제로 발견된 (직군, 임직원구분) 조합 하나."""

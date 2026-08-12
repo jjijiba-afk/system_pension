@@ -295,6 +295,18 @@ def validate_active(
                 )
         else:
             rule = config.job_group_rules[member.job_group_index]
+            # 임원인지는 **사람이 정한 직군 매핑** 이 말해 준다. 명부의
+            # '상무'·'등기이사' 를 어느 묶음으로 볼지는 [직군 규칙] 에서 정하고,
+            # 그 결정이 여기까지 내려온다 — 명부 글자를 기계가 넘겨짚지 않는다.
+            #
+            # 올리기만 하고 내리지는 않는다. 매핑이 '임원' 이면 임원으로 올리되,
+            # 이미 임원으로 잡힌 사람을 매핑이 직원으로 되돌리지는 않는다.
+            if not member.employee_type_raw:
+                from .jobgroup import GROUP_EXECUTIVE
+
+                mapped = text(rule.mapped_name or rule.source_name)
+                if GROUP_EXECUTIVE in mapped:
+                    member.employee_type = EmployeeType.EXECUTIVE
 
         # ── 날짜 정합성 ────────────────────────────────────────────
         if member.birth_date and member.hire_date and member.birth_date >= member.hire_date:
@@ -411,6 +423,16 @@ def validate_active(
                 value=member.payout_multiple, **kw,
             )
 
+        # 앞 7자리만 달라고 적어 두었는데 13자리가 통째로 온다. 산출에는 아무
+        # 지장이 없지만, 알려 주지 않으면 그 파일이 그대로 남는다.
+        if len("".join(c for c in member.resident_number if c.isdigit())) > 7:
+            log.warning(
+                "JAE_RESIDENT_TOO_LONG",
+                "주민등록번호 뒷자리까지 들어왔습니다. 산출에는 앞 7자리만 "
+                "쓰므로, 받은 파일의 뒷 여섯 자리를 지우고 보관하세요",
+                column=_col(sheet, "resident_number"), **kw,
+            )
+
         if member.accrued_benefit < 0:
             log.warning("JAE_ACCRUED_NEGATIVE", "퇴직급여추계액이 음수입니다",
                         column=_col(sheet, "accrued_benefit"),
@@ -425,6 +447,25 @@ def validate_active(
                 value=member.leave_days, **kw,
             )
 
+        if not 0 < member.db_ratio <= 1:
+            log.warning(
+                "JAE_DB_RATIO_RANGE",
+                f"DB비율 {member.db_ratio:g} 이 0 과 1 사이가 아닙니다. "
+                "`DC 1% / DB 99%` 면 0.99 (99 로 적어도 됩니다). "
+                "전액 DB 로 보고 계산합니다",
+                column=_col(sheet, "db_ratio"),
+                value=member.db_ratio, **kw,
+            )
+
+        if member.remaining_contract_years > 50:
+            log.warning(
+                "JAE_CONTRACT_YEARS_RANGE",
+                f"잔여계약기간 {member.remaining_contract_years:g}년이 상식 밖입니다. "
+                "**만료 연도가 아니라 남은 햇수** 를 적어야 합니다",
+                column=_col(sheet, "remaining_contract_years"),
+                value=member.remaining_contract_years, **kw,
+            )
+
         _check_progressive_split(member, config, sheet, log, kw)
 
         # ── 정년연령 확정 ──────────────────────────────────────────
@@ -436,8 +477,11 @@ def validate_active(
                 wage_peak_age=member.wage_peak_age,
                 is_executive=member.employee_type is EmployeeType.EXECUTIVE,
                 declared_nra=member.declared_nra,
+                contract_years=member.remaining_contract_years,
             )
-            member.longterm_nra = longterm_retirement_age(member.age, rule)
+            member.longterm_nra = longterm_retirement_age(
+                member.age, rule, contract_years=member.remaining_contract_years
+            )
 
             if (
                 member.severance_nra <= member.age
