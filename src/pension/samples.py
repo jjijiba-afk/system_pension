@@ -144,11 +144,17 @@ def write_standard_assumptions(
     path: str | Path,
     *,
     job_groups: tuple[str, ...] = DEFAULT_GROUPS,
+    benefit_rules: tuple[str, ...] = (),
     yield_curve_path: str | Path | None = None,
     grade: str = "",
     size: str = DEFAULT_SIZE,
 ) -> Path:
     """기본값이 채워진 기초율 워크북을 만든다.
+
+    :param benefit_rules: 직군 말고 **지급률 열로만** 더 세울 규정명.
+        사람마다 다른 규정이 걸리는 회사에서는 명부의 규정명이 직군과 다르다.
+        그 이름이 지급률 표에 없으면 산출이 직군으로 물러서므로, 양식을 함께
+        보낼 때는 명부가 쓸 이름을 여기에 세워 둔다.
 
     사망률만 근거 있는 값이고 나머지는 회사가 손봐야 한다. 그 구분이 파일을
     여는 순간 보이도록 시트마다 비고를 적는다 — 파일이 담당자에서 감사인까지
@@ -163,6 +169,7 @@ def write_standard_assumptions(
 
     path = Path(path)
     groups = [g for g in job_groups if g] or list(DEFAULT_GROUPS)
+    scales = groups + [r for r in benefit_rules if r and r not in groups]
     n = len(groups)
     size = normalize_size(size)
 
@@ -244,14 +251,14 @@ def write_standard_assumptions(
     # 퇴직금)가 된다. 예시 숫자를 채워 두면 그 값이 진짜 규정인 줄 알고 그냥
     # 산출해 버리는 일이 생긴다.
     make(
-        BENEFIT_SHEET, ["근속연수", *groups], [],
+        BENEFIT_SHEET, ["근속연수", *scales], [],
         "· 30일 평균임금 대비 지급배수입니다. **비워 두면 법정 퇴직금**(근속 1년당 30일분)입니다.\n"
         "· 회사 규정이 법정과 다르면 근속연수별 배수를 여기에 적으세요 — 적는 순간 그 값이 쓰입니다.\n"
         "· 누진제라면 구간별 연 배수를 줄마다 적고 '지급률규정' 방식을 '누진' 으로 바꾸세요.",
     )
     make(
         BENEFIT_RULE_SHEET, ["규정명", "방식", "수식", "설명"],
-        [[g, STATUTORY_MODE, "", "법정 퇴직금 (근속 1년당 30일분)"] for g in groups],
+        [[g, STATUTORY_MODE, "", "법정 퇴직금 (근속 1년당 30일분)"] for g in scales],
         "· 방식: 법정(기본 — 지급률 표가 비면 배수=근속연수, 표에 값이 있으면 그 값) /\n"
         "        누적(표 값이 누적 배수) / 누진(표 값이 구간별 연 배수) / 수식\n"
         "· 수식 변수: t=근속연수, x=연령, N=정년연령, S=30일 평균임금, 제도, 직군, 임직원, 배수\n"
@@ -465,15 +472,22 @@ def write_sample_pack(
     size: str = DEFAULT_SIZE,
 ) -> list[Path]:
     """기본 파일 한 벌을 폴더에 만든다. 만든 파일 경로 목록을 돌려준다."""
+    from .rostertemplate import EXAMPLE_RULES
+
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
+    # 명부 양식의 작성 예시가 쓰는 규정명을 지급률 열에도 세운다. 없으면 양식
+    # 한 벌을 그대로 돌렸을 때 '기초율에 없는 규정' 경고가 뜬다 — 우리가 보낸
+    # 두 파일이 서로 안 맞는다는 뜻이라 그대로 두면 안 된다.
     return [
         write_default_roster(directory / ROSTER_DEFAULT),
         write_standard_assumptions(
             directory / STANDARD_ASSUMPTIONS, job_groups=job_groups,
+            benefit_rules=EXAMPLE_RULES,
             yield_curve_path=yield_curve_path, grade=grade, size=size,
         ),
         write_roster_template(directory / ROSTER_TEMPLATE),
-        write_template(directory / TEMPLATE_ASSUMPTIONS, job_groups=job_groups),
+        write_template(directory / TEMPLATE_ASSUMPTIONS, job_groups=job_groups,
+                       benefit_rules=EXAMPLE_RULES),
         write_curve_template(directory / CURVE_TEMPLATE),
     ]

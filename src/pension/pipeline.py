@@ -19,7 +19,7 @@ from .models import Roster
 from .normalize import BenefitPlan, RetirementReason
 from .planassets import PlanAssets, build_plan_assets
 from .projection import Projection, project_next_year
-from .readers import read_roster
+from .readers import ACTIVE_SHEET, read_roster
 from .rollforward import (
     LongTermRollForward,
     RollForward,
@@ -356,6 +356,33 @@ def _read_payout_rules(assumptions_path: str | Path) -> list:
         wb.close()
 
 
+def _check_rule_names(roster, assumptions, log: IssueLog) -> None:
+    """명부에 적어 온 지급률 규정명이 기초율에 있는지.
+
+    없으면 산출은 직군으로 물러서서 계속 간다. 문제는 그 사실이 결과 어디에도
+    드러나지 않는다는 것이다 — 그 규정에 걸어 둔 [퇴직사유] 별 차등이 이름이
+    안 맞아 통째로 빠지는데, 배수는 직군 것으로 채워져 **오류 없이 그럴듯한
+    숫자** 가 나온다. 몇 명이 어느 이름으로 걸렸는지 한 줄로 말해 준다.
+    """
+    from collections import Counter
+
+    scale = assumptions.severance_benefit
+    unknown: Counter = Counter()
+    for member in roster.active:
+        name = member.rules.severance_benefit
+        if name and member.job_group and not scale.knows(name):
+            unknown[(name, member.job_group)] += 1
+
+    for (name, group), count in sorted(unknown.items(), key=lambda x: -x[1]):
+        log.warning(
+            "JAE_BENEFIT_RULE_UNKNOWN",
+            f"명부의 지급률 규정 '{name}' 이(가) 기초율에 없어 직군 '{group}' 으로 "
+            f"산출했습니다({count}명). 그 이름에 걸어 둔 퇴직사유별 차등이 있다면 "
+            "함께 빠집니다 — [지급률] 열 이름을 명부와 맞추세요",
+            sheet=ACTIVE_SHEET, value=name,
+        )
+
+
 def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun:
     """산출 전 과정을 실행한다.
 
@@ -365,6 +392,8 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
     config, roster, assumptions, log, general = load_inputs(
         options.roster_path, options.assumptions_path, options.base_date
     )
+
+    _check_rule_names(roster, assumptions, log)
 
     if log.has_errors() and not options.allow_errors:
         raise PensionDataError(

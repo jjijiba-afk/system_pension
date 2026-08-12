@@ -142,6 +142,11 @@ RETIRED = [
     ("기타", "비고", "자유 기재. 산출에는 쓰지 않습니다", "", ""),
 ]
 
+#: 작성 예시 두 줄이 쓰는 규정명. 기초율 양식이 이 이름으로 지급률 열을 함께
+#: 만들어야 한다 — 양식 한 벌을 그대로 돌렸을 때 '기초율에 없는 규정' 경고가
+#: 뜨면, 우리가 보낸 두 파일이 서로 안 맞는다는 뜻이다.
+EXAMPLE_RULES: tuple[str, ...] = ("규정A", "임원규정")
+
 THIN = Side(style="thin", color="B8C0D0")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 

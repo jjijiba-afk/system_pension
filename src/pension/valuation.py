@@ -397,6 +397,15 @@ def value_member(
         return result
 
     rule = member.rules.severance_benefit or member.job_group
+    # 명부에 적어 온 규정명이 가정에 없으면 직군으로 물러선다. 그대로 두면
+    # 배수는 '없는 규정' 이라 법정 퇴직금으로 떨어지고, 그 규정에 걸어 둔
+    # [퇴직사유] 별 차등은 이름이 안 맞아 통째로 무시된다 — 배수 쪽만 조용히
+    # 살아나 **오류 없이 그럴듯한 숫자** 가 나온다. 검증이 사번까지 짚어 준다.
+    known = (assumptions.severance_benefit.knows(rule)
+             or assumptions.exit_causes.covers(rule))
+    if rule and member.job_group and not known:
+        rule = member.job_group
+        result.benefit_rule = rule
     withdrawal_rule = member.rules.severance_withdrawal or member.job_group
     salary_rule = member.rules.severance_salary_increase or member.job_group
 

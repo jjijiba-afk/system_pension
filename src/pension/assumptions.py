@@ -365,6 +365,16 @@ class BenefitScale:
         name = text(rule)
         return name in self.curves or name in self.formulas
 
+    def knows(self, rule: str) -> bool:
+        """이 이름의 규정이 가정에 **있기는 한지**.
+
+        :meth:`has_rule` 과 달리 방식만 정해 둔 규정(값이 없는 '법정' 열)도
+        센다. 명부에 적혀 온 규정명이 가정에 있는지 가릴 때 쓴다 — 이때는
+        값이 들어 있는지가 아니라 그 이름이 우리 규정 목록에 있는지가 문제다.
+        """
+        name = text(rule)
+        return name in self.curves or name in self.formulas or name in self.modes
+
 
 CAUSE_VOLUNTARY: Final = "중도"
 """퇴직사유 — 자발적 중도퇴직."""
@@ -449,6 +459,16 @@ class CauseBenefits:
 
     def is_empty(self) -> bool:
         return not self.rules
+
+    def covers(self, rule: str) -> bool:
+        """이 이름에 걸린 사유별 규정이 하나라도 있는지.
+
+        지급률 표에 열이 없어도 사유별 규정만으로 급여가 정해지는 회사가 있다
+        (사망에만 정액을 주는 줄이 그렇다). 그런 이름을 '모르는 규정' 으로
+        보고 직군으로 물러서면 사유별 차등이 통째로 사라진다.
+        """
+        name = text(rule)
+        return any(key == name for key, _cause in self.rules)
 
     def rule_names(self) -> list[str]:
         """사유별 규정이 참조하는 지급률 규정명 전부. 검증에 쓴다."""
@@ -1066,16 +1086,23 @@ def write_assumptions(
     return path
 
 
-def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
+def write_template(path: str | Path, *, job_groups: Iterable[str] = (),
+                   benefit_rules: Iterable[str] = ()) -> Path:
     """빈 기초율 워크북 양식을 만든다.
 
     담당자가 채워 넣을 시트 구조와 예시 몇 줄을 넣어 준다.
+
+    :param benefit_rules: 직군 말고 **지급률 열로만** 더 세울 규정명. 명부에
+        직군과 다른 규정명이 적혀 오는 회사를 위한 자리다.
     """
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
 
     path = Path(path)
-    rules = [text(g) for g in job_groups if text(g)] or ["정규직", "임원"]
+    groups = [text(g) for g in job_groups if text(g)] or ["정규직", "임원"]
+    rules = groups + [
+        text(r) for r in benefit_rules if text(r) and text(r) not in groups
+    ]
 
     wb = openpyxl.Workbook()
     header_font = Font(bold=True, color="FFFFFF")
@@ -1106,14 +1133,14 @@ def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
         [[1, 0.03], [6, 0.025]],
     )
     make(
-        PROMOTION_SHEET, ["연령", *rules],
+        PROMOTION_SHEET, ["연령", *groups],
         "· 승급(호봉·승진) 상승률. A1 을 '근속'으로 바꾸면 근속연수 기준으로 조회합니다.",
-        [[20, *[0.02] * len(rules)], [40, *[0.01] * len(rules)], [55, *[0.0] * len(rules)]],
+        [[20, *[0.02] * len(groups)], [40, *[0.01] * len(groups)], [55, *[0.0] * len(groups)]],
     )
     make(
-        WITHDRAWAL_SHEET, ["연령", *rules],
+        WITHDRAWAL_SHEET, ["연령", *groups],
         "· 사망을 제외한 연간 중도퇴직률입니다. A1 을 '근속'으로 바꾸면 근속연수 기준입니다.",
-        [[20, *[0.15] * len(rules)], [35, *[0.06] * len(rules)], [50, *[0.02] * len(rules)]],
+        [[20, *[0.15] * len(groups)], [35, *[0.06] * len(groups)], [50, *[0.02] * len(groups)]],
     )
     make(
         MORTALITY_SHEET, ["연령", "남자", "여자"],
@@ -1137,10 +1164,10 @@ def write_template(path: str | Path, *, job_groups: Iterable[str] = ()) -> Path:
         [[rule, CUMULATIVE, "", ""] for rule in rules],
     )
     make(
-        LONGTERM_SHEET, ["근속연수", *rules],
+        LONGTERM_SHEET, ["근속연수", *groups],
         "· 근속 포상·장기근속휴가의 지급일수입니다(일 기본급 × 일수). 해당 근속연수 도달 시 지급으로 봅니다."
         "\n· 한 규정에 항목이 여럿이면 '장기급여규정' 시트의 항목 이름으로 열을 더 만드세요.",
-        [[10, *[10] * len(rules)], [20, *[20] * len(rules)], [30, *[30] * len(rules)]],
+        [[10, *[10] * len(groups)], [20, *[20] * len(groups)], [30, *[30] * len(groups)]],
     )
     make(
         LONGTERM_RULE_SHEET, list(LONGTERM_RULE_HEADERS),
