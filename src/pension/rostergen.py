@@ -20,7 +20,7 @@
     사번이 중복된다. 검증 리포트가 무엇을 어떻게 잡아내는지 보여 준다.
 
     다른 하나는 **자료는 옳은데 산출이 까다로운 경우** (:data:`PRACTICE_CASES`).
-    임원 세법한도 프로즌, 연봉제 전환 누진 보전, 프로즌 DC전환자, DC전환 후
+    임원 세법한도 동결, 연봉제 전환 누진 보전, 동결 DC전환자, DC전환 후
     퇴직, 명예퇴직, 사망 정액 가산 같은 것들이며 비고란에 무엇인지 적어 둔다.
     검증이 잡아 주지 않고 담당자가 규정을 읽어 반영해야 하는 것들이라, 시험
     자료에 있어야 연습이 된다.
@@ -140,8 +140,8 @@ CASES: Final[tuple[CaseSpec, ...]] = (
             "  날짜 서식 혼재 · 제도구분 누락 · 임금 0 · 사번 중복 · 생년월일과 입사일 역전 ·",
             "  Input 에 없는 직군 · 퇴사일이 입사일보다 이른 퇴직자 · 지급액 0 등입니다.",
             "· 다른 하나는 **자료는 옳은데 산출이 까다로운 경우** 입니다. 비고란을 보세요.",
-            "  임원 세법한도 프로즌(같은 사번 두 줄) · 연봉제 전환 누진 보전 ·",
-            "  프로즌 DC전환자 · DC전환 후 퇴직(재직·퇴직 사번 중복) · 퇴직예정자 ·",
+            "  임원 세법한도 동결(같은 사번 두 줄) · 연봉제 전환 누진 보전 ·",
+            "  동결 DC전환자 · DC전환 후 퇴직(재직·퇴직 사번 중복) · 퇴직예정자 ·",
             "  명예퇴직 예정자 · 정년 시 기본급 추가지급 · 휴직차감 · 사망 정액 가산 ·",
             "  명예퇴직 위로금 · 임금 단위 혼재 · 장기급여 대상 표기 혼재.",
             "· 평균임금 체크금액을 1,000,000원으로 두어 그 미만인 사람도 걸립니다.",
@@ -481,11 +481,11 @@ def _dirty_date(rng: random.Random, value: str) -> Any:
 #: 실무 스터디에서 실제로 마주친 산출 특이사항. 확률로 흩뿌리지 않고 **반드시
 #: 한 건씩** 심는다 — 안내문이 있다고 적어 둔 것은 명부에 있어야 한다.
 PRACTICE_CASES: Final[tuple[tuple[str, str], ...]] = (
-    ("임원 세법한도 프로즌",
+    ("임원 세법한도 동결",
      "같은 사번이 두 줄. 2019년 이전은 3배수·이후는 2배수로 지급구간이 갈린다."),
     ("연봉제 전환 누진 보전",
      "호봉제 시절 근속분의 누진 배수를 보전한다. 근속은 이어지고 배수만 갈린다."),
-    ("프로즌 DC전환자",
+    ("동결 DC전환자",
      "DC 로 전환했지만 전환 전 과거분은 퇴직금으로 남아 있다."),
     ("DC전환 후 퇴직 — 사번 중복",
      "같은 사번이 재직자명부와 퇴직자명부에 함께 있다."),
@@ -533,7 +533,7 @@ def _add_practice_cases(
     def date_of(row: dict[str, Any], key: str) -> _dt.date:
         return _dt.date.fromisoformat(str(row[key])[:10])
 
-    # ── 임원 세법한도 프로즌 — 같은 사번을 두 줄로 나눈다 ──────────
+    # ── 임원 세법한도 동결 — 같은 사번을 두 줄로 나눈다 ──────────
     exec_row = take(actives, employee_type=_TYPE_EXEC)
     hire = date_of(exec_row, "hire_date")
     split = _dt.date(2019, 12, 31)
@@ -541,7 +541,7 @@ def _add_practice_cases(
         wage = float(exec_row["monthly_wage"])
         exec_row["period_end"] = split.isoformat()
         exec_row["payout_multiple"] = 3.0
-        exec_row["note"] = "19.12.31 이전 기간만 3배수 (세법한도 프로즌)"
+        exec_row["note"] = "19.12.31 이전 기간만 3배수 (세법한도 동결)"
         later = dict(exec_row)
         later["period_start"] = (split + _dt.timedelta(days=1)).isoformat()
         later.pop("period_end", None)
@@ -549,7 +549,7 @@ def _add_practice_cases(
         later["monthly_wage"] = int(wage * 1.35 / 1_000) * 1_000
         later["note"] = "20.1.1 이후 기간만 2배수"
         actives.insert(actives.index(exec_row) + 1, later)
-        planted["임원 세법한도 프로즌"] = exec_row["employee_id"]
+        planted["임원 세법한도 동결"] = exec_row["employee_id"]
 
     # ── 연봉제 전환 누진 보전 ────────────────────────────────────
     row = take(actives, employee_type=_TYPE_STAFF)
@@ -560,7 +560,7 @@ def _add_practice_cases(
         row["note"] = "연봉제 전환 이전 누진 보전 + 이후 법정제"
         planted["연봉제 전환 누진 보전"] = row["employee_id"]
 
-    # ── 프로즌 DC전환자 (과거분은 퇴직금으로 남음) ───────────────
+    # ── 동결 DC전환자 (과거분은 퇴직금으로 남음) ───────────────
     frozen = take(actives, employee_type=_TYPE_STAFF)
     frozen["plan"] = "DC"
     moved = base - _dt.timedelta(days=rng.randint(400, 2_000))
@@ -568,8 +568,8 @@ def _add_practice_cases(
         frozen["settlement_date"] = moved.isoformat()
         frozen["settlement_amount"] = int(
             float(frozen["monthly_wage"]) * rng.uniform(2, 7) / 1_000) * 1_000
-    frozen["note"] = "DC 전환(프로즌). 전환 전 과거분은 퇴직금 지급"
-    planted["프로즌 DC전환자"] = frozen["employee_id"]
+    frozen["note"] = "DC 전환(동결). 전환 전 과거분은 퇴직금 지급"
+    planted["동결 DC전환자"] = frozen["employee_id"]
 
     # ── DC전환 후 퇴직 — 재직·퇴직 양쪽에 같은 사번 ──────────────
     if retirees:

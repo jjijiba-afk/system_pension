@@ -277,7 +277,7 @@ class TestPracticeCases:
         assert progressive[0].progressive_rate > 1.0
 
     def test_period_split_is_not_a_duplicate_error(self, pack, tmp_path) -> None:
-        """세법한도 프로즌은 같은 사번 두 줄이지만 오류가 아니라 기간 분할이다."""
+        """세법한도 동결은 같은 사번 두 줄이지만 오류가 아니라 기간 분할이다."""
         run = _run(pack, "자료불량", tmp_path, force=True)
         by_id: dict[str, int] = {}
         for m in run.valuation.members:
