@@ -382,6 +382,20 @@ class TestPagesDeploy:
         assert "홈 화면에 추가" in page
         assert "%APPDATA%" not in page
 
+    def test_a_failed_save_is_never_silent(self) -> None:
+        """저장에 실패했는데 화면이 성공처럼 굴면 안 된다.
+
+        ``syncfs`` 는 오류를 콜백 인자로 넘긴다. 그것을 그대로 resolve 하면
+        성공과 구별되지 않아, 저장소가 막힌 기기에서 화면은 '저장했습니다' 라고
+        말하고 새로고침하면 단체·산출 내역이 전부 사라진다.
+        """
+        script = (ROOT / "webapp/app/app.js").read_text(encoding="utf-8")
+        block = script[script.index("const persistHome"):]
+        block = block[:block.index("\n});") + 4]
+        assert "error" in block, "syncfs 의 오류 인자를 보지 않는다"
+        assert "reportBrokenStorage" in block
+        assert "storageBroken" in script
+
     def test_the_one_feature_per_roster_pack_is_reachable(self) -> None:
         """특이사항 한 가지씩 만드는 벌이 화면에서 눌러 갈 수 있어야 한다.
 

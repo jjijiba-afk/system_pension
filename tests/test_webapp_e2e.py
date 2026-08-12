@@ -571,6 +571,58 @@ def test_client_bar_keeps_run_history_apart(page, tmp_path) -> None:
     assert "2412 1번단체" in page.inner_text("#runs-list")
 
 
+def test_clients_and_runs_survive_a_reload(page, tmp_path) -> None:
+    """단체와 그 안의 산출은 새로고침해도 남아 있어야 한다.
+
+    앱 자료는 메모리 파일시스템에 있다가 ``syncfs`` 로 브라우저 저장소에
+    밀어 넣어야 남는다. 그 호출을 한 군데라도 빠뜨리면 화면은 '저장했습니다'
+    라고 말하고 새로고침하면 사라진다 — 결산을 마친 뒤에 알게 된다.
+    """
+    from pension.samples import write_sample_pack
+
+    files = write_sample_pack(tmp_path)
+    roster = next(p for p in files if p.name == "명부_양식.xlsx")
+    assumptions = next(p for p in files if p.name == "기초율_기본값.xlsx")
+
+    page.once("dialog", lambda dialog: dialog.accept("살아남을단체"))
+    page.click("#client-add")
+    assert page.input_value("#client-pick") == "살아남을단체"
+
+    page.click("#tab-calc")
+    page.set_input_files("#roster", str(roster))
+    page.check("#asrc-file")
+    page.set_input_files("#assumptions", str(assumptions))
+    page.click("#run")
+    page.wait_for_selector("#result", state="visible", timeout=180_000)
+    page.fill("#run-name", "새로고침시험")
+    page.click("#run-save")
+    page.wait_for_selector("text=저장했습니다", timeout=30_000)
+
+    # ── 여기서 새로고침 ──────────────────────────────────────────
+    page.reload()
+    page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+
+    # 고르고 있던 단체가 그대로 열려야 한다. 목록에만 남고 기본 단체로
+    # 돌아가 버리면, 그 상태로 산출해 남의 회사 전기값을 끌어온다.
+    assert page.input_value("#client-pick") == "살아남을단체"
+    assert "살아남을단체" in page.inner_text("#client-pick")
+
+    page.click("#tab-runs")
+    assert "새로고침시험" in page.inner_text("#runs-list")
+    assert page.inner_text("#client-runs") == "1건"
+
+    # 앞 시험이 만든 단체들도 그대로 있어야 한다.
+    names = page.eval_on_selector_all(
+        "#client-pick option", "els => els.map(e => e.value)")
+    assert "기본 단체" in names
+
+    # 뒷정리 — 다음 시험이 기본 단체에서 시작하도록.
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.click("#client-remove")
+    assert page.input_value("#client-pick") == "기본 단체"
+    page.click("#tab-calc")
+
+
 def test_member_lookup_and_reports(page, tmp_path) -> None:
     """산출 → 사번 조회(연차별 근거) → 계리평가 보고서 미리보기까지.
 

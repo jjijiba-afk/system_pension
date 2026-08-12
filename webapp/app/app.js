@@ -88,7 +88,36 @@ async function intoFS(file, path) {
   return path;
 }
 
-const persistHome = () => new Promise((done) => pyodide.FS.syncfs(false, done));
+// 메모리에 있는 /pension-home 을 브라우저 저장소로 밀어 넣는다. 단체·산출
+// 내역·등록 자료가 새로고침 뒤에도 남는 것은 전적으로 이 호출 덕이다.
+//
+// **실패를 삼키면 안 된다.** syncfs 는 오류를 콜백 인자로 넘기는데, 그것을
+// 그대로 resolve 하면 성공과 구별되지 않는다. 저장소가 막힌 기기(사설 브라우징,
+// 공간 부족)에서 화면은 '저장했습니다' 라고 말하고 새로고침하면 전부 사라진다 —
+// 그때는 이미 늦다. 한 번이라도 실패하면 그 사실을 계속 띄워 둔다.
+let storageBroken = false;
+
+function reportBrokenStorage(error) {
+  storageBroken = true;
+  const message =
+    "⚠ 이 기기에 저장하지 못했습니다. 지금까지의 단체·산출 내역이 새로고침하면 "
+    + "사라집니다. 사설 브라우징 창이거나 저장 공간이 모자란 경우입니다 — "
+    + "[자료실] 의 [보관함 내보내기] 로 지금 바로 파일을 남겨 두세요.";
+  status(message);
+  const note = $("storage-note");
+  if (note) {
+    note.textContent = message;
+    note.className = "warn-box";
+  }
+  console.error("syncfs 실패", error);
+}
+
+const persistHome = () => new Promise((done) => {
+  pyodide.FS.syncfs(false, (error) => {
+    if (error && !storageBroken) reportBrokenStorage(error);
+    done(!error);
+  });
+});
 
 const XLSX_MIME =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
