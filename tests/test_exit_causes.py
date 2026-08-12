@@ -309,8 +309,10 @@ class TestAlternateRuleAndExtraScale:
                 - value_member(member, config, plain).dbo
             )
 
-        # 즉시 귀속은 **오늘 근속** 으로 잰다. 5년차는 3개월분, 15년차는 5개월분.
-        assert death_extra(15.0) == pytest.approx(death_extra(5.0) * 5 / 3, rel=1e-9)
+        # 즉시 귀속은 **오늘 근속** 으로 잰다. 표가 {0: 3, 10: 5} 이고 구간은
+        # 선형보간이므로 5년차는 4개월분, 15년차는 5개월분(표 위 평탄)이다.
+        # (기준일 근속이 일수 반올림으로 4.9993년이라 비율을 느슨하게 잰다.)
+        assert death_extra(15.0) == pytest.approx(death_extra(5.0) * 5 / 4, rel=1e-3)
 
     def test_crossing_the_step_shows_up_as_service_cost(
         self, config: CalculationConfig
@@ -335,9 +337,11 @@ class TestAlternateRuleAndExtraScale:
                 - value_member(member, config, plain).service_cost
             )
 
-        assert death_unit(9.5) > 0.0     # 올해 계단을 넘는다
+        assert death_unit(9.5) > 0.0     # 올해 표의 끝(10년)에 닿는다
         assert death_unit(15.0) == pytest.approx(0.0, abs=1e-9)   # 이미 넘었다
-        assert death_unit(2.0) == pytest.approx(0.0, abs=1e-9)    # 아직 멀었다
+        # 보간이라 표 안에서는 해마다 기울기(0.2 개월분)만큼 쌓인다. 표 끝을
+        # 올해 넘는 사람(9.5년차)은 남은 반 칸만 쌓아 그 절반쯤이다.
+        assert death_unit(2.0) > death_unit(9.5) > 0.0
 
 
 

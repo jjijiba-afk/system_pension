@@ -575,8 +575,9 @@ class TestDefaults:
         call("state_write", state=state, path=path)
 
         scale = load_assumptions(path).severance_benefit
-        assert scale.multiple("정규직", 5) == pytest.approx(1)
-        assert scale.multiple("정규직", 12.6) == pytest.approx(12)
+        # 법정이면 5·12.6·25 였을 자리. 표가 이겨서 보간값이 나와야 한다.
+        assert scale.multiple("정규직", 5) == pytest.approx(1 + 11 * 5 / 10)
+        assert scale.multiple("정규직", 12.6) == pytest.approx(12 + 14 * 2.6 / 10)
         assert scale.multiple("정규직", 25) == pytest.approx(26)
 
     def test_benefit_split_op_goes_both_ways(self) -> None:

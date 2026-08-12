@@ -15,8 +15,10 @@
     지급률        근속연수 | 규정명들…     (월평균임금 대비 누적 배수)
     장기급여지급률 근속연수 | 규정명들…    (일 기본급 대비 지급일수)
 
-모든 표는 **계단식 조회** 다. 찾는 키보다 작거나 같은 가장 큰 행의 값을 쓴다.
-예를 들어 퇴직률 표에 20·25·30세만 있으면 27세는 25세 행의 값을 쓴다.
+요율 표(승급률·퇴직률·사망률)는 **계단식 조회** 다. 찾는 키보다 작거나 같은
+가장 큰 행의 값을 쓴다 — 퇴직률 표에 20·25·30세만 있으면 27세는 25세 행이다.
+**지급률(급여 배수) 표만 예외로 구간 사이를 선형보간한다.** 배수는 근속과
+함께 이어 쌓이는 양이라 계단으로 읽으면 12.4년이 12년과 같은 급여가 된다.
 """
 
 from __future__ import annotations
@@ -137,6 +139,39 @@ class RateCurve:
         if idx < 0:
             return self.points[self._keys[0]]
         return self.points[self._keys[idx]]
+
+    def interpolated(self, key: float) -> float:
+        """구간 사이를 직선으로 잇는 조회. **지급률(급여 배수) 전용** 이다.
+
+        누적 배수는 근속과 함께 이어 쌓이는 값이라, 계단으로 읽으면 근속
+        12.4년이 12년과 같은 급여가 된다 — 실제 지급은 그 사이를 일할·월할로
+        메운다. 참고 산출 시스템도 정수 근속 사이를 선형보간한다.
+
+        표 아래(첫 키 이전)는 (0, 0) 에서 첫 점까지 직선으로 본다 — 배수는
+        근속 0 에서 0 부터 쌓인다. 표 위는 마지막 값으로 평탄하다(상한).
+        만근속(연단위 절사) 규정은 표를 계단으로 만드는 것이 아니라 명부의
+        차감근속연수로 설계한다.
+
+        퇴직률·승급률·사망률은 그대로 계단(:meth:`rate`)이다 — 그 표들은
+        '그 나이의 연간 확률' 이지 이어 쌓이는 양이 아니다.
+        """
+        if not self._keys:
+            return 0.0
+        keys = self._keys
+        if key >= keys[-1]:
+            return self.points[keys[-1]]
+        idx = bisect_right(keys, key) - 1
+        if idx < 0:
+            low_key, low_val = 0.0, 0.0
+            if key <= low_key:
+                return 0.0
+        else:
+            low_key, low_val = keys[idx], self.points[keys[idx]]
+        high_key, high_val = keys[idx + 1], self.points[keys[idx + 1]]
+        span = high_key - low_key
+        if span <= 0:
+            return high_val
+        return low_val + (high_val - low_val) * (key - low_key) / span
 
     def scaled(self, factor: float) -> RateCurve:
         """모든 값에 배수를 적용한 새 곡선. 민감도 분석에 쓴다."""
@@ -352,7 +387,7 @@ class BenefitScale:
             return service if self.statutory_when_missing else 0.0
         if self.mode(name) == PROGRESSIVE:
             return _progressive_multiple(curve, service)
-        return curve.rate(service)
+        return curve.interpolated(service)
 
     def milestones(self, rule: str) -> list[tuple[int, float]]:
         """(근속연수, 지급값) 목록. 장기급여의 지급 시점 산정에 쓴다."""

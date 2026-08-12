@@ -23,13 +23,23 @@ from pension.formula import Formula
 
 
 class TestCumulative:
-    """표 값이 그대로 누적 배수. 기존 동작이며 방식을 적지 않으면 이쪽이다."""
+    """표 값이 그 근속까지의 누적 배수. 방식을 적지 않으면 이쪽이다.
 
-    def test_step_lookup(self) -> None:
+    구간 사이는 **선형보간** 한다. 배수는 근속과 함께 이어 쌓이는 양이라
+    계단으로 읽으면 12.4년이 12년과 같은 급여가 된다 — 실제 지급은 그 사이를
+    일할·월할로 메우고, 참고 산출 시스템도 정수 근속 사이를 직선으로 잇는다.
+    만근속(연단위 절사) 규정은 명부의 차감근속연수로 설계한다.
+    """
+
+    def test_interpolated_lookup(self) -> None:
         scale = BenefitScale(curves={"정규직": RateCurve({1: 1.0, 10: 12.0, 20: 26.0})})
         assert scale.multiple("정규직", 1) == 1.0
-        assert scale.multiple("정규직", 9) == 1.0  # 10년 도달 전에는 직전 구간
         assert scale.multiple("정규직", 10) == 12.0
+        # 구간 안은 직선: 9년 = 1 + 11 × 8/9.
+        assert scale.multiple("정규직", 9) == pytest.approx(1 + 11 * 8 / 9)
+        assert scale.multiple("정규직", 15) == pytest.approx(19.0)
+        # 표 아래는 (0, 0) 에서 직선으로, 표 위는 마지막 값으로 평탄하다.
+        assert scale.multiple("정규직", 0.5) == pytest.approx(0.5)
         assert scale.multiple("정규직", 25) == 26.0
 
     def test_default_mode_is_cumulative(self) -> None:
