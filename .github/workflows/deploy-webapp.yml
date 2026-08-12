@@ -48,8 +48,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      # 맞춤 도메인은 Secret 으로 넘긴다. 저장소에 적어 두면 주소를 아는
+      # 사람이 코드 검색으로 이 저장소를 찾을 수 있고, Secret 은 실행 기록에도
+      # 가려져 나온다. 아직 안 만들었으면 webapp/CNAME 이 대신 쓰인다.
+      - name: 맞춤 도메인이 어디서 오는지
+        run: |
+          if [ -n "${{ secrets.PAGES_DOMAIN }}" ]; then
+            echo "도메인: Secret 에서 받습니다"
+          elif [ -f webapp/CNAME ]; then
+            echo "::warning::도메인이 아직 webapp/CNAME 에 있습니다. \
+            Settings → Secrets and variables → Actions 에서 PAGES_DOMAIN \
+            Secret 을 만든 뒤 이 파일을 지우세요."
+          else
+            echo "::warning::맞춤 도메인이 없습니다. github.io 주소로 올라갑니다."
+          fi
+
       - name: 웹앱 빌드
         id: build
+        env:
+          PAGES_DOMAIN: ${{ secrets.PAGES_DOMAIN }}
         run: |
           python webapp/build.py
           stamp=$(python - <<'STAMP'

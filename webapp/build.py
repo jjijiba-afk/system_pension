@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -328,19 +329,32 @@ def _write_cname(target: Path) -> None:
 
     GitHub Pages 는 배포된 파일 안의 ``CNAME`` 을 보고 도메인을 잡는다. 설정
     화면에서 한 번 넣어 두어도, 워크플로가 올린 판에 이 파일이 없으면 배포할
-    때마다 도메인이 풀리는 일이 있다. 저장소에 적어 두면 그럴 일이 없다.
+    때마다 도메인이 풀린다.
 
-    ``webapp/CNAME`` 이 없으면 아무것도 하지 않는다 — 도메인을 안 쓰는 동안에는
-    ``github.io`` 주소로 그냥 열린다.
+    도메인은 **환경변수 ``PAGES_DOMAIN`` 을 먼저 본다.** 저장소에 적어 두면
+    누구나 도메인으로 이 저장소를 찾을 수 있기 때문이다 — 공개 저장소는 코드
+    검색이 되므로, 주소를 아는 사람이 검색창에 그대로 쳐 넣으면 걸린다. 주소와
+    저장소를 잇는 끈은 소스에 두지 않는다.
+
+    ``webapp/CNAME`` 은 그 다음이다. 손으로 빌드해 볼 때 환경변수를 매번
+    넘기지 않아도 되게 남겨 둔 자리이며, 이 파일은 저장소에 커밋하지 않는다.
+
+    둘 다 없으면 아무것도 하지 않는다 — 도메인을 안 쓰는 동안에는 ``github.io``
+    주소로 그냥 열린다.
+
+    **도메인은 찍지 않는다.** 공개 저장소의 실행 기록은 누구나 읽을 수 있어,
+    로그에 한 줄 남기면 소스에서 뺀 의미가 없어진다.
     """
-    source = Path(__file__).parent / "CNAME"
-    if not source.exists():
-        return
-    domain = source.read_text(encoding="utf-8").strip()
+    domain = os.environ.get("PAGES_DOMAIN", "").strip()
+    if not domain:
+        source = Path(__file__).parent / "CNAME"
+        if not source.exists():
+            return
+        domain = source.read_text(encoding="utf-8").strip()
     if not domain:
         return
     target.write_text(domain + "\n", encoding="utf-8")
-    print(f"  맞춤 도메인 {domain}")
+    print("  맞춤 도메인 설정됨")
 
 
 def build() -> Path:
