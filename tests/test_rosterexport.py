@@ -139,7 +139,7 @@ class TestRelayout:
         target, _report = relaid
         assert openpyxl.load_workbook(target).sheetnames == [
             "작성요령", "기본정보", "퇴직급여규정", "장기급여규정", "사외적립자산",
-            "재직자명부", "퇴직자명부",
+            "재직자명부", "퇴직자명부", "추가명부",
         ]
 
     def test_it_reports_what_it_did(self, relaid) -> None:

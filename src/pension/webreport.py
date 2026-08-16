@@ -527,6 +527,19 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
         parts.append('<p class="note">전기 연결이 없어 당기 변동 분해는 생략'
                      '되었습니다.</p>')
 
+    events = getattr(run, "events", None)
+    if events is not None and not events.is_empty:
+        # 문단 109~110(정산)·105~108(축소). 사건 시점에 잰 채무를 없애고,
+        # 지급액과의 차이를 그 즉시 당기손익으로 인식한다. 증감표 한 줄로만
+        # 두면 무엇이 얼마나 빠졌는지 보이지 않아, 감사에서 반드시 되묻는다.
+        parts.append("<h3>※ 기중 제도변동 (축소·정산·사업결합·분할)</h3>")
+        parts.append(_kv_table(
+            [(label, _won(amount) if "인원" not in label else f"{amount:,.0f}명")
+             for label, amount in events.as_rows()]))
+        parts.append('<p class="note">채무는 <b>사건일 기준</b>으로 다시 재었습니다 — '
+                     '결산일 가정으로 재면 그 사이의 이자와 임금상승이 섞여 '
+                     '정산손익이 그만큼 틀립니다.</p>')
+
     parts.append("<h3>사외적립자산의 변동내역</h3>")
     if assets is not None:
         parts.append(_kv_table([(label, _won(amount))

@@ -19,7 +19,8 @@ from .models import Roster
 from .normalize import BenefitPlan, RetirementReason
 from .planassets import PlanAssets, build_plan_assets
 from .projection import Projection, project_next_year
-from .readers import ACTIVE_SHEET, read_roster
+from .events import EventOutcome, measure_events
+from .readers import ACTIVE_SHEET, read_extra_roster, read_roster
 from .rollforward import (
     LongTermRollForward,
     RollForward,
@@ -164,6 +165,8 @@ class PensionRun:
     """차년도 예측. 산출을 마치면 늘 만든다."""
     general_info: Any = None
     """``일반사항`` 에서 읽은 것. 시트가 없으면 ``None``."""
+    events: EventOutcome = field(default_factory=EventOutcome)
+    """[추가명부] 를 사건 시점 기준으로 잰 결과. 시트가 없으면 빈 값이다."""
     active_upload: list[list[Any]] = field(default_factory=list)
     retired_upload: list[list[Any]] = field(default_factory=list)
 
@@ -270,6 +273,7 @@ def load_inputs(
         _check_uncalculated(roster_path, log)
         _check_general_sheet(general, log)
         roster = read_roster(wb, config, log)
+        roster.extra = read_extra_roster(wb, config, log)
     finally:
         wb.close()
 
@@ -421,6 +425,10 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
         retired_upload=retired_upload,
     )
 
+    if roster.extra:
+        progress("기중 제도변동을 재는 중", 0.50)
+        run.events = measure_events(roster.extra, config, assumptions, log)
+
     if options.include_longterm:
         progress("장기종업원급여를 산출하는 중", 0.55)
         run.longterm = value_longterm(roster, config, assumptions)
@@ -491,6 +499,16 @@ def _build_rollforward(
         other_paid = run.other_payments
         transfers_in = run.transfers_in
 
+    # [추가명부] 를 받았으면 그쪽이 이긴다. 사건 시점에 실제로 잰 채무라,
+    # 손으로 적어 넣은 한 칸보다 근거가 낫다. 분할·처분으로 넘긴 채무는
+    # 정산과 같은 자리(소멸)로, 사업결합으로 인수한 것은 유입으로 들어간다.
+    events = run.events
+    settlement_obligation = prior.settlement_obligation
+    if not events.is_empty:
+        settlement_obligation = events.settled_obligation + events.transfers_out
+        settlements = max(settlements, events.settled_paid)
+        transfers_in += events.transfers_in
+
     # ── 전기 가정으로 다시 산출 ──────────────────────────────────
     # 두 벌이 필요하다. 하나는 전기 가정 그대로(A), 하나는 전기 계리가정에
     # **당기 지급률 규정만** 얹은 것(B). 그 차이가 제도개정 효과다.
@@ -551,7 +569,7 @@ def _build_rollforward(
         interest_cost=interest_cost,
         benefits_paid=benefits_paid,
         settlement_paid=settlements,
-        settlement_obligation=prior.settlement_obligation,
+        settlement_obligation=settlement_obligation,
         other_paid=other_paid,
         transfers_in=transfers_in,
         closing_dbo=run.valuation.dbo,

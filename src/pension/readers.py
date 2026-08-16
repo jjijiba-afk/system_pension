@@ -38,19 +38,24 @@ from .normalize import (
 __all__ = [
     "ACTIVE_FIRST_ROW",
     "ACTIVE_SHEET",
+    "EXTRA_SHEET",
     "RETIRED_FIRST_ROW",
     "RETIRED_SHEET",
     "read_active_roster",
+    "read_extra_roster",
     "read_retired_roster",
     "read_roster",
 ]
 
 ACTIVE_SHEET: Final = "재직자명부"
 RETIRED_SHEET: Final = "퇴직자명부"
+EXTRA_SHEET: Final = "추가명부"
+"""축소·정산·사업결합·분할로 기중에 드나든 사람들. 결산일 명부에는 없다."""
 
 #: 같은 명부인데 통합문서마다 시트 이름이 다르다.
 ACTIVE_SHEET_ALIASES: Final = (ACTIVE_SHEET, "2)재직자명부", "재직자")
 RETIRED_SHEET_ALIASES: Final = (RETIRED_SHEET, "퇴직자")
+EXTRA_SHEET_ALIASES: Final = (EXTRA_SHEET, "특수사건명부", "제도변동명부")
 
 #: 머리글 없는 옛 서식의 재직자명부 데이터 시작 행.
 ACTIVE_FIRST_ROW: Final = 26
@@ -287,6 +292,13 @@ def _resolve(workbook, aliases_key: str, log: IssueLog):
         aliases, base, required = ACTIVE_HEADER_ALIASES, ACTIVE_COLUMNS, REQUIRED_ACTIVE
         fallback_start = ACTIVE_FIRST_ROW
         label = ACTIVE_SHEET
+    elif aliases_key == "extra":
+        # 재직자명부와 같은 열을 쓴다 — 사건 시점의 재직자로 다시 평가할
+        # 사람들이라, 필요한 항목이 똑같다. 시트 이름만 다르다.
+        sheet = find_sheet(workbook, *EXTRA_SHEET_ALIASES)
+        aliases, base, required = ACTIVE_HEADER_ALIASES, ACTIVE_COLUMNS, REQUIRED_ACTIVE
+        fallback_start = ACTIVE_FIRST_ROW
+        label = EXTRA_SHEET
     else:
         sheet = find_sheet(workbook, *RETIRED_SHEET_ALIASES)
         aliases, base, required = RETIRED_HEADER_ALIASES, RETIRED_COLUMNS, REQUIRED_RETIRED
@@ -308,13 +320,18 @@ def _resolve(workbook, aliases_key: str, log: IssueLog):
     return sheet, cols, layout
 
 
-def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> list[ActiveMember]:
+def read_active_roster(workbook, config: CalculationConfig, log: IssueLog,
+                       *, which: str = "active") -> list[ActiveMember]:
     """``재직자명부`` 를 읽어 :class:`ActiveMember` 목록으로 만든다.
 
     형식 오류가 있어도 중단하지 않고 해당 항목만 비운 채 진행한다. 값의 정합성
     검사는 :mod:`pension.validation` 이 맡는다.
+
+    :param which: ``active`` 또는 ``extra``. ``extra`` 면 같은 열 배치로
+        :data:`EXTRA_SHEET` 를 읽는다.
     """
-    ws, cols, layout = _resolve(workbook, "active", log)
+    ws, cols, layout = _resolve(workbook, which, log)
+    sheet_label = EXTRA_SHEET if which == "extra" else ACTIVE_SHEET
     members: list[ActiveMember] = []
     first_row = layout.data_start_row
     last_row = _last_data_row(ws, first_row, cols)
@@ -474,9 +491,30 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
                 longterm_salary_increase=text(get("longterm_salary_increase")),
             )
 
+        member.event_kind = text(get("event_kind"))
+        member.event_payment = _number(get("event_payment"))
+        member.event_date = _read_date(
+            get("event_date"), config, log, col=cols.get("event_date"),
+            code="JAE_EVENT_DATE", required=False,
+            sheet=sheet_label, row=row, seq=seq, employee_id=employee_id,
+        ) if "event_date" in cols else None
+
         members.append(member)
 
     return members
+
+
+def read_extra_roster(workbook, config: CalculationConfig,
+                      log: IssueLog) -> list[ActiveMember]:
+    """``추가명부`` — 축소·정산·사업결합·분할로 기중에 드나든 사람들.
+
+    시트가 없으면 빈 목록이다. 대부분의 회사·대부분의 해에는 이런 일이 없고,
+    없는 것이 정상이라 경고도 남기지 않는다.
+    """
+    try:
+        return read_active_roster(workbook, config, log, which="extra")
+    except KeyError:
+        return []
 
 
 def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> list[RetiredMember]:

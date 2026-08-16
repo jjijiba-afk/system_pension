@@ -116,6 +116,18 @@ class ActiveMember:
     """임금피크 연령."""
     transfer_in_date: _dt.date | None = None
     transfer_in_amount: float = 0.0
+
+    # ── 추가명부 (축소·정산·사업결합·분할) ────────────────────────
+    # 결산일 명부에는 없는 사람들이다. 기중에 제도가 축소되거나 정산됐거나,
+    # 사업을 사고팔며 통째로 넘어온·넘어간 집단을 **사건 시점 기준으로** 다시
+    # 평가해야 소멸·인수 채무가 나온다. 결산일 가정으로 재면 그 사이의 이자와
+    # 임금상승이 섞여, 정산손익이 그만큼 틀린다.
+    event_kind: str = ""
+    """사건 구분. ``축소`` / ``정산`` / ``사업결합`` / ``분할``."""
+    event_date: _dt.date | None = None
+    """사건일. 이 날짜를 산출기준일로 삼아 이 사람을 다시 평가한다."""
+    event_payment: float = 0.0
+    """그 사건으로 실제 지급한 금액. 소멸 채무와의 차이가 정산손익이 된다."""
     longterm_amount: float = 0.0
     """장기종업원급여 지급금액."""
     note: str = ""
@@ -354,3 +366,9 @@ class Roster:
 
     active: list[ActiveMember] = field(default_factory=list)
     retired: list[RetiredMember] = field(default_factory=list)
+    extra: list[ActiveMember] = field(default_factory=list)
+    """[추가명부] — 축소·정산·사업결합·분할로 기중에 드나든 사람들.
+
+    결산일 채무에는 들어가지 않는다. 사건 시점 기준으로 따로 재어 증감표의
+    소멸·인수 채무가 된다(:mod:`pension.events`).
+    """
