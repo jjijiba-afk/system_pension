@@ -10,7 +10,11 @@
   /* 종이(카드)를 옅은 회색 바탕 위에 얹는다. 표가 어디서 끝나는지 보인다. */
   --desk: #F4F6FA;
   /* 분석 화면의 계열 색. 퇴직사유 셋과 확률 곡선을 눈으로 가른다. */
-  --plum: #7A5470; --teal: #2C6C67; --amber: #8F6318; --rust: #9A3B28; }
+  --plum: #7A5470; --teal: #2C6C67; --amber: #8F6318; --rust: #9A3B28;
+  /* 눌러서 무언가 일어나는 것(단추)의 면. 종전에는 투명이라 바탕과 구분이
+     안 가 화면이 한 덩어리로 밝았다. 설치판은 단추에 회색 면이 있고 흰색은
+     입력칸과 표에만 쓴다 — 그 대비가 '여기를 채우세요' 를 만든다. */
+  --face: #E9EDF4; --face-line: #C2CAD8; }
 * { box-sizing: border-box; }
 html { background: var(--desk); }
 
@@ -97,8 +101,9 @@ button.big { display: block; width: 100%; padding: 16px; margin-top: 14px;
   font-size: 1.12rem; font-weight: bold; }
 button.big:disabled { background: #A9B2C4; }
 button.big.secondary { background: var(--navy-soft); }
-button.small { padding: 5px 11px; border: 1px solid var(--line); border-radius: 0;
-  background: transparent; color: inherit; font-size: 0.92rem; font-weight: 600; }
+button.small { padding: 0.33rem 0.83rem; border: 1px solid var(--face-line);
+  border-radius: 0; background: var(--face); color: inherit;
+  font-size: 0.92rem; font-weight: 600; }
 button.small.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
 
 #status { background: var(--bg-soft); border-radius: 0; padding: 4px 12px;
@@ -307,18 +312,32 @@ details.calc-section[open] > summary { padding: 6px 12px 1px; font-weight: bold;
 details.calc-section[open] > summary::before { content: none; }
 details.calc-section[open] > summary .count { margin-left: auto; font-weight: normal;
   font-size: 0.82rem; color: var(--hint); }
-details.calc-section > .section-body { padding: 2px 12px 9px; }
+details.calc-section > .section-body { padding: 0.17rem 0.83rem 0.67rem; }
 
-/* 라벨 | 입력칸 | 단추 한 줄. EXE 의 입력 줄과 같은 모양이다. */
-#page-calc .field { display: flex; flex-wrap: wrap; gap: 6px;
-  align-items: center; margin: 5px 0 0; }
+/* 구획 자체의 여백도 rem 으로. 설치판 Labelframe padding=(12,8,12,10),
+   구획 사이 pady=(0,12) 와 같은 값이다. */
+#page-calc fieldset { padding: 0.67rem 0.83rem 0.83rem; margin: 0 0 0.83rem; }
+#page-calc details.calc-section { margin: 0 0 0.83rem; }
+#page-calc > form > fieldset:first-of-type { margin-top: 0; }
+
+/* 라벨 | 입력칸 | 단추 한 줄. EXE 의 입력 줄과 같은 모양이다.
+
+   여백을 **rem 으로** 적는다. px 로 못박아 두면 글자만 줄어들고 여백은 그대로
+   남아, 글자를 9pt 로 내린 화면에서 칸 사이가 통째로 벌어져 보인다.
+   숫자는 설치판(tkinter)의 실제 수치를 그대로 옮긴 것이다 —
+   줄 간격 pady=(6,0), 라벨↔입력 padx=(10,8). */
+#page-calc .field { display: flex; flex-wrap: wrap; gap: 0.33rem 0.83rem;
+  align-items: center; margin: 0.5rem 0 0; }
 /* 라벨 칸 너비를 화면 전체에서 하나로 맞춘다. 칸마다 다르면 입력칸 왼쪽이
    들쭉날쭉해져서 훑어 내려가기 어렵다. */
-#page-calc .field > .label { flex: 0 0 auto; width: 152px; font-weight: 600;
+#page-calc .field > .label { flex: 0 0 auto; width: 12.5rem; font-weight: 600;
   font-size: 0.94rem; }
 #page-calc .field > input[type=text],
-#page-calc .field > select { flex: 1 1 220px; min-width: 0; }
-#page-calc .field + .hint { margin: 2px 0 0 160px; }
+#page-calc .field > select { flex: 1 1 16rem; min-width: 0; }
+#page-calc .field + .hint { margin: 0.33rem 0 0 13.33rem; }
+/* 한 줄에 칸이 둘 들어가는 자리(기준일·시작일). 날짜 칸은 늘어날 이유가 없다. */
+#page-calc .field > input.narrow { flex: 0 0 auto; width: 10rem; }
+#page-calc .field > .label.inline { width: auto; margin-left: 0.83rem; }
 
 /* 입력칸은 흰 바탕에 얇은 테두리 — EXE 의 Entry 와 같다. 점선 드롭존을
    쓰지 않는 이유는, 그 모양이 화면에서 가장 크고 진한 것이 되어 정작
@@ -327,31 +346,38 @@ details.calc-section > .section-body { padding: 2px 12px 9px; }
 #page-calc select, #page-calc input[type=file] {
   /* background 단축을 쓰면 고르는 칸의 화살표(background-image)까지 지워진다. */
   background-color: var(--paper); border: 1px solid var(--line); border-radius: 0;
-  font-size: 0.94rem; padding: 5px 8px; }
-#page-calc select { padding-right: 30px; }
-#page-calc input[type=file] { border-style: solid; padding: 4px 8px; }
-#page-calc label { font-weight: 600; font-size: 0.92rem; margin: 6px 0 2px; }
+  font-size: 0.94rem; padding: 0.17rem 0.42rem; }
+#page-calc select { padding-right: 2.5rem; }
+/* 파일 고르는 칸은 라벨과 같은 줄에 둔다. 종전에는 폭 100% 라 줄을 통째로
+   차지했고, 구획마다 한 줄씩 더 먹었다. */
+#page-calc input[type=file] { border-style: solid; padding: 0.17rem 0.42rem;
+  flex: 1 1 16rem; min-width: 0; width: auto; }
+#page-calc label { font-weight: 600; font-size: 0.92rem; margin: 0.5rem 0 0.17rem; }
 #page-calc .hint { font-size: 0.82rem; }
 
 /* 체크상자는 EXE 처럼 가로로 늘어세운다. 한 줄에 하나씩 쌓으면 옵션 칸만
    화면 한 판을 먹는다. */
-#page-calc .checks { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 6px 0; }
+#page-calc .checks { display: flex; flex-wrap: wrap; gap: 0.33rem 1.8rem;
+  margin: 0.5rem 0 0; }
 #page-calc .checks .check { margin: 0; font-weight: 600; font-size: 0.92rem; }
-#page-calc .check input { width: 18px; height: 18px; }
+/* 네모도 글자를 따라 줄인다. 12px 글자 옆의 18px 네모가 화면에서 제일 튄다.
+   손가락 기기는 아래 (pointer: coarse) 에서 다시 키운다. */
+#page-calc .check input { width: 1.1rem; height: 1.1rem; }
 
 /* 실행 줄 — 단추는 왼쪽에 두고 나머지는 비운다. 화면 폭을 가득 채운 단추는
    '지금 눌러야 하는 것' 이 하나뿐인 것처럼 보이게 한다. */
 /* 실행 단추는 흐름 안에 둔다. 떠 있는 단추는 EXE 에 없고, 칸을 모두 펼친
    지금은 아래 내용을 가린다. */
 #page-calc button.big.sticky { position: static; display: inline-block;
-  width: auto; min-width: 180px; padding: 9px 26px; font-size: 1rem;
-  border-radius: 0; margin: 6px 0 0; box-shadow: none; }
+  width: auto; min-width: 15rem; padding: 0.75rem 2.2rem; font-size: 1rem;
+  border-radius: 0; margin: 0.5rem 0 0; box-shadow: none; }
 
 @media (max-width: 640px) {
   #page-calc .field > .label { flex: 1 0 100%; width: auto; }
   #page-calc .field + .hint { margin-left: 0; }
   #page-calc button.big.sticky { width: 100%; }
 }
+
 
 /* ── 모서리는 각지게 ──
    PC 본 화면(tkinter clam 테마)의 칸·단추·탭은 전부 직각이다. 웹 쪽만 둥글면
@@ -435,6 +461,13 @@ input[type=date] { -webkit-appearance: none; appearance: none; }
   /* 표 안의 칸도 마찬가지다. `.grid input[type=text]` 이 따로 크기를 잡고
      있어 위 줄만으로는 지지 않지만, 뜻을 분명히 하려고 함께 적는다. */
   .grid input[type=text] { font-size: 16px !important; }
+
+  /* 눌러야 하는 것은 다시 키운다. [산출] 화면의 촘촘한 치수는 마우스로 쓰는
+     화면을 위한 것이지, 손끝으로 못 누르게 하자는 것이 아니다. */
+  #page-calc .check input { width: 22px; height: 22px; }
+  #page-calc .field > input[type=text], #page-calc .field > input[type=date],
+  #page-calc .field > select, #page-calc input[type=file] { padding: 5px 8px; }
+  button.small { padding: 6px 12px; }
 }
 
 /* ── 좁은 화면의 표 ──
