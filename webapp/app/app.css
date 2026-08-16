@@ -5,7 +5,7 @@
 /* 색은 PC 본 화면(pension/desk/theme.py)과 같은 값을 쓴다. 두 화면을 나란히
    놓고 쓰는 사람이 있으므로, 같은 것이 같아 보여야 한다. */
 :root { color-scheme: light;
-  --navy: #1F3864; --navy-soft: #44546A; --line: #D6DCE8; --hint: #5B6478;
+  --navy: #1F3864; --navy-soft: #44546A; --line: #B9BCC4; --hint: #5B6478;
   --bg-soft: #EEF3F8; --paper: #FFFFFF; --ink: #1B2430;
   /* 종이(카드)를 옅은 회색 바탕 위에 얹는다. 표가 어디서 끝나는지 보인다. */
   --desk: #F4F6FA;
@@ -14,7 +14,9 @@
   /* 눌러서 무언가 일어나는 것(단추)의 면. 종전에는 투명이라 바탕과 구분이
      안 가 화면이 한 덩어리로 밝았다. 설치판은 단추에 회색 면이 있고 흰색은
      입력칸과 표에만 쓴다 — 그 대비가 '여기를 채우세요' 를 만든다. */
-  --face: #E9EDF4; --face-line: #C2CAD8; }
+  --face: #E9EDF4; --face-line: #B9BCC4;
+  /* 고르지 않은 탭. 바탕과 구분되는 한 단계 짙은 회색이다. */
+  --tab-off: #DCDAD5; }
 * { box-sizing: border-box; }
 html { background: var(--desk); }
 
@@ -68,8 +70,8 @@ nav.tabs { display: flex; gap: 2px; margin: 10px 0 0; overflow-x: auto;
   -webkit-overflow-scrolling: touch; }
 nav.tabs button { flex: 1 0 auto; padding: 5px 14px; font-size: 0.96rem;
   font-weight: 600; white-space: nowrap; color: var(--hint);
-  border: 1px solid transparent; border-bottom: none;
-  border-radius: 0; background: transparent; }
+  border: 1px solid var(--line); border-bottom: none;
+  border-radius: 0; background: var(--tab-off); }
 nav.tabs button.on { background: var(--paper); color: var(--navy);
   border-color: var(--line); }
 section.page { display: none; }
@@ -86,10 +88,10 @@ label { display: block; margin: 10px 0 4px; font-weight: 600; }
 input[type=file] { width: 100%; padding: 6px 8px; border: 1px dashed #8894AB;
                    border-radius: 0; font-size: 0.98rem; }
 input[type=text] { padding: 5px 8px; border: 1px solid var(--line);
-                   border-radius: 0; font-size: 0.96rem; background: transparent;
+                   border-radius: 0; font-size: 0.96rem; background: var(--paper);
                    color: inherit; }
 select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 0;
-         font-size: 0.96rem; background: transparent; color: inherit; }
+         font-size: 0.96rem; background: var(--paper); color: inherit; }
 .hint { color: var(--hint); font-size: 0.85rem; margin-top: 2px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .row > input[type=text] { flex: 1; min-width: 160px; }
@@ -151,7 +153,7 @@ details.section > summary .count { margin-left: auto; font-weight: 400;
 table.grid { border-collapse: collapse; margin: 10px 0; }
 .grid th { border: 1px solid var(--line); padding: 4px 8px; font-size: 0.88rem;
            background: var(--bg-soft); white-space: nowrap; }
-.grid td { border: 1px solid var(--line); padding: 0; }
+.grid td { border: 1px solid var(--line); padding: 0; background: var(--paper); }
 .grid input[type=text] { width: 108px; border: 0; border-radius: 0; padding: 5px 8px;
                          text-align: right; font-size: 0.95rem; }
 .grid select { border: 0; border-radius: 0; }
