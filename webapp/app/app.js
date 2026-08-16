@@ -2555,7 +2555,7 @@ function traceTable(trace) {
 
   const head = ["연차", "시점", "연령", "근속", "월평균임금", "지급률",
                 "중도퇴직률", "사망률", "연초 재직확률", "할인계수",
-                "DBO 기여 — 중도", "사망", "정년", "당기근무원가 기여"];
+                "DBO — 중도", "사망", "정년", "당기근무원가"];
   const sums = { 중도: 0, 사망: 0, 정년: 0, cost: 0 };
   const rows = [...years.entries()].sort((a, b) => a[0] - b[0]).map(([t, slot]) => {
     const b = slot.base;
@@ -2572,11 +2572,11 @@ function traceTable(trace) {
     ];
   });
 
-  const table = el("table", { class: "data" },
+  const table = el("table", { class: "data trace" },
     el("tr", {}, ...head.map((h) => el("th", {}, h))),
     ...rows.map((cells) => el("tr", {},
       ...cells.map((c, i) => el("td", { class: i >= 4 ? "num" : "" }, String(c))))),
-    el("tr", {}, el("td", { colspan: "10" }, "합계 — 줄 합계가 곧 이 사람의 확정급여채무입니다"),
+    el("tr", {}, el("td", { colspan: "10" }, "합계 — DBO·당기근무원가 모두 줄 합계가 곧 이 사람의 값입니다"),
       el("td", { class: "num" }, won(sums.중도)),
       el("td", { class: "num" }, won(sums.사망)),
       el("td", { class: "num" }, won(sums.정년)),
@@ -2596,7 +2596,7 @@ function longtermTraceTable(trace) {
     pctOf(r.survival), r.discount.toFixed(6), pctOf(r.share), won(r.dbo),
     won(r.service_cost),
   ]);
-  return el("div", { class: "scroll-x" }, el("table", { class: "data" },
+  return el("div", { class: "scroll-x" }, el("table", { class: "data trace" },
     el("tr", {}, ...head.map((h) => el("th", {}, h))),
     ...rows.map((cells) => el("tr", {},
       ...cells.map((c, i) => el("td", { class: i >= 3 ? "num" : "" }, String(c)))))));

@@ -120,6 +120,9 @@ button.small.primary { background: var(--navy); border-color: var(--navy); color
 
 /* ── 결과·데이터 표 ── */
 table.data { border-collapse: collapse; width: 100%; margin: 12px 0; }
+/* 연차별 근거 표 — 머리글이 낱말 중간에서 꺾이면 '중도퇴직/률' 처럼 읽힌다.
+   표는 이미 가로 스크롤 안에 있으므로 한 줄로 둔다. */
+.data.trace th { white-space: nowrap; }
 .data td, .data th { border: 1px solid var(--line); padding: 5px 9px;
                      text-align: left; font-size: 0.92rem; }
 .data td.num { text-align: right; font-variant-numeric: tabular-nums; }
