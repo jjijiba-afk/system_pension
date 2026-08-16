@@ -4,12 +4,14 @@
 어디에 적는지** 가 끝나야 한다.
 
 * 색이 진한 앞쪽 열만 채우면 산출된다. 나머지는 해당자만.
-* 열은 다섯 묶음으로 갈라 두었다. 해당 없는 묶음은 통째로 지우고 보내도 된다.
+* 열은 ``퇴직급여``·``기타장기`` 두 파트로 갈리고, 파트 안에서 다시 묶음으로
+  나뉜다. 해당 없는 파트·묶음은 통째로 지우고 보내도 된다.
 * 머리글 이름으로 열을 찾으므로 순서를 바꿔도 되고, 옛 이름으로 적어 보내도
   읽힌다(:mod:`pension.layout` 의 별칭).
 
 명부만으로는 산출이 되지 않으므로 같은 파일에 ``기본정보``·``퇴직급여규정``·
-``사외적립자산`` 을 함께 둔다. 따로 보내면 셋 중 하나가 빠진 채로 온다.
+``장기급여규정``·``사외적립자산`` 을 함께 둔다. 따로 보내면 그중 하나가 빠진
+채로 온다.
 """
 
 from __future__ import annotations
@@ -342,6 +344,7 @@ def _guide(wb) -> None:
     for name, what in (
         ("기본정보", "단체명·산출기준일·상시근로자 수·신용등급, 그리고 직군 규칙"),
         ("퇴직급여규정", "지급규정 열 항목과 특이사항. 산출가정의 근거가 됩니다"),
+        ("장기급여규정", "근속포상·장기근속휴가. 없으면 통째로 비워 두세요"),
         ("사외적립자산", "신탁 명세서의 증감표·세부내역. 순확정급여부채가 여기서 나옵니다"),
         ("재직자명부", "기준일 현재 재직 중인 사람"),
         ("퇴직자명부", "기중에 퇴직·전출·DC전환한 사람"),
@@ -551,6 +554,134 @@ def _rules(wb, *, filled: bool = False, specials: dict[str, str] | None = None) 
         Font(name=FACE, size=9, italic=True, color="5B6478"))
 
 
+# ── 장기급여(근속포상) 규정 ─────────────────────────────────────
+
+#: 규정 개요. (항목, 예시, 적는 법)
+LONGTERM_RULE_ROWS = [
+    ("대상", "근속 10년 이상 전 직원",
+     "직군마다 다르면 각각 적으세요. 명부의 '장기급여 대상' 칸과 맞아야 합니다"),
+    ("근속 기산일", "입사일",
+     "**중간정산과 무관합니다.** 다른 날부터 센다면 명부의 '장기급여 기산일' 을 채우세요"),
+    ("지급시점", "근속 도달", f"{' / '.join(('근속도달시', '퇴직시', '정년시'))} 중"),
+    ("지급일", "창립기념일 (10-01)",
+     "도달 즉시가 아니라 정해진 날에 몰아 준다면 그 날짜. 없으면 비우세요"),
+    ("반복 지급", "30년 넘으면 5년마다 한 번 더", "되풀이가 없으면 '없음'"),
+    ("이월", "받은 휴가는 그해 소멸, 이월 없음",
+     "안 쓰고 모아 두었다가 퇴직할 때 정산하면 '이월' 이라고 적으세요"),
+    ("기준임금", "일 기본급 (통상임금 ÷ 209 × 8)",
+     "휴가·포상을 금액으로 바꿀 때 무엇을 쓰는지"),
+    ("현물 시세", "금 1돈 450,000원 (2025-12-31 기준)",
+     "금·물품으로 준다면 평가시점 시세와 그 기준일. 없으면 비우세요"),
+    ("기중 지급액", "38,000,000원",
+     "이번 회계기간에 실제로 나간 근속포상 총액. [사외적립자산] 시트에도 있습니다"),
+]
+
+#: 근속별 지급 내용. (규정명, 근속년수, 지급 내용, 지급방법, 지급기준)
+#: 한 근속에 성격이 다른 급여가 둘 이상 걸리면 **줄을 나눠** 적는다 — 휴가와
+#: 현물은 금액으로 바꾸는 방법도, 해마다 올리는 방법도 다르다.
+LONGTERM_SCALE_ROWS = [
+    ("정규직포상", 10, "유급휴가 5일", "휴가", "일 기본급 × 5"),
+    ("정규직포상", 20, "유급휴가 10일", "휴가", "일 기본급 × 10"),
+    ("정규직포상", 20, "순금 10돈", "현물", "평가시점 시세 4,500,000원"),
+    ("정규직포상", 30, "30일 평균임금의 300%", "평균임금", "30일 평균임금 × 3"),
+    ("임원포상", 10, "기념패 및 300만원", "현금", "정액 3,000,000원"),
+]
+
+#: 지급방법 낱말. 산출가정의 ``장기급여규정`` 시트가 그대로 받는 말이라,
+#: 여기서 다른 말로 적어 받으면 우리가 손으로 옮기며 뜻을 바꾸게 된다.
+LONGTERM_KINDS: tuple[str, ...] = ("휴가", "평균임금", "현물", "현금")
+
+
+def _longterm(wb, *, filled: bool = False, rows: list | None = None,
+              overview: dict[str, str] | None = None) -> None:
+    """장기급여(근속포상·장기근속휴가) 규정.
+
+    퇴직급여와 성격이 달라 시트를 나눴다. 근속포상이 없는 회사가 대부분인데,
+    퇴직급여규정 안에 한 칸으로 끼워 두면 "우리는 없는데 뭘 적으라는 건지" 로
+    읽히고, 있는 회사는 한 칸에 다 못 적어 첨부로 보낸다. 어느 쪽이든 우리가
+    되묻게 된다.
+
+    :param rows: 근속별 지급 내용 줄들. 주면 예시 대신 이것을 적는다.
+    :param overview: 규정 개요 항목 → 내용.
+    """
+    filled = filled or rows is not None or overview is not None
+    ws = wb.create_sheet("장기급여규정", 3)
+    ws.column_dimensions["A"].width = 3
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 34
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 30
+    ws.column_dimensions["F"].width = 46
+
+    ws["A1"] = "기타장기종업원급여 (근속포상) 규정"
+    ws["A1"].font = Font(name=FACE, size=14, bold=True, color="7A5470")
+    ws["A2"] = ("근속포상·장기근속휴가가 **없으면 이 시트는 통째로 비워 두시면 됩니다.** "
+                "명부의 [기타장기] 파트도 함께 비우세요.")
+    ws["A2"].font = Font(name=FACE, size=9, color="5B6478")
+    if not filled:
+        ws["A3"] = "노란 칸은 작성 예시입니다. 회사 사실이 아니니 지우고 쓰세요."
+        ws["A3"].font = Font(name=FACE, size=9, italic=True, color="5B6478")
+
+    def head(row: int, columns: tuple[tuple[int, str], ...]) -> None:
+        for column, text_ in columns:
+            cell = ws.cell(row, column, text_)
+            cell.font = Font(name=FACE, size=9, bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="7A5470")
+            cell.border = BORDER
+            cell.alignment = Alignment(horizontal="center", vertical="center",
+                                       wrap_text=True)
+
+    ws.cell(4, 2, "규정 개요").font = Font(name=FACE, size=11, bold=True, color="7A5470")
+    head(5, ((2, "항목"), (3, "내용"), (6, "적는 법")))
+    ws.merge_cells(start_row=5, start_column=3, end_row=5, end_column=5)
+    row = 6
+    for label, sample, note in LONGTERM_RULE_ROWS:
+        ws.cell(row, 2, label).font = Font(name=FACE, size=9, bold=True)
+        # 빈 양식에도 예시를 노랗게 남긴다. 항목 이름만 있으면 '대상' 칸에
+        # 무엇을 몇 줄로 적어야 하는지 알 수 없어, 대개 비워서 돌아온다.
+        cell = ws.cell(row, 3, (overview or {}).get(label, sample))
+        cell.font = Font(name=FACE, size=9, color="000000" if filled else "9C6500")
+        cell.fill = PatternFill("solid", fgColor="FFFFFF" if filled else "FFF2CC")
+        ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
+        ws.cell(row, 6, note).font = Font(name=FACE, size=9, color="5B6478")
+        for column in (2, 3, 6):
+            ws.cell(row, column).border = BORDER
+            ws.cell(row, column).alignment = Alignment(vertical="top", wrap_text=True)
+        row += 1
+
+    row += 1
+    ws.cell(row, 2, "근속별 지급 내용").font = Font(
+        name=FACE, size=11, bold=True, color="7A5470")
+    ws.cell(row, 6, "한 근속에 휴가와 현물이 함께 걸리면 줄을 나눠 적어 주세요.").font = (
+        Font(name=FACE, size=9, color="5B6478"))
+    row += 1
+    head(row, ((2, "규정명"), (3, "근속년수"), (4, "지급 내용"),
+               (5, f"지급방법\n({' / '.join(LONGTERM_KINDS)})"), (6, "지급기준 (금액 환산)")))
+    ws.row_dimensions[row].height = 30
+    row += 1
+
+    given = rows if rows is not None else LONGTERM_SCALE_ROWS
+    for rule, service, what, kind, basis in given:
+        for column, value in ((2, rule), (3, service), (4, what), (5, kind), (6, basis)):
+            cell = ws.cell(row, column, value)
+            cell.font = Font(name=FACE, size=9, color="000000" if filled else "9C6500")
+            if not filled:
+                cell.fill = PatternFill("solid", fgColor="FFF2CC")
+            cell.border = BORDER
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        row += 1
+    # 이어 적을 자리. 표가 어디까지인지 보이지 않으면 어디에 쓸지 모른다.
+    for _ in range(4):
+        for column in range(2, 7):
+            ws.cell(row, column).border = BORDER
+        row += 1
+
+    ws.cell(row + 1, 2,
+            "'규정명' 은 명부의 '장기급여 지급률 규정' 또는 직군과 이어집니다. "
+            "규정이 하나뿐이면 아무 이름이나 한 가지로 통일해 주세요.").font = (
+        Font(name=FACE, size=9, italic=True, color="5B6478"))
+
+
 # ── 사외적립자산 ────────────────────────────────────────────────
 
 #: 퇴직급여추계액 변동내역. (부호, 항목, 예시금액)
@@ -612,7 +743,7 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     obligation_of = numbers.get("obligation")
     asset_of = numbers.get("asset")
 
-    ws = wb.create_sheet("사외적립자산", 3)
+    ws = wb.create_sheet("사외적립자산", 4)
     for column, width in (("A", 4), ("B", 34), ("C", 18), ("D", 18),
                           ("E", 18), ("F", 52)):
         ws.column_dimensions[column].width = width
@@ -765,6 +896,8 @@ def build_workbook(
     note: str = "",
     rules_filled: bool = False,
     specials: dict[str, str] | None = None,
+    longterm: dict[str, str] | None = None,
+    longterm_rows: list | None = None,
     numbers: dict | None = None,
     actives: list[dict] | None = None,
     retirees: list[dict] | None = None,
@@ -784,6 +917,7 @@ def build_workbook(
     _guide(wb)
     _basics(wb, values=basics, groups=groups, note=note)
     _rules(wb, filled=rules_filled, specials=specials)
+    _longterm(wb, filled=rules_filled, rows=longterm_rows, overview=longterm)
     _assets(wb, numbers=numbers)
     _sheet(wb, "재직자명부", ACTIVE, second=SECOND_ACTIVE,
            rows=actives, extras=active_extras)
