@@ -924,8 +924,8 @@ def _asset_numbers(
         },
         "closing": (round(closing - national_pension), round(national_pension)),
         "breakdown": [
-            ("현금 및 현금등가물", cash),
-            ("정기예금·원리금보장 GIC", round(closing) - cash),
+            ("현금 및 현금등가물", cash, "있음"),
+            ("정기예금·원리금보장 GIC", round(closing) - cash, "없음"),
         ],
         "extras": {
             "자산인식상한 (문단 64)": "",

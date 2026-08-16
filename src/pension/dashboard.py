@@ -144,6 +144,7 @@ def build(run: Any, employee_id: str = "") -> dict[str, Any]:
         "net": [[k, a] for k, a in assets.net_rows()] if assets else [],
         "funded": assets.funded_ratio if assets else 0.0,
         "asset_breakdown": dict(info.assets.breakdown) if info else {},
+        "asset_quoted": dict(info.assets.quoted) if info else {},
         "assumption_steps": [[k, v] for k, v in (roll.assumption_steps if roll else [])],
         "ceiling": ({"limit": assets.asset_ceiling, "surplus": assets.surplus,
                      "effect": assets.ceiling_effect}

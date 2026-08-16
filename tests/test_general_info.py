@@ -482,3 +482,33 @@ class TestTheStandardTemplateReadsBackWhole:
         """0 은 '상한이 0 원', 빈칸은 '미적용' 이다. 섞으면 자산을 통째로 깎는다."""
         book = self._book(tmp_path / "빈양식.xlsx")
         assert read_general_info(book).assets.asset_ceiling is None
+
+    def test_the_quoted_price_flag_is_read_per_class(self, tmp_path) -> None:
+        """문단 142 는 분류마다 활성시장 공시가격 유무를 함께 묻는다."""
+        book = self._book(
+            tmp_path / "공시가격.xlsx",
+            numbers={
+                "opening": (0, 0), "closing": (3_000_000_000, 0),
+                "asset": {}, "obligation": {},
+                "breakdown": [
+                    ("국공채", 1_000_000_000, "있음"),
+                    ("정기예금·원리금보장 GIC", 2_000_000_000, "없음"),
+                ],
+            },
+        )
+        assets = read_general_info(book).assets
+        assert assets.quoted == {"국공채": True, "정기예금·원리금보장 GIC": False}
+
+    def test_a_class_with_no_flag_is_not_assumed_absent(self, tmp_path) -> None:
+        """빈칸을 '없음' 으로 단정하면 시세가 있는 국공채까지 없는 쪽으로 몰린다."""
+        book = self._book(
+            tmp_path / "무표기.xlsx",
+            numbers={
+                "opening": (0, 0), "closing": (1_000_000_000, 0),
+                "asset": {}, "obligation": {},
+                "breakdown": [("국공채", 1_000_000_000)],
+            },
+        )
+        assets = read_general_info(book).assets
+        assert assets.breakdown == {"국공채": 1_000_000_000}
+        assert assets.quoted == {}

@@ -534,9 +534,36 @@ def _severance_sections(run: Any, sections: list, period: str) -> None:
         breakdown = info.assets.breakdown if info is not None else {}
         if breakdown:
             parts.append("<h3>※ 사외적립자산 구성내역 (문단 142)</h3>")
-            parts.append(_kv_table(
-                [(name, _won(amount)) for name, amount in breakdown.items()]
-                + [("사외적립자산 합계", _won(sum(breakdown.values())))]))
+            quoted = info.assets.quoted if info is not None else {}
+            if quoted:
+                # 문단 142 는 분류를 '활성시장 공시가격이 있는 것' 과 '없는 것'
+                # 으로 다시 나누라고 한다. 원리금보장 상품이 자산의 대부분인
+                # 회사가 흔한데, 합쳐서 내면 그 사실이 공시에 남지 않는다.
+                rows: list[tuple[str, str]] = []
+                for has, title in ((True, "활성시장 공시가격 있음"),
+                                   (False, "활성시장 공시가격 없음")):
+                    picked = [(name, amount) for name, amount in breakdown.items()
+                              if quoted.get(name) is has]
+                    if not picked:
+                        continue
+                    rows.append((f"<b>{title}</b>", ""))
+                    rows += [(f"&nbsp;&nbsp;{name}", _won(amount))
+                             for name, amount in picked]
+                    rows.append((f"&nbsp;&nbsp;소계", _won(sum(a for _n, a in picked))))
+                unmarked = [(name, amount) for name, amount in breakdown.items()
+                            if name not in quoted]
+                if unmarked:
+                    rows.append(("<b>공시가격 유무 미기재</b>", ""))
+                    rows += [(f"&nbsp;&nbsp;{name}", _won(amount))
+                             for name, amount in unmarked]
+                rows.append(("사외적립자산 합계", _won(sum(breakdown.values()))))
+                parts.append(_kv_table(rows))
+            else:
+                parts.append(_kv_table(
+                    [(name, _won(amount)) for name, amount in breakdown.items()]
+                    + [("사외적립자산 합계", _won(sum(breakdown.values())))]))
+                parts.append('<p class="note">분류별 활성시장 공시가격 유무가 '
+                             '자료에 없어 문단 142 의 세분류를 생략했습니다.</p>')
     else:
         parts.append('<p class="note">사외적립자산 입력이 없어 전액 미적립으로 '
                      '보았습니다.</p>')

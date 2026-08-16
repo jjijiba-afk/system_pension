@@ -152,6 +152,13 @@ class AssetMovement:
     """
     breakdown: dict[str, float] = field(default_factory=dict)
     """자산 분류별 공정가치(문단 142 공시)."""
+    quoted: dict[str, bool] = field(default_factory=dict)
+    """분류별 **활성시장 공시가격 유무**(문단 142).
+
+    문단 142 는 분류만으로 끝나지 않고 각 분류를 공시가격이 있는 것과 없는
+    것으로 다시 나누라고 한다. 적히지 않은 분류는 여기 안 들어온다 — '없음'
+    으로 단정하면 시세가 있는 국공채까지 없는 쪽으로 몰린다.
+    """
 
     def is_empty(self) -> bool:
         return not (self.opening or self.closing or self.contributions)
@@ -538,6 +545,9 @@ def _read_assets(ws) -> AssetMovement:
                 # '⑴ 현금 및 현금등가물' → '현금 및 현금등가물'
                 clean = re.sub(r"^[^가-힣A-Za-z]+", "", label)
                 result.breakdown[clean] = amount
+                mark = text(ws.cell(row, name_col + 2).value)
+                if mark in ("있음", "없음"):
+                    result.quoted[clean] = mark == "있음"
 
     # '그 밖의 입력' — 표에 있으면서도 아무도 읽지 않으면, 채워 보낸 사람은
     # 화면에 손으로 한 번 더 적어야 한다. 물어봤으면 읽어야 한다.

@@ -135,3 +135,41 @@ class TestLongtermReport:
     def test_unknown_kind_is_refused(self, full_run) -> None:
         with pytest.raises(ValueError, match="보고서 종류"):
             render_html(full_run, kind="pension")
+
+
+class TestPlanAssetDisclosure:
+    """문단 142 — 자산 분류는 활성시장 공시가격 유무로 다시 갈려야 한다.
+
+    원리금보장 상품이 자산의 대부분인 회사가 흔하다. 분류만 내고 공시가격
+    유무를 합쳐 버리면, 그 사실이 재무제표 어디에도 남지 않는다.
+    """
+
+    def _with(self, run, breakdown, quoted):
+        assets = run.general_info.assets
+        assets.breakdown = dict(breakdown)
+        assets.quoted = dict(quoted)
+        return render_html(run, kind="severance")
+
+    def test_classes_are_split_by_quoted_price(self, full_run) -> None:
+        page = self._with(
+            full_run,
+            {"국공채": 1_000_000_000, "정기예금·원리금보장 GIC": 3_000_000_000},
+            {"국공채": True, "정기예금·원리금보장 GIC": False},
+        )
+        assert "활성시장 공시가격 있음" in page
+        assert "활성시장 공시가격 없음" in page
+        assert "3,000,000,000" in page
+
+    def test_missing_flags_are_said_out_loud(self, full_run) -> None:
+        """세분류를 못 냈으면 조용히 넘어가지 말고 그 사실을 적는다."""
+        page = self._with(full_run, {"국공채": 1_000_000_000}, {})
+        assert "문단 142 의 세분류를 생략" in page
+
+    def test_a_class_with_no_flag_is_shown_apart(self, full_run) -> None:
+        """일부만 적혀 왔을 때 안 적힌 것을 '없음' 에 섞으면 공시가 틀린다."""
+        page = self._with(
+            full_run,
+            {"국공채": 1_000_000_000, "그 밖의 자산": 500_000_000},
+            {"국공채": True},
+        )
+        assert "공시가격 유무 미기재" in page

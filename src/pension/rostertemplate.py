@@ -715,16 +715,24 @@ ASSET_OPENING = (12_000_000_000, 300_000_000)
 #: 기말은 신탁 명세서의 숫자를 그대로 적는 자리다. 검증 줄이 0 이 되는 값.
 ASSET_CLOSING = (12_793_000_000, 300_000_000)
 
-#: 자산 분류별 공정가치 (문단 142 공시).
+#: 자산 분류별 공정가치 (문단 142 공시). (분류, 금액, 활성시장 공시가격)
+#:
+#: 문단 142 는 분류만으로 끝나지 않는다 — 각 분류를 **활성시장에 공시가격이
+#: 있는 것과 없는 것으로 다시 나누라** 고 한다. 정기예금·GIC 처럼 시세가 없는
+#: 자산이 자산의 대부분인 회사가 흔한데, 나누지 않으면 그 사실이 공시에
+#: 드러나지 않는다.
 ASSET_BREAKDOWN = [
-    ("현금 및 현금등가물", 150_000_000),
-    ("정기예금·원리금보장 GIC", 9_800_000_000),
-    ("국공채", 1_500_000_000),
-    ("특수채·금융채", 700_000_000),
-    ("회사채", 400_000_000),
-    ("수익증권 (펀드)", 543_000_000),
-    ("그 밖의 자산", 0),
+    ("현금 및 현금등가물", 150_000_000, "있음"),
+    ("정기예금·원리금보장 GIC", 9_800_000_000, "없음"),
+    ("국공채", 1_500_000_000, "있음"),
+    ("특수채·금융채", 700_000_000, "있음"),
+    ("회사채", 400_000_000, "없음"),
+    ("수익증권 (펀드)", 543_000_000, "있음"),
+    ("그 밖의 자산", 0, "없음"),
 ]
+
+#: 활성시장 공시가격 유무를 적는 말. 읽는 쪽과 같은 낱말이어야 한다.
+QUOTED_WORDS: tuple[str, str] = ("있음", "없음")
 
 
 def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
@@ -848,20 +856,32 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
         name=FACE, size=11, bold=True, color="1F3864")
     ws.cell(row, 6, "기말 공정가치를 자산 종류별로. 공시(문단 142)에 그대로 실립니다.").font = (
         Font(name=FACE, size=9, color="5B6478"))
-    head(row + 1, ((2, "자산 분류"), (3, "공정가치")))
+    head(row + 1, ((2, "자산 분류"), (3, "공정가치"), (4, "활성시장 공시가격")))
     row += 2
     first_detail = row
-    for name, amount in numbers.get("breakdown", ASSET_BREAKDOWN):
+    for line in numbers.get("breakdown", ASSET_BREAKDOWN):
+        name, amount = line[0], line[1]
+        quoted = line[2] if len(line) > 2 else ""
         cell = ws.cell(row, 2, name)
         cell.font = Font(name=FACE, size=9)
         cell.border = BORDER
         money(row, 3, amount)
+        # 문단 142 는 분류마다 '활성시장에 공시가격이 있는지' 를 함께 묻는다.
+        # 정기예금·GIC 가 자산의 대부분인 회사가 흔한데, 안 나누면 공시에
+        # 그 사실이 드러나지 않는다.
+        mark = ws.cell(row, 4, quoted)
+        mark.font = Font(name=FACE, size=9, color=ink)
+        mark.alignment = Alignment(horizontal="center")
+        mark.border = BORDER
+        if not filled:
+            mark.fill = PatternFill("solid", fgColor=face)
         row += 1
     total = ws.cell(row, 2, "합계")
     total.font = Font(name=FACE, size=9, bold=True)
     total.border = BORDER
     money(row, 3, f"=SUM(C{first_detail}:C{row - 1})", formula=True)
-    ws.cell(row, 4, f"기말 잔액(C{closing_row}+D{closing_row}) 과 같아야 합니다.").font = (
+    ws.cell(row, 5, f"기말 잔액(C{closing_row}+D{closing_row}) 과 같아야 합니다. "
+                    f"'활성시장 공시가격' 은 {' / '.join(QUOTED_WORDS)} 중 하나로.").font = (
         Font(name=FACE, size=9, color="5B6478"))
 
     # 그 밖에 담당자가 정해 주어야 하는 숫자
