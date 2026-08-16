@@ -123,7 +123,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     samples.add_argument(
         "--cases", action="store_true",
-        help="난수로 만든 시험용 명부 3종(표준·복합제도·특이케이스)과 짝 기초율도 함께",
+        help="난수로 만든 시험용 명부(표준·복합제도)와 짝 기초율도 함께. "
+             "특이케이스는 강사용이라 --case-password 가 맞아야 나옵니다",
+    )
+    samples.add_argument(
+        "--case-password", default="", metavar="비밀번호",
+        help="강사용 잠금 비밀번호 — 맞으면 시험명부3(특이케이스)까지 만듭니다",
     )
     samples.add_argument(
         "--seed", type=int, default=20251231,
@@ -394,8 +399,11 @@ def _cmd_samples(args: argparse.Namespace) -> int:
         print(f"  {path.name}")
 
     if args.cases:
-        from .rostergen import CASES, write_case_pack
+        from .rostergen import case_specs, lock_ok, write_case_pack
 
+        specials = lock_ok(args.case_password)
+        if args.case_password and not specials:
+            print("\n--case-password 가 맞지 않습니다 — 특이케이스는 빼고 만듭니다.")
         base_date = None
         if args.case_base_date:
             import datetime as _dt
@@ -403,10 +411,14 @@ def _cmd_samples(args: argparse.Namespace) -> int:
             base_date = _dt.date.fromisoformat(args.case_base_date)
         made = write_case_pack(
             args.directory / "시험명부", seed=args.seed, base_date=base_date,
+            specials=specials,
         )
-        print(f"\n시험용 명부 {len(CASES)}종 (재직 290명 안팎, 난수 씨앗 {args.seed}):")
-        for spec in CASES:
+        specs = case_specs(specials=specials)
+        print(f"\n시험용 명부 {len(specs)}종 (재직 290명 안팎, 난수 씨앗 {args.seed}):")
+        for spec in specs:
             print(f"  {spec.title}.xlsx + {spec.title}_기초율.xlsx — {spec.summary}")
+        if not specials:
+            print("  (시험명부3_특이케이스는 강사용 잠금 — --case-password 필요)")
         print(f"  → {args.directory / '시험명부'} ({len(made)}개 파일)")
 
     print(

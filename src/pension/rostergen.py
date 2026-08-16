@@ -44,9 +44,30 @@ from pathlib import Path
 from typing import Any, Final
 
 __all__ = [
-    "CASES", "DEFAULT_CASE", "CaseSpec", "make_population",
+    "CASES", "DEFAULT_CASE", "CaseSpec", "lock_ok", "make_population",
     "write_case_roster", "write_case_rosters",
 ]
+
+# ── 강사용 잠금 ─────────────────────────────────────────────────
+# 시험명부3(특이케이스)와 특이사항 명부는 문제지가 딸린 강사용 자료라
+# 비밀번호를 맞혀야 만들 수 있다. 여기에는 비밀번호 자체가 아니라
+# PBKDF2-SHA256 해시만 둔다 — 저장소가 공개라도 원문은 드러나지 않는다.
+LOCK_SALT: Final = "26a79e4f4f68c81af51db05a796e2a80"
+LOCK_HASH: Final = "8c4b97acd982aee50d3cce7163164a502fa3c2322a6ec4fa2c48dde75acab1d6"
+LOCK_ROUNDS: Final = 310_000
+
+
+def lock_ok(password: str) -> bool:
+    """강사용 비밀번호가 맞는지. 빈 값은 항상 거짓."""
+    import hashlib
+    import hmac
+
+    if not password:
+        return False
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(LOCK_SALT), LOCK_ROUNDS,
+    )
+    return hmac.compare_digest(digest.hex(), LOCK_HASH)
 
 BASE_DATE: Final = _dt.date(2025, 12, 31)
 """기본 산출기준일. 생성 함수에 ``base_date`` 를 주면 그 날짜로 만든다."""
@@ -1212,15 +1233,25 @@ def write_case_assumptions(spec: CaseSpec, path: str | Path) -> Path:
     return form.write_state(state, path)
 
 
+def case_specs(*, specials: bool = True) -> tuple[CaseSpec, ...]:
+    """만들 사례 목록. ``specials`` 가 거짓이면 강사용(특이케이스)을 뺀다."""
+    return tuple(
+        spec for spec in CASES if specials or not spec.flags.get("specials_only")
+    )
+
+
 def write_case_pack(
     directory: str | Path, *, seed: int = 20251231,
-    base_date: _dt.date | None = None,
+    base_date: _dt.date | None = None, specials: bool = True,
 ) -> list[Path]:
-    """세 사례의 명부와 짝이 되는 기초율을 한꺼번에 만든다."""
+    """사례별 명부와 짝이 되는 기초율을 한꺼번에 만든다.
+
+    :param specials: 거짓이면 강사용 잠금 대상(특이케이스)은 만들지 않는다.
+    """
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     made: list[Path] = []
-    for spec in CASES:
+    for spec in case_specs(specials=specials):
         report = directory / f"{spec.title}_특이사항.txt"
         made.append(write_case_roster(
             spec, directory / f"{spec.title}.xlsx", seed=seed, report_path=report,

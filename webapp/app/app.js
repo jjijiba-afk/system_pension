@@ -3110,26 +3110,63 @@ $("base-date-clear").addEventListener("click", () => { $("base_date").value = ""
 
 let generated = null;
 
+// ── 강사용 잠금 ─────────────────────────────────────────────────
+// 시험명부3(특이케이스)과 특이사항 명부는 문제·해설이 딸린 강사용 자료다.
+// 비밀번호는 엔진(파이썬)이 해시로만 대조하고, 맞힌 값은 탭이 닫힐 때까지만
+// sessionStorage 에 남는다. 코드가 공개된 앱이라 완전한 보안장치는 아니고,
+// 실습자가 화면에서 문제지를 열어 보지 못하게 막는 잠금이다.
+const LOCK_STORE = "gen-lock-key";
+
+function lockKey() {
+  try { return sessionStorage.getItem(LOCK_STORE) || ""; } catch (err) { return ""; }
+}
+
+function genUnlocked() { return Boolean(lockKey()); }
+
+let afterUnlock = null;
+
+function askUnlock(then) {
+  afterUnlock = then || null;
+  $("lock-msg").textContent = "";
+  $("lock-pass").value = "";
+  $("lock-dialog").showModal();
+  $("lock-pass").focus();
+}
+
+$("lock-ok").addEventListener("click", () => {
+  const value = $("lock-pass").value;
+  if (!value) { $("lock-dialog").close(); return; }   // 그냥 확인 — 닫는다.
+  try {
+    py("gen_unlock", { password: value });
+  } catch (error) {
+    $("lock-msg").textContent = error.message || String(error);
+    return;
+  }
+  try { sessionStorage.setItem(LOCK_STORE, value); } catch (err) { /* 사설 모드 */ }
+  $("lock-dialog").close();
+  status("잠금을 풀었습니다 — 이 탭을 닫을 때까지 유지됩니다.");
+  if (afterUnlock) { const go = afterUnlock; afterUnlock = null; go(); }
+});
+
+$("lock-pass").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); $("lock-ok").click(); }
+});
+
 $("gen-run").addEventListener("click", () => {
   try {
     status("시험 명부를 만드는 중… (몇 초 걸립니다)");
     const seed = parseInt($("gen-seed").value, 10) || 20251231;
     generated = py("gen_cases", {
       work: "/work", seed, base_date: $("gen-base-date").value,
+      specials: genUnlocked(), password: lockKey(),
     });
     renderGenerated();
-    $("gen-download").disabled = false;
     status(`시험 명부 ${generated.cases.length}종을 만들었습니다.` +
            (generated.base_date ? ` (기준일 ${generated.base_date})` : ""));
   } catch (error) {
     status("만들지 못했습니다: " + (error.message || error));
     alert(error.message || error);
   }
-});
-
-$("gen-download").addEventListener("click", () => {
-  if (!generated) return;
-  download(generated.path, generated.filename, "application/zip");
 });
 
 function renderGenerated() {
@@ -3144,13 +3181,25 @@ function renderGenerated() {
         el("button", { class: "small", type: "button",
           onclick: () => showReport(item) }, "특이사항 보기"),
         el("button", { class: "small", type: "button",
-          onclick: () => registerGenerated(item) }, "목록에 등록")));
+          onclick: () => registerGenerated(item) }, "목록에 등록"),
+        el("button", { class: "small", type: "button",
+          onclick: () => download(item.zip, item.zipname, "application/zip") },
+          "zip 내려받기")));
     if (item.force) {
       box.append(el("div", { class: "warn-box" },
         "자료 오류를 일부러 심은 명부입니다 — [검증 오류가 있어도 산출 강행] 을 켜야 끝까지 돕니다."));
     }
     return box;
   }));
+  if (generated.locked) {
+    target.append(el("fieldset", {},
+      el("legend", {}, "시험명부3_특이케이스 🔒"),
+      el("div", { class: "hint" }, "현재 개발중인 메뉴로 추후 오픈 예정입니다."),
+      el("div", { class: "toolbar" },
+        el("button", { class: "small", type: "button",
+          onclick: () => askUnlock(() => $("gen-run").click()) },
+          "안내"))));
+  }
 }
 
 function useGenerated(item) {
@@ -3202,6 +3251,10 @@ async function registerGenerated(item) {
 let features = null;
 
 $("feat-run").addEventListener("click", () => {
+  if (!genUnlocked()) {          // 안내문이 곧 해설지 — 통째로 강사용 잠금.
+    askUnlock(() => $("feat-run").click());
+    return;
+  }
   const measure = $("feat-measure").checked;
   try {
     status(measure
@@ -3210,6 +3263,7 @@ $("feat-run").addEventListener("click", () => {
     const seed = parseInt($("gen-seed").value, 10) || 20251231;
     features = py("gen_features", {
       work: "/work", seed, base_date: $("gen-base-date").value, measure,
+      password: lockKey(),
     });
     renderFeatures();
     $("feat-download").disabled = false;

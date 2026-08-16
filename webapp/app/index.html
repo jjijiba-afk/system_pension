@@ -485,10 +485,10 @@
 
 <details class="section" id="lib-gen"><summary>시험 명부 만들기<span class="count"></span></summary>
 <div class="section-body">
-<p class="notice">난수로 만든 시험용 명부 세 벌입니다. 프로그램이 제대로 도는지
+<p class="notice">난수로 만든 시험용 명부입니다. 프로그램이 제대로 도는지
 확인하거나, 실제 명부 없이 화면을 익힐 때 씁니다. 명부마다 <b>짝이 되는 기초율</b>과
-무엇이 들어 있는지 적은 <b>특이사항 안내문</b>이 함께 나옵니다.
-성명·사번은 지어낸 것이라 실제 인물과 무관합니다.</p>
+무엇이 들어 있는지 적은 <b>특이사항 안내문</b>이 함께 나오고, 사례마다 zip 으로
+따로 내려받습니다. 성명·사번은 지어낸 것이라 실제 인물과 무관합니다.</p>
 
 <fieldset><legend>만들기</legend>
   <div class="lib-line">
@@ -497,7 +497,6 @@
     <span style="font-weight:600">난수 씨앗</span>
     <input type="text" id="gen-seed" inputmode="numeric" value="20251231" style="width:130px">
     <button class="small primary" type="button" id="gen-run">시험 명부 만들기</button>
-    <button class="small" type="button" id="gen-download" disabled>zip 내려받기</button>
   </div>
   <div class="hint">기준일을 비우면 2025-12-31 로 만듭니다. 연령·근속·퇴사일이
   모두 이 날짜를 기준으로 맞춰집니다.<br>씨앗이 같으면 언제 만들어도 같은 명부가 나옵니다 — 산출 결과를
@@ -508,7 +507,7 @@
 <div id="gen-cases"></div>
 
 <fieldset><legend>특이사항 한 가지씩 — 한 벌</legend>
-  <p class="hint">위의 세 벌은 특이사항 열두 가지를 <b>한 사람씩</b> 심어 한 파일에
+  <p class="hint">위의 시험 명부는 특이사항 열두 가지를 <b>한 사람씩</b> 심어 한 파일에
   몰아 넣은 것입니다. 무엇이 있는지 훑기에는 좋지만, 산출 결과를 놓고 "이 숫자가
   왜 이렇게 나왔나" 를 따지기에는 쓸 수 없습니다 — 한 사람만 달라진 것이라 채무
   전체에서 티가 안 나고, 열두 가지가 서로 얽혀 있기 때문입니다.<br>
@@ -650,6 +649,19 @@
   <h1 style="font-size:1.05rem" id="report-title"></h1>
   <pre id="report-body" style="white-space:pre-wrap;font-size:0.86rem;line-height:1.5"></pre>
   <button class="big secondary" onclick="this.closest('dialog').close()">닫기</button>
+</dialog>
+
+<dialog id="lock-dialog">
+  <h1 style="font-size:1.05rem">안내</h1>
+  <p>현재 개발중인 메뉴로 추후 오픈 예정입니다.</p>
+  <input type="password" id="lock-pass" autocomplete="off" placeholder="관리자 비밀번호"
+    style="width:100%;margin:8px 0">
+  <div class="hint" id="lock-msg" style="color:#b3261e"></div>
+  <div class="toolbar">
+    <button class="small primary" type="button" id="lock-ok">확인</button>
+    <button class="small" type="button"
+      onclick="this.closest('dialog').close()">닫기</button>
+  </div>
 </dialog>
 
 <dialog id="print-dialog" style="width:92vw;max-width:900px">

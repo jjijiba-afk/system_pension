@@ -240,6 +240,8 @@ class LibraryTab(ttk.Frame):
         ttk.Button(bar, text="만들기", command=self.generate).pack(side="left")
         ttk.Button(bar, text="만든 것을 목록에 등록",
                    command=self.register_cases).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="잠금 해제",
+                   command=self.unlock_cases).pack(side="left", padx=(6, 0))
 
         self.case_table = Table(box, ["사례", "설명"], widths=[150, 560],
                                 aligns=["w", "w"], height=len(CASES), stretch=1)
@@ -258,6 +260,27 @@ class LibraryTab(ttk.Frame):
         folder.mkdir(parents=True, exist_ok=True)
         return folder
 
+    #: 강사용(특이케이스) 잠금 상태 — 비밀번호를 맞히면 이 창이 닫힐 때까지 열림.
+    _cases_unlocked = False
+
+    def unlock_cases(self) -> None:
+        from tkinter import simpledialog
+
+        from ..rostergen import lock_ok
+
+        value = simpledialog.askstring(
+            "안내", "현재 개발중인 메뉴로 추후 오픈 예정입니다.\n"
+            "관리자 비밀번호:", show="*", parent=self)
+        if value is None:
+            return
+        if not lock_ok(value):
+            messagebox.showerror("안내", "비밀번호가 맞지 않습니다.", parent=self)
+            return
+        type(self)._cases_unlocked = True
+        self.gen_status.configure(
+            text="잠금을 풀었습니다 — [만들기] 를 누르면 특이케이스까지 나옵니다.",
+            style="Good.TLabel")
+
     def generate(self) -> None:
         from ..rostergen import write_case_pack
         from .calc import parse_date
@@ -272,12 +295,14 @@ class LibraryTab(ttk.Frame):
         self.gen_status.configure(text="만드는 중…", style="Hint.TLabel")
         self.update_idletasks()
         try:
-            made = write_case_pack(folder, seed=seed, base_date=base)
+            made = write_case_pack(folder, seed=seed, base_date=base,
+                                   specials=self._cases_unlocked)
         except Exception as exc:
             self.gen_status.configure(text=f"만들지 못했습니다: {exc}", style="Bad.TLabel")
             return
+        note = "" if self._cases_unlocked else " (특이케이스는 개발중 — 추후 오픈)"
         self.gen_status.configure(
-            text=f"{len(made)}개 파일을 만들었습니다: {folder}", style="Good.TLabel")
+            text=f"{len(made)}개 파일을 만들었습니다{note}: {folder}", style="Good.TLabel")
         reveal(folder)
 
     def register_cases(self) -> None:
@@ -290,12 +315,15 @@ class LibraryTab(ttk.Frame):
             roster = folder / f"{spec.title}.xlsx"
             assumptions = folder / f"{spec.title}_기초율.xlsx"
             if not roster.exists():
-                self.gen_status.configure(text="먼저 [만들기] 를 누르세요.", style="Bad.TLabel")
-                return
+                # 잠긴 강사용 사례는 없는 게 정상 — 나머지를 그대로 등록한다.
+                continue
             register(ROSTER_KIND, roster, name=spec.title)
             if assumptions.exists():
                 register(PRESET_KIND, assumptions, name=f"{spec.title}_기초율")
             made.append(spec.title)
+        if not made:
+            self.gen_status.configure(text="먼저 [만들기] 를 누르세요.", style="Bad.TLabel")
+            return
         self.hub.announce("library")
         self.gen_status.configure(
             text="목록에 등록했습니다 — " + " · ".join(made) +

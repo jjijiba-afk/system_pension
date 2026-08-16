@@ -676,22 +676,57 @@ class TestPresets:
 
 
 class TestGenerator:
-    """시험용 난수 명부를 시스템 안에서 만든다."""
+    """시험용 난수 명부 — 강사용(특이케이스)은 비밀번호 잠금."""
 
-    def test_makes_pack_with_reports(self, tmp_path) -> None:
+    @staticmethod
+    def _open_lock(monkeypatch, word: str) -> None:
+        """시험용 비밀번호로 잠금 해시를 갈아 끼운다 — 실제 비밀번호는 저장소에 없다."""
+        import hashlib
+
+        from pension import rostergen
+
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", word.encode("utf-8"), bytes.fromhex(rostergen.LOCK_SALT),
+            rostergen.LOCK_ROUNDS,
+        ).hex()
+        monkeypatch.setattr(rostergen, "LOCK_HASH", digest)
+
+    def test_locked_by_default_makes_two_cases_with_zips(self, tmp_path) -> None:
         result = call("gen_cases", work=str(tmp_path), seed=42)
-        assert Path(result["path"]).exists()
-        assert len(result["files"]) == 9        # 사례 3종 × (명부·기초율·안내문)
-        assert len(result["cases"]) == 3
+        assert result["locked"] is True
+        assert len(result["cases"]) == 2
+        assert len(result["files"]) == 6        # 사례 2종 × (명부·기초율·안내문)
+        assert not any(c["key"] == "특이케이스" for c in result["cases"])
 
-        # 자료불량 사례는 만들지 않는다 — 세 사례 모두 강행 없이 돌아간다.
+        # 자료불량 사례는 만들지 않는다 — 모두 강행 없이 돌아간다.
         assert not any(c["force"] for c in result["cases"])
-        special = next(c for c in result["cases"] if c["key"] == "특이케이스")
-        assert "문제지" in special["report"]
-        assert "사례 01" in special["report"]
         clean = next(c for c in result["cases"] if c["key"] == "표준")
         assert "산출 특이사항" in clean["report"]
         assert Path(clean["roster"]).exists() and Path(clean["assumptions"]).exists()
+        # 사례마다 zip 하나 — 실습자에게 한 벌씩 따로 나눠 준다.
+        for case in result["cases"]:
+            assert Path(case["zip"]).exists()
+            assert case["zipname"].startswith(case["title"])
+
+    def test_specials_need_the_password(self, tmp_path) -> None:
+        assert "비밀번호" in call_error(
+            "gen_cases", work=str(tmp_path), seed=42, specials=True, password="틀림")
+        assert "비밀번호" in call_error("gen_unlock", password="틀림")
+        assert "비밀번호" in call_error(
+            "gen_features", work=str(tmp_path), seed=42, measure=False)
+
+    def test_password_opens_the_specials(self, tmp_path, monkeypatch) -> None:
+        word = "연습용 자물쇠"
+        self._open_lock(monkeypatch, word)
+        assert call("gen_unlock", password=word)["ok"] is True
+        result = call("gen_cases", work=str(tmp_path), seed=42,
+                      specials=True, password=word)
+        assert result["locked"] is False
+        assert len(result["cases"]) == 3
+        special = next(c for c in result["cases"] if c["key"] == "특이케이스")
+        assert "문제지" in special["report"]
+        assert "사례 01" in special["report"]
+        assert Path(special["zip"]).exists()
 
     def test_generated_case_runs_end_to_end(self, tmp_path) -> None:
         made = call("gen_cases", work=str(tmp_path), seed=42)
@@ -704,9 +739,9 @@ class TestGenerator:
     def test_register_puts_them_in_the_lists(self, tmp_path) -> None:
         call("gen_cases", work=str(tmp_path), seed=42)
         result = call("gen_case_register", work=str(tmp_path))
-        assert len(result["registered"]) == 3
-        assert len(result["library"]["명부"]["entries"]) == 3
-        assert len(result["library"]["가정세트"]["entries"]) == 3
+        assert len(result["registered"]) == 2   # 잠긴 특이케이스는 빠진다
+        assert len(result["library"]["명부"]["entries"]) == 2
+        assert len(result["library"]["가정세트"]["entries"]) == 2
 
     def test_register_without_generating_says_so(self, tmp_path) -> None:
         assert "먼저" in call_error("gen_case_register", work=str(tmp_path / "빈곳"))

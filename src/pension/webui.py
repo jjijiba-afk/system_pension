@@ -1023,6 +1023,15 @@ def _as_date(token: object) -> _dt.date | None:
 
 # ── 시험용 난수 명부 ─────────────────────────────────────────────
 
+def _gen_unlock(request: dict) -> dict[str, Any]:
+    """강사용 잠금 해제 — 비밀번호가 맞는지만 확인한다."""
+    from .rostergen import lock_ok
+
+    if not lock_ok(text(request.get("password"))):
+        raise ValueError("비밀번호가 맞지 않습니다.")
+    return {"ok": True}
+
+
 def _gen_features(request: dict) -> dict[str, Any]:
     """특이사항 한 가지씩만 담은 명부 한 벌.
 
@@ -1038,6 +1047,11 @@ def _gen_features(request: dict) -> dict[str, Any]:
         report_text,
         write_feature_rosters,
     )
+    from .rostergen import lock_ok
+
+    # 특이사항 명부는 문제·해설이 딸린 강사용 자료 — 통째로 잠근다.
+    if not lock_ok(text(request.get("password"))):
+        raise ValueError("비밀번호가 맞지 않습니다.")
 
     seed = int(request.get("seed") or 20251231)
     base_date = _as_date(request.get("base_date"))
@@ -1102,12 +1116,19 @@ def _gen_features(request: dict) -> dict[str, Any]:
 
 
 def _gen_cases(request: dict) -> dict[str, Any]:
-    """난수 명부 세 사례를 만들어 zip 하나로 묶는다.
+    """난수 명부 사례들을 만들고 사례마다 zip 으로 따로 묶는다.
 
     명부·짝이 되는 기초율·특이사항 안내문이 한 벌로 나온다. 안내문이 없으면
     난수 명부를 열어 봐도 무엇을 시험하려는 자료인지 알 수 없다.
+
+    시험명부3(특이케이스)은 문제지가 딸린 강사용 자료라, ``specials`` 요청에
+    맞는 ``password`` 가 함께 와야만 만든다. 아니면 1·2 두 사례만 만든다.
     """
-    from .rostergen import write_case_pack
+    from .rostergen import case_specs, lock_ok, write_case_pack
+
+    specials = bool(request.get("specials"))
+    if specials and not lock_ok(text(request.get("password"))):
+        raise ValueError("비밀번호가 맞지 않습니다.")
 
     seed = int(request.get("seed") or 20251231)
     base_date = _as_date(request.get("base_date"))
@@ -1115,30 +1136,35 @@ def _gen_cases(request: dict) -> dict[str, Any]:
     folder = work / "시험명부"
     if folder.exists():
         shutil.rmtree(folder)
-    made = write_case_pack(folder, seed=seed, base_date=base_date)
+    made = write_case_pack(folder, seed=seed, base_date=base_date,
+                           specials=specials)
 
-    target = work / f"시험명부_{seed}.zip"
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in made:
-            archive.write(path, path.name)
+    # 사례마다 zip 하나 — 실습자에게 명부를 한 벌씩 따로 나눠 줄 수 있다.
+    cases = []
+    for spec in case_specs(specials=specials):
+        parts = [
+            folder / f"{spec.title}.xlsx",
+            folder / f"{spec.title}_기초율.xlsx",
+            folder / f"{spec.title}_특이사항.txt",
+        ]
+        target = work / f"{spec.title}_{seed}.zip"
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in parts:
+                archive.write(path, path.name)
+        cases.append({
+            "key": spec.key, "title": spec.title, "summary": spec.summary,
+            "roster": str(parts[0]),
+            "assumptions": str(parts[1]),
+            "report": parts[2].read_text(encoding="utf-8"),
+            "force": bool(spec.flags.get("dirty")),
+            "zip": str(target), "zipname": target.name,
+        })
 
     return {
-        "path": str(target), "filename": target.name,
-        "size": target.stat().st_size,
         "files": [path.name for path in made],
         "base_date": str(base_date or ""),
-        "cases": [
-            {
-                "key": spec.key, "title": spec.title, "summary": spec.summary,
-                "roster": str(folder / f"{spec.title}.xlsx"),
-                "assumptions": str(folder / f"{spec.title}_기초율.xlsx"),
-                "report": (folder / f"{spec.title}_특이사항.txt").read_text(
-                    encoding="utf-8"
-                ),
-                "force": bool(spec.flags.get("dirty")),
-            }
-            for spec in CASES
-        ],
+        "locked": not specials,
+        "cases": cases,
     }
 
 
@@ -1156,10 +1182,16 @@ def _gen_case_register(request: dict) -> dict[str, Any]:
         roster = folder / f"{spec.title}.xlsx"
         assumptions = folder / f"{spec.title}_기초율.xlsx"
         if not roster.exists():
-            raise ValueError("먼저 [시험 명부 만들기] 를 눌러 주세요")
+            # 콕 집어 온 사례가 없을 때만 안내한다 — 전체 등록은 잠긴
+            # 강사용 사례가 빠져 있어도 나머지를 그대로 등록한다.
+            if wanted:
+                raise ValueError("먼저 [시험 명부 만들기] 를 눌러 주세요")
+            continue
         register(ROSTER_KIND, roster, name=spec.title)
         register(PRESET_KIND, assumptions, name=f"{spec.title}_기초율")
         made.append(spec.title)
+    if not made:
+        raise ValueError("먼저 [시험 명부 만들기] 를 눌러 주세요")
     return {"registered": made, **_library_list({})}
 
 
@@ -1333,6 +1365,7 @@ _OPS = {
     "rates_state": _rates_state,
     "preset_save": _preset_save,
     "preset_state": _preset_state,
+    "gen_unlock": _gen_unlock,
     "gen_cases": _gen_cases,
     "gen_features": _gen_features,
     "gen_case_register": _gen_case_register,
