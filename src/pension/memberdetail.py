@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
+from .assumptions import CAUSE_DEATH, CAUSE_NORMAL, CAUSE_VOLUNTARY
 from .normalize import text
 
 __all__ = ["lookup"]
@@ -118,8 +119,14 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
         "applied": applied,
         "result": {
             "확정급여채무 (DBO)": result.dbo,
+            # 사유별 몫 — 셋의 합이 위의 채무와 같다. 사유마다 지급률이 다른
+            # 규정은 총액만으로는 검산이 되지 않는다.
+            "DBO — 정년": result.by_cause.get(CAUSE_NORMAL, {}).get("dbo", 0.0),
+            "DBO — 중도": result.by_cause.get(CAUSE_VOLUNTARY, {}).get("dbo", 0.0),
+            "DBO — 사망": result.by_cause.get(CAUSE_DEATH, {}).get("dbo", 0.0),
             "당기근무원가": result.service_cost,
             "이자원가 (차기)": result.interest_cost,
+            "지급률 (누적 배수)": result.accrued_multiple,
             "퇴직급여추계액": result.accrued_benefit,
             "듀레이션 (년)": result.duration,
         },

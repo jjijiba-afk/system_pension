@@ -35,20 +35,19 @@ function isShell(request) {
 // (14MB), 그중 하나라도 실패하면 `addAll` 이 통째로 실패해 새 일꾼이 아예 설치
 // 되지 않는다 — 그러면 옛 일꾼이 그대로 남아 **새 판이 영영 안 뜬다.** 휴대폰
 // 회선에서는 이것이 드물지 않다. 무거운 것은 처음 쓸 때 받아 두면 된다.
+// 새 일꾼은 **기다린다.** `skipWaiting()` 으로 곧바로 넘겨받으면, 산출이 도는
+// 중에 엔진(휠)만 새 판으로 바뀌어 화면과 엇갈릴 수 있다. 사람이 새로고침해
+// 열려 있던 화면이 모두 닫힌 뒤에 바뀌는 것이 맞다.
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)));
 });
 
+// 옛 캐시는 새 일꾼이 실제로 넘겨받은 뒤에 지운다. `clients.claim()` 도 쓰지
+// 않는다 — 이미 떠 있는 화면은 자기가 받은 판 그대로 끝까지 돌아야 한다.
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys()
-      .then((names) => Promise.all(
-        names.filter((name) => name !== CACHE).map((name) => caches.delete(name))))
-      .then(() => self.clients.claim())
+    caches.keys().then((names) => Promise.all(
+      names.filter((name) => name !== CACHE).map((name) => caches.delete(name))))
   );
 });
 

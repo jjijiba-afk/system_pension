@@ -143,6 +143,13 @@ class MemberValuation:
     """차기 이자원가(= DBO × 할인율)."""
     accrued_benefit: float = 0.0
     """기준일 현재 퇴직 시 지급액(퇴직급여추계액). 명부 값이 아니라 지급률로 재계산한 값."""
+    accrued_multiple: float = 0.0
+    """기준일 현재 누적 지급배수(지급률). 추계액을 만든 배수 그 자체다.
+
+    금액만 보면 임금이 커서 큰 것인지 배수가 커서 큰 것인지 가릴 수 없다.
+    담당자가 규정과 맞대어 보는 칸이 배수이므로 결과에도 그대로 싣는다.
+    가산액(사망 위로금 등)은 배수가 아니므로 여기에 들어가지 않는다.
+    """
     next_accrued_benefit: float = 0.0
     """**1년 뒤** 퇴직 시 지급액. 명부의 차년도 추계액과 맞대어 보는 값이다.
 
@@ -696,9 +703,15 @@ def value_member(
 
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
     # 추계액은 '지금 자발적으로 나가면 얼마' 이므로 중도퇴직 규정으로 잰다.
+    accrued_cause = causes.get(rule, CAUSE_VOLUNTARY)
     result.accrued_benefit = benefit_at(
-        past_service, float(member.age), member.monthly_wage,
-        causes.get(rule, CAUSE_VOLUNTARY),
+        past_service, float(member.age), member.monthly_wage, accrued_cause,
+    )
+    # 그 추계액을 만든 배수. 급여액과 나란히 두어야 "임금이 큰 것인지 배수가
+    # 큰 것인지" 를 결과만 보고도 가릴 수 있다.
+    result.accrued_multiple = multiple_at(
+        max(past_service, accrued_cause.min_service), float(member.age),
+        accrued_cause.benefit_rule,
     )
     # 1년 뒤 즉시퇴직 지급액. 임금은 첫 해 인상률만큼 오른다고 본다 — 명부의
     # 차년도 추계액과 맞대면 근속·임금뿐 아니라 **임금상승 가정** 까지 맞대어

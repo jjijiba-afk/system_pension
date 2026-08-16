@@ -51,6 +51,21 @@ class TestBuildRows:
         for member in run.longterm.members:
             assert by_id[member.employee_id].longterm_dbo == member.dbo
 
+    def test_cause_split_adds_up_to_the_dbo(self, run) -> None:
+        """사유별 몫 셋의 합이 그 사람의 확정급여채무와 같아야 한다."""
+        rows = build_member_rows(run)
+        assert any(r.dbo_normal for r in rows), "정년 몫이 있어야 한다"
+        for row in rows:
+            assert (row.dbo_normal + row.dbo_voluntary + row.dbo_death
+                    == pytest.approx(row.dbo))
+
+    def test_carries_the_payout_multiple(self, run) -> None:
+        """추계액이 큰 것이 임금 탓인지 배수 탓인지 결과만 보고 가려야 한다."""
+        rows = build_member_rows(run)
+        paid = [r for r in rows if r.accrued_benefit > 0]
+        assert paid, "추계액이 있는 사람이 있어야 한다"
+        assert all(r.accrued_multiple > 0 for r in paid)
+
     def test_total_dbo_adds_both_liabilities(self, run) -> None:
         rows = build_member_rows(run)
         for row in rows:

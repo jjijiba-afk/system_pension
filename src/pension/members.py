@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from .assumptions import CAUSE_DEATH, CAUSE_NORMAL, CAUSE_VOLUNTARY
 from .workbook import save_workbook
 from collections import defaultdict
 from dataclasses import dataclass
@@ -59,8 +60,16 @@ class MemberRow:
     projection_years: int = 0
 
     monthly_wage: float = 0.0
+    accrued_multiple: float = 0.0
+    """기준일 현재 누적 지급배수(지급률). 추계액을 만든 배수 그 자체다."""
     accrued_benefit: float = 0.0
     dbo: float = 0.0
+    dbo_normal: float = 0.0
+    """정년퇴직 몫의 확정급여채무."""
+    dbo_voluntary: float = 0.0
+    """중도퇴직 몫의 확정급여채무."""
+    dbo_death: float = 0.0
+    """사망 몫의 확정급여채무. 셋의 합이 :attr:`dbo` 와 같다."""
     service_cost: float = 0.0
     interest_cost: float = 0.0
     duration: float = 0.0
@@ -102,8 +111,14 @@ _COLUMNS: tuple[tuple[str, str, str, int], ...] = (
     ("정년연령", "retirement_age", "", 9),
     ("투영연수", "projection_years", "", 9),
     ("30일 평균임금", "monthly_wage", _MONEY, 14),
+    ("지급률", "accrued_multiple", "0.0000", 10),
     ("퇴직급여추계액", "accrued_benefit", _MONEY, 15),
     ("확정급여채무", "dbo", _MONEY, 15),
+    # 사유별로 지급률이 다른 규정은 총액만으로는 검산이 안 된다. 셋의 합이
+    # 위의 확정급여채무와 같아야 한다.
+    ("DBO(정년)", "dbo_normal", _MONEY, 14),
+    ("DBO(중도)", "dbo_voluntary", _MONEY, 14),
+    ("DBO(사망)", "dbo_death", _MONEY, 14),
     ("당기근무원가", "service_cost", _MONEY, 14),
     ("이자원가(차기)", "interest_cost", _MONEY, 14),
     ("듀레이션", "duration", _YEARS, 10),
@@ -147,8 +162,12 @@ def build_member_rows(run: PensionRun) -> list[MemberRow]:
             retirement_age=member.retirement_age,
             projection_years=member.projection_years,
             monthly_wage=member.monthly_wage,
+            accrued_multiple=member.accrued_multiple,
             accrued_benefit=member.accrued_benefit,
             dbo=member.dbo,
+            dbo_normal=member.by_cause.get(CAUSE_NORMAL, {}).get("dbo", 0.0),
+            dbo_voluntary=member.by_cause.get(CAUSE_VOLUNTARY, {}).get("dbo", 0.0),
+            dbo_death=member.by_cause.get(CAUSE_DEATH, {}).get("dbo", 0.0),
             service_cost=member.service_cost,
             interest_cost=member.interest_cost,
             duration=member.duration,

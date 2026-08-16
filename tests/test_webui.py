@@ -708,6 +708,23 @@ class TestGenerator:
             assert Path(case["zip"]).exists()
             assert case["zipname"].startswith(case["title"])
 
+    def test_password_works_without_pbkdf2_hmac(self, monkeypatch) -> None:
+        """브라우저(Pyodide)의 hashlib 에는 pbkdf2_hmac 이 없다.
+
+        없으면 같은 알고리즘을 손으로 돌리는데, 두 경로가 다른 값을 내면
+        PC 에서 만든 해시를 브라우저에서 못 맞춘다 — 실제로 그렇게 됐다.
+        """
+        import hashlib
+
+        from pension import rostergen
+
+        word = "연습용 자물쇠"
+        self._open_lock(monkeypatch, word)
+        native = rostergen.lock_ok(word)
+        monkeypatch.delattr(hashlib, "pbkdf2_hmac")
+        assert native and rostergen.lock_ok(word)
+        assert not rostergen.lock_ok(word + "틀림")
+
     def test_specials_need_the_password(self, tmp_path) -> None:
         assert "비밀번호" in call_error(
             "gen_cases", work=str(tmp_path), seed=42, specials=True, password="틀림")

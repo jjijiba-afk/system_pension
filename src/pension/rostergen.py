@@ -53,21 +53,44 @@ __all__ = [
 # 비밀번호를 맞혀야 만들 수 있다. 여기에는 비밀번호 자체가 아니라
 # PBKDF2-SHA256 해시만 둔다 — 저장소가 공개라도 원문은 드러나지 않는다.
 LOCK_SALT: Final = "26a79e4f4f68c81af51db05a796e2a80"
-LOCK_HASH: Final = "8c4b97acd982aee50d3cce7163164a502fa3c2322a6ec4fa2c48dde75acab1d6"
-LOCK_ROUNDS: Final = 310_000
+LOCK_HASH: Final = "167c74c04cfd51e7433aeab21093e87c72c63c83a2fef823bc61cbeeec715248"
+#: 반복 횟수. 브라우저(Pyodide)에서는 아래 순수 파이썬 경로로 도므로, 사람이
+#: 기다릴 만한 선에서 잡는다. 저장소가 공개라 이 값이 보여도 무방하다.
+LOCK_ROUNDS: Final = 50_000
+
+
+def _derive(password: str) -> str:
+    """PBKDF2-HMAC-SHA256 (dkLen 32) — 런타임에 따라 두 경로.
+
+    브라우저에서 도는 파이썬(Pyodide)에는 :func:`hashlib.pbkdf2_hmac` 이 없다
+    (OpenSSL 바인딩이 빠져 있다). 없으면 같은 알고리즘을 손으로 돌린다 —
+    결과가 같아야 PC 에서 만든 해시를 브라우저에서도 맞출 수 있다.
+    """
+    import hashlib
+    import hmac
+
+    key = password.encode("utf-8")
+    salt = bytes.fromhex(LOCK_SALT)
+    native = getattr(hashlib, "pbkdf2_hmac", None)
+    if native is not None:
+        return native("sha256", key, salt, LOCK_ROUNDS).hex()
+
+    block = hmac.new(key, salt + b"\x00\x00\x00\x01", hashlib.sha256).digest()
+    out = bytearray(block)
+    for _ in range(LOCK_ROUNDS - 1):
+        block = hmac.new(key, block, hashlib.sha256).digest()
+        for index, byte in enumerate(block):
+            out[index] ^= byte
+    return bytes(out).hex()
 
 
 def lock_ok(password: str) -> bool:
     """강사용 비밀번호가 맞는지. 빈 값은 항상 거짓."""
-    import hashlib
     import hmac
 
     if not password:
         return False
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), bytes.fromhex(LOCK_SALT), LOCK_ROUNDS,
-    )
-    return hmac.compare_digest(digest.hex(), LOCK_HASH)
+    return hmac.compare_digest(_derive(password), LOCK_HASH)
 
 BASE_DATE: Final = _dt.date(2025, 12, 31)
 """기본 산출기준일. 생성 함수에 ``base_date`` 를 주면 그 날짜로 만든다."""

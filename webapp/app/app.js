@@ -2688,8 +2688,12 @@ function showMemberDetail(args, sourceLabel) {
     body.append(el("h3", {}, "인적사항"), kvTable(Object.entries(row.profile)));
     body.append(el("h3", {}, "적용한 규정·가정"), kvTable(Object.entries(row.applied)));
     body.append(el("h3", {}, "산출 결과"),
-      kvTable(Object.entries(row.result).map(([k, v]) =>
-        [k, k.includes("듀레이션") ? Number(v).toFixed(2) + "년" : won(v) + "원"])));
+      kvTable(Object.entries(row.result).map(([k, v]) => {
+        if (k.includes("듀레이션")) return [k, Number(v).toFixed(2) + "년"];
+        // 지급률은 금액이 아니라 배수다 — 원을 붙이면 뜻이 달라진다.
+        if (k.includes("지급률")) return [k, Number(v).toFixed(4) + "배"];
+        return [k, won(v) + "원"];
+      })));
     if (row.trace.length) {
       body.append(el("h3", {}, "연차별 계산 근거 (퇴직급여)"), traceTable(row.trace));
     }
