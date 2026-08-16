@@ -186,6 +186,41 @@ def test_an_uploaded_roster_comes_back_in_our_template(page, tmp_path) -> None:
     assert book["재직자명부"].cell(3, 2).value == "사번"
 
 
+def test_font_scale_is_small_on_a_pc_and_safe_on_touch(browser, app_url) -> None:
+    """글자 크기는 **배율** 로만 건다.
+
+    PC 는 설치판과 같은 9pt(=12px). 손가락 기기는 조금만 조이되 입력칸은
+    16px 아래로 내리지 않는다 — iOS 사파리가 그 미만이면 칸을 누를 때마다
+    화면을 확대해 버려, 표를 채우는 내내 화면이 튄다.
+
+    px 로 못박으면 브라우저에서 글자를 키워 둔 사람의 설정이 통째로 무시되므로
+    ``%`` 인지도 함께 본다.
+    """
+    def sizes(viewport, **opts):
+        view = browser.new_page(viewport=viewport, **opts)
+        view.goto(app_url)
+        dismiss_intro(view)
+        view.wait_for_selector("#run:not([disabled])", timeout=180_000)
+        view.click("#tab-edit")
+        found = view.evaluate("""() => {
+          const px = (s) => parseFloat(
+            getComputedStyle(document.querySelector(s)).fontSize);
+          return { root: px(":root"), cell: px(".grid input[type=text]") };
+        }""")
+        view.close()
+        return found
+
+    pc = sizes({"width": 1440, "height": 900})
+    assert pc["root"] == 12.0, f"PC 는 9pt(12px) 여야 한다: {pc}"
+
+    pad = sizes({"width": 1024, "height": 1366}, has_touch=True, is_mobile=True)
+    assert pad["root"] > pc["root"], "손가락 기기가 PC 보다 작아지면 안 된다"
+    assert pad["cell"] >= 16.0, f"입력칸이 16px 미만이면 iOS 가 확대한다: {pad}"
+
+    css = (DIST / "app.css").read_text(encoding="utf-8")
+    assert ":root { font-size: 87.5%; }" in css, "배율(%)로 걸어야 한다"
+
+
 def test_payout_rules_show_how_many_people_they_reach(page, tmp_path) -> None:
     """[지급규정]에 건 직군이 **실제 명부의 몇 사람에게 닿는지** 보여야 한다.
 

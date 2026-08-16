@@ -13,6 +13,22 @@
   --plum: #7A5470; --teal: #2C6C67; --amber: #8F6318; --rust: #9A3B28; }
 * { box-sizing: border-box; }
 html { background: var(--desk); }
+
+/* 화면 글자 크기 — 모두 **배율** 로 건다. px 로 못박으면 브라우저에서 글자를
+   키워 둔 사람의 설정이 통째로 무시된다. 아래 크기는 전부 rem 이라 이 한
+   줄만 움직이면 화면 전체가 같은 비율로 따라온다.
+
+   기본 87.5% — 손가락으로 쓰는 아이패드·아이폰. 조금만 조인다.
+   큰 화면 75% — 마우스로 쓰는 PC. 기본 16px 기준 12px = **9pt**, 설치판과 같다.
+
+   손가락 기기의 **입력칸만** 16px 로 되돌리는 규칙이 파일 아래쪽에 따로 있다
+   (iOS 사파리가 그 미만이면 칸을 누를 때 화면을 확대해 버린다). */
+:root { font-size: 87.5%; }
+
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  :root { font-size: 75%; }
+}
+
 body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
        max-width: 1100px; margin: 0 auto; line-height: 1.55;
        background: var(--desk); color: var(--ink);
@@ -416,6 +432,9 @@ input[type=date] { -webkit-appearance: none; appearance: none; }
      정작 사람이 제일 많이 두드리는 칸들이 15px 로 남아 아이폰에서 확대됐다.
      이건 다른 어떤 규칙보다 이겨야 하는 접근성 보정이다. */
   input, select, textarea { font-size: 16px !important; }
+  /* 표 안의 칸도 마찬가지다. `.grid input[type=text]` 이 따로 크기를 잡고
+     있어 위 줄만으로는 지지 않지만, 뜻을 분명히 하려고 함께 적는다. */
+  .grid input[type=text] { font-size: 16px !important; }
 }
 
 /* ── 좁은 화면의 표 ──
