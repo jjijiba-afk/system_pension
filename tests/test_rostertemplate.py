@@ -371,3 +371,53 @@ class TestFrozenRowsCarryNoMerge:
             cell = ws.cell(PART_ROW, column)
             assert cell.alignment.horizontal == "centerContinuous", cell.coordinate
             assert cell.fill.fgColor.rgb.startswith("FF")
+
+
+class TestTheRosterCrossCheck:
+    """[예치금] 증감표의 지급액들은 퇴직자명부를 더한 값과 같아야 한다.
+
+    다른 자료에서 옮겨 적다 어긋나는 일이 잦아, 시트가 스스로 맞대어 보고
+    TRUE/FALSE 로 알린다. 수식이 명부의 엉뚱한 열을 더하면 '오류 없이
+    그럴듯한' FALSE·TRUE 가 나오므로, 열 자리를 여기서 못박는다.
+    """
+
+    def _checks(self, blank):
+        ws = blank["예치금"]
+        return {str(r[1].value): (r[2].value, r[3].value)
+                for r in ws.iter_rows()
+                if r[1].value and "—" in str(r[1].value) and len(r) > 3}
+
+    def test_each_check_sums_the_right_roster_column(self, blank) -> None:
+        from openpyxl.utils import get_column_letter
+
+        where = {label: get_column_letter(index)
+                 for index, (_b, label, *_r) in enumerate(tpl.RETIRED, start=1)}
+        checks = self._checks(blank)
+        wants = {
+            "퇴직급여 지급액 — 예치금 열": "사외자산 지급액",
+            "지급액+DC전환+전출·처분 — 추계액 열": "퇴직급여 총지급액",
+            "퇴직위로금 — 추계액 열": "퇴직위로금 등",
+            "국민연금전환금 — 지급액 줄": "국민연금 전환금",
+        }
+        assert set(checks) == set(wants)
+        for label, roster_column in wants.items():
+            _mine, theirs = checks[label]
+            assert f"퇴직자명부!{where[roster_column]}" in str(theirs), (
+                f"'{label}' 이 퇴직자명부의 엉뚱한 열을 더한다: {theirs}")
+
+    def test_the_blank_forms_examples_actually_agree(self, blank) -> None:
+        """예시끼리 어긋나 있으면 받는 사람이 처음 보는 것이 FALSE 다."""
+        ws = blank["퇴직자명부"]
+        head = {str(c.value).strip(): c.column for c in ws[HEADER_ROW] if c.value}
+
+        def roster_sum(label):
+            return sum(float(ws.cell(r, head[label]).value or 0)
+                       for r in range(FIRST_DATA_ROW, ws.max_row + 1))
+
+        paid = {name: (ob, asset) for _s, name, _ho, _ha, ob, asset
+                in tpl.MOVEMENT_ROWS}
+        assert paid["퇴직급여 지급액"][1] == roster_sum("사외자산 지급액")
+        assert (paid["퇴직급여 지급액"][0] + paid["DC전환 지급액"][0]
+                + paid["계열사 전출"][0] + paid["사업처분·분할"][0]
+                ) == roster_sum("퇴직급여 총지급액")
+        assert paid["퇴직위로금 (명예퇴직금 등)"][0] == roster_sum("퇴직위로금 등")

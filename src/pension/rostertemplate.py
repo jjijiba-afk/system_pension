@@ -830,10 +830,10 @@ MOVEMENT_ROWS = [
     ("(+)", "이자수익",              False, True,  0,             420_000_000),
     ("(+)", "합병 인수액",            True,  True,  0,             0),
     ("(+)", "계열사 전입",            True,  True,  0,             0),
-    ("(-)", "퇴직급여 지급액",         True,  True,  980_000_000,   980_000_000),
+    ("(-)", "퇴직급여 지급액",         True,  True,  165_000_000,   158_000_000),
     ("(-)", "중간정산금",             True,  True,  120_000_000,   120_000_000),
     ("(-)", "DC전환 지급액",          True,  True,  0,             0),
-    ("(-)", "퇴직위로금 (명예퇴직금 등)", True,  False, 60_000_000,    0),
+    ("(-)", "퇴직위로금 (명예퇴직금 등)", True,  False, 0,             0),
     ("(-)", "계열사 전출",            True,  True,  0,             0),
     ("(-)", "사업처분·분할",           True,  True,  0,             0),
     ("(-)", "운용관리수수료",          False, True,  0,             18_000_000),
@@ -849,7 +849,7 @@ ASSET_ROWS = [(sign, name, av, 0) for sign, name, _o, has_asset, _ov, av in MOVE
 
 ASSET_OPENING = (12_000_000_000, 300_000_000)
 #: 기말은 신탁 명세서의 숫자를 그대로 적는 자리다. 검증 줄이 0 이 되는 값.
-ASSET_CLOSING = (12_793_000_000, 300_000_000)
+ASSET_CLOSING = (13_615_000_000, 300_000_000)
 
 #: 자산 분류별 공정가치 (문단 142 공시). (분류, 금액, 활성시장 공시가격)
 #:
@@ -859,7 +859,7 @@ ASSET_CLOSING = (12_793_000_000, 300_000_000)
 #: 드러나지 않는다.
 ASSET_BREAKDOWN = [
     ("현금 및 현금성자산", 150_000_000, "있음"),
-    ("정기예금·원리금보장 GIC", 9_800_000_000, "없음"),
+    ("정기예금·원리금보장 GIC", 10_622_000_000, "없음"),
     ("국공채", 1_500_000_000, "있음"),
     ("특수채·금융채", 700_000_000, "있음"),
     ("회사채", 400_000_000, "없음"),
@@ -992,8 +992,57 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     _note(ws, verify_row, 6, "0 이 아니면 보내 주신 표 자체가 맞지 않는다는 뜻입니다")
     row = verify_row + 2
 
+    # ── 명부 대조 (자동) ─────────────────────────────────────────
+    # 이 표의 지급액들은 퇴직자명부를 더한 값과 같아야 한다. 다른 자료에서
+    # 옮겨 적다 어긋나는 일이 잦아, 시트가 스스로 맞대어 보고 TRUE/FALSE 로
+    # 알린다. 수식이라 명부를 고치면 따라 움직인다.
+    at = {name: opening_row + 1 + index
+          for index, (_s, name, *_r) in enumerate(MOVEMENT_ROWS)}
+    where = {label: get_column_letter(index)
+             for index, (_b, label, *_r) in enumerate(RETIRED, start=1)}
+
+    def roster_sum(label: str) -> str:
+        column = where[label]
+        return f"SUM(퇴직자명부!{column}{FIRST_DATA_ROW}:{column}5004)"
+
+    row = _band(ws, row, "② 명부 대조 (자동)", "5B6478",
+                "위 표의 지급액과 퇴직자명부를 더한 값이 같은지 스스로 맞대어 "
+                "봅니다. FALSE 가 뜨면 어느 한쪽이 빠졌거나 다른 기간의 금액이 "
+                "섞인 것입니다. 퇴직자명부의 열 순서를 바꿨다면 맞지 않을 수 "
+                "있습니다.")
+    row = _heads(ws, row, ((1, ""), (2, "맞대는 것"), (3, "이 표"),
+                           (4, "퇴직자명부 합"), (5, "일치"), (6, "적는 법")),
+                 colour="5B6478")
+    checks = [
+        ("퇴직급여 지급액 — 예치금 열",
+         f"=D{at['퇴직급여 지급액']}", roster_sum("사외자산 지급액"),
+         "사외자산 지급액 열의 합"),
+        ("지급액+DC전환+전출·처분 — 추계액 열",
+         f"=C{at['퇴직급여 지급액']}+C{at['DC전환 지급액']}"
+         f"+C{at['계열사 전출']}+C{at['사업처분·분할']}",
+         roster_sum("퇴직급여 총지급액"),
+         "총지급액 열의 합 — DC전환·전출자도 총지급액에 적히므로 함께 더해 맞댑니다"),
+        ("퇴직위로금 — 추계액 열",
+         f"=C{at['퇴직위로금 (명예퇴직금 등)']}", roster_sum("퇴직위로금 등"),
+         "퇴직위로금 등 열의 합"),
+        ("국민연금전환금 — 지급액 줄",
+         f"=E{at['퇴직급여 지급액']}", roster_sum("국민연금 전환금"),
+         "국민연금 전환금 열의 합"),
+    ]
+    for label_text, mine_formula, theirs_sum, hint in checks:
+        label(row, "", label_text)
+        money(row, 3, mine_formula, formula=True)
+        money(row, 4, f"={theirs_sum}", formula=True)
+        same = ws.cell(row, 5, f"=(C{row}=D{row})")
+        same.font = Font(name=FACE, size=9, bold=True)
+        same.border = BORDER
+        same.alignment = Alignment(horizontal="center")
+        _note(ws, row, 6, hint)
+        row += 1
+    row += 1
+
     # ── ③ 예치금 구성 (문단 142) ─────────────────────────────────
-    row = _band(ws, row, "② 예치금 구성  ※ 문단 142 공시", BAND_COLOURS[2],
+    row = _band(ws, row, "③ 예치금 구성  ※ 문단 142 공시", BAND_COLOURS[2],
                 "기말 공정가치를 자산 종류별로. 분류마다 활성시장 공시가격이 "
                 "있는지도 함께 적어 주세요 — 공시에 그대로 실립니다. 분류가 더 "
                 "있으면 줄을 늘려도 됩니다.")
@@ -1026,7 +1075,7 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     row += 2
 
     # ── ④ 그 밖의 입력 ───────────────────────────────────────────
-    row = _band(ws, row, "③ 그 밖의 입력", BAND_COLOURS[3],
+    row = _band(ws, row, "④ 그 밖의 입력", BAND_COLOURS[3],
                 "해당 없으면 0 으로 두세요. 자산인식상한은 비워 두면 미적용입니다.")
     row = _heads(ws, row, ((1, ""), (2, "항목"), (3, "금액"), (4, "적는 법")),
                  spans={4: 6})
@@ -1155,12 +1204,24 @@ def _embed_values(path: Path) -> None:
                 for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)]
 
     def evaluate(ws, expr, seen):
+        # 명부 대조가 쓰는 다른 시트 합계 — SUM(퇴직자명부!M5:M5004).
+        expr = re.sub(
+            r"SUM\((?:'([^']+)'|([^'!()=]+))!([A-Z]+\d+:[A-Z]+\d+)\)",
+            lambda m: "(" + repr(sum(span(
+                book[m.group(1) or m.group(2)], m.group(3), seen))) + ")",
+            expr)
         expr = re.sub(r"SUM\(([A-Z]+\d+:[A-Z]+\d+)\)",
                       lambda m: "(" + repr(sum(span(ws, m.group(1), seen))) + ")",
                       expr)
         expr = re.sub(r"\$?([A-Z]{1,2})\$?([0-9]+)",
                       lambda m: repr(value_of(ws, m.group(1) + m.group(2), seen)),
                       expr)
+        # 명부 대조의 참/거짓 — =(C26=D26). 양쪽을 셈해 같은지 본다.
+        same = re.fullmatch(r"\(([^=]+)=([^=]+)\)", expr)
+        if same:
+            left = evaluate(ws, same.group(1), seen)
+            right = evaluate(ws, same.group(2), seen)
+            return ("b", abs(left - right) < 0.5)
         if not re.fullmatch(r"[0-9eE+\-*/.() ]+", expr):
             raise ValueError(f"풀 수 없는 수식: {expr}")
         return eval(expr)  # noqa: S307 — 숫자와 연산자만 남은 것을 확인했다
@@ -1173,8 +1234,15 @@ def _embed_values(path: Path) -> None:
         for row in ws.iter_rows():
             for cell in row:
                 if isinstance(cell.value, str) and cell.value.startswith("="):
-                    number = evaluate(ws, cell.value[1:], frozenset({cell.coordinate}))
-                    found[cell.coordinate] = repr(round(number, 6))
+                    # 다른 시트를 더하거나 참/거짓을 내는 수식(명부 대조)은 여기서
+                    # 못 푼다. 그대로 두면 엑셀이 열 때 계산한다 — 제한된 보기
+                    # 에서만 잠시 빈 칸으로 보인다.
+                    number = evaluate(ws, cell.value[1:],
+                                      frozenset({cell.coordinate}))
+                    if isinstance(number, tuple):      # 참/거짓
+                        found[cell.coordinate] = ("b", "1" if number[1] else "0")
+                    else:
+                        found[cell.coordinate] = ("n", repr(round(number, 6)))
         if found:
             wanted[index] = found
     if not wanted:
@@ -1190,12 +1258,15 @@ def _embed_values(path: Path) -> None:
                 match = re.fullmatch(r"xl/worksheets/sheet(\d+)\.xml", item.filename)
                 if match and int(match.group(1)) in wanted:
                     text = data.decode("utf-8")
-                    for ref, value in wanted[int(match.group(1))].items():
-                        pattern = (r'(<c r="%s"[^>]*>)(<f[^>]*>.*?</f>)'
-                                   r'(?:<v\s*/>|<v>.*?</v>)?(</c>)' % ref)
-                        text, hits = re.subn(pattern,
-                                             r"\g<1>\g<2><v>" + value + r"</v>\g<3>",
-                                             text, count=1)
+                    for ref, (kind, value) in wanted[int(match.group(1))].items():
+                        pattern = (r'<c r="%s"([^>]*)>(<f[^>]*>.*?</f>)'
+                                   r'(?:<v\s*/>|<v>.*?</v>)?</c>' % ref)
+                        # 참/거짓 칸은 t="b" 를 달아야 1 이 아니라 TRUE 로 보인다.
+                        mark = ' t="b"' if kind == "b" else ""
+                        text, hits = re.subn(
+                            pattern,
+                            r'<c r="%s"\g<1>%s>\g<2><v>%s</v></c>' % (ref, mark, value),
+                            text, count=1)
                         if hits != 1:
                             raise ValueError(f"{item.filename} 의 {ref} 를 찾지 못했다")
                     data = text.encode("utf-8")
