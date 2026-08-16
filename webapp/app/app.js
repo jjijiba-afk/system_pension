@@ -1223,6 +1223,13 @@ $("ed-groups-roster").addEventListener("click", async () => {
       renderMap();
     } catch { /* 인원은 못 세도 규정은 걸린다 */ }
     const state = collectState();
+    // 표의 열 목록 — gridColumns() 와 같은 규칙을 state 쪽 grid 로 계산한다.
+    const columnsOf = (grid) => {
+      const extra = (grid.extra || []).filter(Boolean);
+      if (grid.rules_only && extra.length) return [...new Set(extra)];
+      return [...state.job_groups,
+              ...new Set(extra.filter((n) => !state.job_groups.includes(n)))];
+    };
     const addExtras = (sheet, names) => {
       const grid = state.grids[sheet];
       const have = new Set([...state.job_groups, ...(grid.extra || [])]);
@@ -1233,14 +1240,44 @@ $("ed-groups-roster").addEventListener("click", async () => {
         have.add(name);
       }
     };
-    addExtras(benefitSheet(), result.scale_rules);
-    addExtras("장기급여지급률", result.longterm_rules);
-    // 직군은 퇴직률·승급률·정년의 축이고 지급률의 축은 규정이다. 전원이
-    // 규정명을 달고 있으면 지급률 표의 직군 열은 아무에게도 닿지 않으므로
-    // 빼고, 규정명이 빈 사람이 있으면 그 사람들이 직군 열로 떨어지므로 둔다.
-    if (result.scale_rules?.length && !result.blank_rule) {
-      state.grids[benefitSheet()].rules_only = true;
+    // 지급률 표의 규정 축은 명부에 맞춰 **다시 세운다.** 더하기만 하면 이전
+    // 명부·이전 버전이 남긴 낡은 규정 열이 영영 붙어 다녀, 어느 열이 진짜
+    // 인지 알 수 없게 된다. 명부에 없는 열은 (사유별 '규정·사유' 열은 원래
+    // 규정을 따라) 지우되, 값이 들어 있을 수 있으니 지우기 전에 묻는다.
+    const rebuildRuleAxis = (sheet, names) => {
+      const grid = state.grids[sheet];
+      const wanted = new Set(names);
+      const stays = (n) => wanted.has(n) || wanted.has(String(n).split("·")[0]);
+      const gone = (grid.extra || []).filter((n) => n && !stays(n));
+      if (gone.length && !confirm(
+        `지급률 표에 명부에 없는 열이 있습니다: ${gone.join(", ")}\n\n` +
+        "이 열들을 지우고 명부의 규정 열만 남길까요?\n" +
+        "(취소하면 지우지 않고 명부의 규정 열만 추가합니다)")) {
+        addExtras(sheet, names);
+        return;
+      }
+      const before = columnsOf(grid);
+      const byName = (grid.rows || []).map((row) => {
+        const dict = {};
+        before.forEach((n, i) => { dict[n] = row[i + 1] || ""; });
+        return { key: row[0] || "", dict };
+      });
+      grid.extra = [
+        ...(grid.extra || []).filter((n) => n && stays(n)),
+        ...names.filter((n) => !(grid.extra || []).includes(n)),
+      ];
+      // 직군은 퇴직률·승급률·정년의 축이고 지급률의 축은 규정이다. 전원이
+      // 규정명을 달고 있으면 지급률 표의 직군 열은 아무에게도 닿지 않으므로
+      // 빼고, 규정명이 빈 사람이 있으면 그 사람들이 직군 열로 떨어지므로 둔다.
+      grid.rules_only = !result.blank_rule;
+      const after = columnsOf(grid);
+      grid.rows = byName.map(({ key, dict }) =>
+        [key, ...after.map((n) => dict[n] ?? "")]);
+    };
+    if (result.scale_rules?.length) {
+      rebuildRuleAxis(benefitSheet(), result.scale_rules);
     }
+    addExtras("장기급여지급률", result.longterm_rules);
     renderState(state);
     saveEditorLocal();
 
