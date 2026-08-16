@@ -138,6 +138,31 @@ def open_section(page, selector: str):
         box.locator("summary").click()
 
 
+def unlock_teaching_material(page):
+    """교육용(잠긴) 자료를 시험에서 열어 본다.
+
+    실제 비밀번호는 저장소에 없다(해시만 있다). 그래서 브라우저 안에서 도는
+    엔진의 해시를 **시험용 비밀번호의 해시로** 갈아 끼운 뒤, 사람이 하듯 안내
+    창에 그 비밀번호를 넣는다 — 잠금 화면 자체도 함께 시험하게 된다.
+    """
+    from pension.rostergen import LOCK_ROUNDS, LOCK_SALT, _derive
+
+    word = "시험용 자물쇠"
+    digest = _derive(word)
+    assert LOCK_ROUNDS and LOCK_SALT
+    page.evaluate(
+        """(args) => pyodide.runPython(
+            `from pension import rostergen\nrostergen.LOCK_HASH = ${JSON.stringify(args.digest)}`
+        )""",
+        {"digest": digest},
+    )
+    page.click("#feat-ask")
+    page.wait_for_selector("#lock-dialog[open]", timeout=10_000)
+    page.fill("#lock-pass", word)
+    page.click("#lock-ok")
+    page.wait_for_selector("#feat-open:not([hidden])", timeout=10_000)
+
+
 def open_calc(page, section_id: str):
     """산출 탭에서 접어 둔 구획을 펼친다. 사람이 하는 것과 같은 순서다."""
     page.click("#tab-calc")
@@ -572,7 +597,9 @@ def test_generator_tab_makes_and_runs_a_case(page) -> None:
     page.fill("#gen-seed", "777")
     page.click("#gen-run")
     page.wait_for_selector("#gen-cases fieldset", timeout=120_000)
-    assert page.locator("#gen-cases fieldset").count() == 3
+    # 잠기지 않은 사례 둘 + 잠긴 사례 안내 하나.
+    assert page.locator("#gen-cases button", has_text="이 명부로 산출 준비").count() == 2
+    assert "개발중인 메뉴" in page.inner_text("#gen-cases")
 
     # 특이사항 안내문이 실제 내용을 담고 있어야 한다.
     page.locator("#gen-cases button", has_text="특이사항 보기").first.click()
@@ -580,8 +607,9 @@ def test_generator_tab_makes_and_runs_a_case(page) -> None:
     assert "산출 특이사항" in page.inner_text("#report-body")
     page.click("#report-dialog >> text=닫기")
 
+    # 사례마다 zip 이 따로 나온다 — 실습자에게 한 벌씩 나눠 줄 수 있어야 한다.
     with page.expect_download() as captured:
-        page.click("#gen-download")
+        page.locator("#gen-cases button", has_text="zip 내려받기").first.click()
     assert Path(captured.value.path()).read_bytes()[:2] == b"PK"
 
     # '이 명부로 산출 준비' → 파일 선택 없이 그대로 산출된다.
@@ -1093,7 +1121,7 @@ def test_intro_dialog_points_at_the_library(browser, app_url) -> None:
     page.wait_for_function(
         "() => document.getElementById('help-body').textContent.includes('자료실')",
         timeout=30_000)
-    assert "받은 명부가 없어도" in page.inner_text("#help-body")
+    assert "수령한 명부가 없어도" in page.inner_text("#help-body")
 
     page.close()
     fresh.close()
@@ -1107,6 +1135,7 @@ def test_feature_pack_shows_a_table_not_a_wall_of_text(page) -> None:
     """
     page.click("#tab-lib")
     open_section(page, "#lib-gen")
+    unlock_teaching_material(page)
     # 채무까지 재면 명부 열한 벌을 산출해야 해서 브라우저에서 몇 분 걸린다.
     # 화면이 표로 그려지는지만 보면 되므로 여기서는 끄고 만든다.
     page.uncheck("#feat-measure")
@@ -1329,7 +1358,10 @@ def test_a_new_build_reaches_a_device_that_already_installed_the_app(
         first = context.new_page()
         first.goto(url)
         first.wait_for_selector("#run:not([disabled])", timeout=120_000)
-        # 서비스워커가 자리를 잡을 때까지 기다린다 — 여기서부터가 '설치된 기기'다.
+        # 일꾼은 자리를 **곧바로 넘겨받지 않는다**(산출 도중에 판이 바뀌지 않게).
+        # 그래서 첫 방문은 통제되지 않고, 한 번 더 열어야 통제가 시작된다.
+        first.reload()
+        first.wait_for_selector("#run:not([disabled])", timeout=120_000)
         first.wait_for_function(
             "() => navigator.serviceWorker.controller !== null", timeout=60_000)
         before = first.evaluate(
@@ -1413,6 +1445,9 @@ def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
         page = context.new_page()
         page.goto(url)
         page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
+        # 첫 방문은 일꾼이 자리를 넘겨받기 전이다 — 한 번 더 열어야 통제된다.
+        page.reload()
+        page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
         page.wait_for_function(
             "() => navigator.serviceWorker.controller !== null", timeout=30_000)
         before = page.inner_text("#build-stamp").strip()
@@ -1443,6 +1478,12 @@ def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
         precache = re.search(r"const PRECACHE = (\[.*?\]);", worker, re.S).group(1)
         assert "pyodide/" not in precache
         assert "wheels/" not in precache
+        # 새 일꾼이 곧바로 자리를 빼앗으면 산출 도중에 화면과 엔진이 엇갈린다.
+        # 주석에는 그 낱말이 나오므로 주석을 걷어내고 **실제 호출** 만 본다.
+        code = re.sub(r"/\*.*?\*/", "", worker, flags=re.S)
+        code = re.sub(r"//.*", "", code)
+        assert "skipWaiting(" not in code
+        assert "clients.claim(" not in code
         context.close()
     finally:
         server.shutdown()

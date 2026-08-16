@@ -201,8 +201,16 @@ class TestKeepingAndBringingBack:
 class TestTheLibraryTab:
 
     def test_the_random_roster_generator_is_in_this_window(self, app) -> None:
-        """난수 명부를 이 창 안에서 만들고 그대로 목록에 넣는다."""
-        from pension.rostergen import CASES
+        """난수 명부를 이 창 안에서 만들고 그대로 목록에 넣는다.
+
+        잠긴 사례(교육용 문제지가 딸린 명부)는 만들지도 등록하지도 않는다 —
+        비밀번호를 풀기 전에는 없는 것과 같아야 한다.
+        """
+        from pension.rostergen import case_specs
+
+        open_cases = {spec.title for spec in case_specs(specials=False)}
+        locked = {spec.title for spec in case_specs()} - open_cases
+        assert locked, "잠긴 사례가 하나는 있어야 이 시험이 뜻을 가진다"
 
         app.library.seed.set("4242")
         app.library.generate()
@@ -212,11 +220,12 @@ class TestTheLibraryTab:
         app.library.kind.set("명부")
         app.library.refresh()
         registered = set(app.library.asset_table.tree.get_children())
-        assert {spec.title for spec in CASES} <= registered
+        assert open_cases <= registered
+        assert not (locked & registered), "잠긴 사례가 목록에 나오면 안 된다"
 
         # 산출 탭의 [저장된 명부] 목록에도 바로 떠야 한다.
         app.calc._refresh_library()
-        assert set(app.calc._roster_box.cget("values")) >= {spec.title for spec in CASES}
+        assert set(app.calc._roster_box.cget("values")) >= open_cases
 
     def test_a_generated_roster_actually_runs(self, app, workspace) -> None:
         """만든 명부로 산출까지 돌아야 '만들었다' 고 할 수 있다."""
