@@ -161,16 +161,32 @@ async function askForPersistentStorage() {
   }
 }
 
+//: 지금 어느 단계인지. 부팅이 깨졌을 때 **어디서** 깨졌는지 말해 준다 —
+//: "준비하지 못했습니다" 만으로는 기기 앞의 사람도, 고치는 사람도 알 수 없다.
+let bootStage = "시작";
+
 async function boot() {
   try {
+    bootStage = "런타임 내려받기";
     status("엔진을 준비하는 중… (1/3 런타임)");
     pyodide = await loadPyodide({ indexURL: new URL("pyodide/", location.href).href });
 
     // 등록 자료 폴더를 IndexedDB 에 물린다. 새로고침해도 남아야 한다.
-    pyodide.FS.mkdirTree("/pension-home");
-    pyodide.FS.mount(pyodide.FS.filesystems.IDBFS, {}, "/pension-home");
-    await new Promise((done) => pyodide.FS.syncfs(true, done));
+    //
+    // **여기서 죽으면 안 된다.** 아이폰의 사설 브라우징이나 저장소가 막힌
+    // 설정에서는 IndexedDB 자체를 쓸 수 없는데, 그때 부팅을 통째로 포기하면
+    // 산출도 못 한다. 저장이 안 될 뿐 계산은 되어야 한다.
+    bootStage = "저장소 연결";
+    try {
+      pyodide.FS.mkdirTree("/pension-home");
+      pyodide.FS.mount(pyodide.FS.filesystems.IDBFS, {}, "/pension-home");
+      await new Promise((done, fail) => pyodide.FS.syncfs(true,
+        (error) => (error ? fail(error) : done())));
+    } catch (error) {
+      reportBrokenStorage(error);
+    }
 
+    bootStage = "계산 모듈 준비";
     status("엔진을 준비하는 중… (2/3 계산 모듈)");
     pyodide.FS.mkdirTree("/wheels");
     pyodide.FS.mkdirTree("/work");
@@ -191,23 +207,32 @@ for wheel in Path('/wheels').glob('*.whl'):
 os.environ['PENSION_HOME'] = '/pension-home'
 from pension.webui import api
 `);
+    bootStage = "화면 구성";
     status("엔진을 준비하는 중… (3/3 화면 구성)");
     pyApi = pyodide.globals.get("api");
     META = py("meta");
 
     buildEditor();
-    const saved = localStorage.getItem(EDITOR_STORE);
+    // 저장소가 막힌 브라우저는 localStorage 를 읽기만 해도 예외를 던진다.
+    let saved = null;
+    try { saved = localStorage.getItem(EDITOR_STORE); } catch { saved = null; }
     renderState(saved ? JSON.parse(saved) : py("state_new").state);
     refreshLibrary();
     refreshRuns();
     syncRunPages();
 
+    bootStage = "완료";
     status("준비 완료. 명부를 고르고 기초율을 정한 뒤 [산출 실행]을 누르십시오.");
     $("run").disabled = false;
     // 화면이 다 뜬 뒤에 묻는다. 이것 때문에 부팅이 늦어질 이유가 없다.
     askForPersistentStorage();
   } catch (error) {
-    status("엔진을 준비하지 못했습니다: " + error);
+    // 어느 단계에서, 무엇이 났는지 그대로 적는다. 기기가 손에 없어도 이
+    // 한 줄이면 원인을 좁힐 수 있다.
+    const name = (error && error.name) || "오류";
+    const message = (error && error.message) || String(error);
+    status(`엔진을 준비하지 못했습니다 — [${bootStage}] 단계에서 ${name}: ${message}`);
+    console.error("부팅 실패", bootStage, error);
   }
 }
 boot();
