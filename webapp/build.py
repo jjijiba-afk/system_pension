@@ -378,6 +378,13 @@ _PRINT_PAGE = """<!doctype html>
   <span>인쇄 대화상자에서 대상을 <b>PDF로 저장</b> 으로 지정하십시오.</span></div>
 {body}
 <script>
+// 앱 안(문서 창)에서 열렸으면 위 도구모음이 이미 있다 — 같은 단추를 두 번
+// 보이지 않게 이 줄을 감춘다. 파일을 따로 열었을 때만 남는다.
+if (window.self !== window.top) {{
+  var bar = document.querySelector(".bar");
+  if (bar) bar.style.display = "none";
+}}
+
 // 새 창으로 열렸으면 그대로 닫고, 브라우저가 닫기를 막으면(주소창으로 직접
 // 연 경우 등) 앱 화면으로 돌아간다. 문서만 남고 길이 끊기는 일이 없게 한다.
 function closePage() {{
