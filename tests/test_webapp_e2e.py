@@ -76,6 +76,12 @@ def page(browser, app_url):
     # 치우고 시작한다 — 이 창의 동작 자체는 test_intro_dialog 가 따로 본다.
     dismiss_intro(page)
     page.wait_for_selector("#run:not([disabled])", timeout=120_000)
+    # 재측정요소 분해는 화면 기본값이 **켬** 이지만, 전기를 연결한 회차에서는
+    # 명부 전체 산출이 네 번 더 돈다. 이 페이지는 시험 열댓 개가 나눠 쓰는
+    # 작업대라, 그 값을 켠 채로 두면 산출을 부르는 시험 전부가 다섯 배로
+    # 늘어진다. 기본값이 제대로 걸려 있는지는
+    # test_the_calc_screen_opens_with_working_defaults 가 새 페이지에서 따로 본다.
+    page.uncheck("#split_remeasurement")
     yield page
     page.close()
 
@@ -219,6 +225,50 @@ def test_font_scale_is_small_on_a_pc_and_safe_on_touch(browser, app_url) -> None
 
     css = (DIST / "app.css").read_text(encoding="utf-8")
     assert ":root { font-size: 87.5%; }" in css, "배율(%)로 걸어야 한다"
+
+
+def test_the_calc_screen_opens_with_working_defaults(browser, app_url) -> None:
+    """[산출] 화면은 매 회차 같은 것을 고르게 된다. 그것을 기본값으로 둔다.
+
+    * 산출기준일 — 지금까지 지나간 가장 가까운 연말. 결산은 끝난 사업연도를
+      잰다. 다만 **우리가 채운 칸** 으로 표시해 두어, 명부 [기본정보] 에
+      기준일이 있으면 그쪽이 이긴다.
+    * 재측정요소 가정별 분해 — 켬.
+    * 기초율은 [산출가정 입력 화면] — 다만 그 화면이 비어 있으면 쓸 수 없어
+      파일로 물러난다. 채워지면 도로 돌아오고, 사람이 다른 출처를 직접
+      고른 뒤에는 건드리지 않는다.
+    """
+    import datetime as dt
+
+    view = browser.new_page()
+    view.goto(app_url)
+    dismiss_intro(view)
+    view.wait_for_selector("#run:not([disabled])", timeout=180_000)
+
+    today = dt.date.today()
+    year = today.year if (today.month, today.day) == (12, 31) else today.year - 1
+    start = view.evaluate("""() => ({
+      base: document.querySelector('#base_date').value,
+      split: document.querySelector('#split_remeasurement').checked,
+      file: document.querySelector('#asrc-file').checked,
+    })""")
+    assert start["base"] == f"{year}-12-31", start
+    assert start["split"] is True
+    assert start["file"] is True, "편집 화면이 비었으면 파일로 물러나야 한다"
+
+    # 산출가정을 채우면 기본값(입력 화면)으로 돌아온다.
+    view.click("#tab-edit")
+    view.evaluate("""() => { const r = py('standard_state',
+        {groups: ['정규직', '임원'], size: '300인 미만'}); renderState(r.state); }""")
+    assert view.evaluate("() => document.querySelector('#asrc-editor').checked") is True
+
+    # 사람이 직접 고른 뒤에는 그 선택을 지킨다.
+    view.click("#tab-calc")
+    view.check("#asrc-file")
+    view.click("#tab-edit")
+    view.click("#tab-calc")
+    assert view.evaluate("() => document.querySelector('#asrc-file').checked") is True
+    view.close()
 
 
 def test_payout_rules_show_how_many_people_they_reach(page, tmp_path) -> None:

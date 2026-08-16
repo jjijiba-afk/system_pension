@@ -1418,6 +1418,23 @@ $("ed-save").addEventListener("click", () => {
   }
 });
 
+/** 기초율 출처가 **정해졌는지**. 정해지기 전에만 기본값이 따라간다.
+ *
+ *  사람이 라디오를 고르면 물론이고, 화면이 대신 고르는 자리(시험 명부 물리기·
+ *  저장한 산출 불러오기)도 여기에 해당한다. 그 자리들은 그 명부와 **짝이 되는
+ *  기초율** 을 함께 걸어 주는데, 기본값이 뒤늦게 편집 화면으로 되돌리면 짝이
+ *  깨져 엉뚱한 가정으로 산출된다. */
+let asrcTouched = false;
+for (const id of ["asrc-editor", "asrc-saved", "asrc-file"]) {
+  $(id).addEventListener("change", () => { asrcTouched = true; });
+}
+
+/** 기초율 출처를 코드가 고른다. 사람이 고른 것과 같이 취급한다. */
+function pickAssumptionSource(id) {
+  $(id).checked = true;
+  asrcTouched = true;
+}
+
 function syncEditorHint(state) {
   const rows = state
     ? (state.grids?.["할인율"]?.rows || [])
@@ -1426,6 +1443,10 @@ function syncEditorHint(state) {
   if (rows.length) {
     hint.textContent = `— 직군 ${groups.length}개 · 할인율 ${rows.length}행 입력됨`;
     $("asrc-editor").disabled = false;
+    // 쓸 수 있게 되면 도로 이쪽으로 돌아온다. 이것이 기본값이고, 사람이
+    // 다른 출처를 직접 고른 뒤에는 건드리지 않는다 — 편집 내용이 비어 잠깐
+    // 파일로 물러났던 것을 사람의 선택으로 오해하면 안 된다.
+    if (!asrcTouched) $("asrc-editor").checked = true;
   } else {
     hint.textContent = "— 아직 입력 없음";
     $("asrc-editor").disabled = true;
@@ -1606,6 +1627,22 @@ for (const id of ["base_date", "period_start", "asset_opening",
                   "asset_contributions", "asset_paid", "asset_closing",
                   "unpaid_benefits", "asset_ceiling"]) {
   $(id).addEventListener("input", () => autoFilled.delete(id));
+}
+
+/** 지금까지 지나간 **가장 가까운 연말**. 결산은 늘 끝난 사업연도를 잰다. */
+function lastYearEnd(today = new Date()) {
+  const year = today.getFullYear();
+  // 12월 31일 당일이면 올해 것, 아니면 작년 것.
+  const passed = today.getMonth() === 11 && today.getDate() === 31;
+  return `${passed ? year : year - 1}-12-31`;
+}
+
+// 기준일을 비워 두면 매번 손으로 넣어야 한다. 지나간 연말을 미리 넣어 두되
+// **우리가 채운 칸으로 표시** 해 둔다 — 명부 [기본정보] 에 기준일이 있으면
+// 그쪽이 이겨야 하기 때문이다(사람이 직접 고친 칸만 명부를 이긴다).
+if (!$("base_date").value) {
+  $("base_date").value = lastYearEnd();
+  autoFilled.add("base_date");
 }
 
 async function fillFromGeneralSheet() {
@@ -2905,7 +2942,7 @@ function restoreRun(name) {
     $("run-name").value = name;
 
     $("asrc-saved").disabled = false;
-    $("asrc-saved").checked = true;
+    pickAssumptionSource("asrc-saved");
     $("saved-asrc-hint").textContent = `— '${name}' 의 기초율`;
     $("roster").value = "";
     $("loaded-run-text").textContent =
@@ -3080,7 +3117,7 @@ function useGenerated(item) {
   $("roster").value = "";
   $("roster-saved").value = "";
   $("asrc-saved").disabled = false;
-  $("asrc-saved").checked = true;
+  pickAssumptionSource("asrc-saved");
   $("saved-asrc-hint").textContent = `— ${item.title} 의 짝 기초율`;
   $("force").checked = Boolean(item.force);
   $("base_date").value = "";
