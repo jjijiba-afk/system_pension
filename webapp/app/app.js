@@ -2773,7 +2773,9 @@ function showMemberDetail(args, sourceLabel) {
     body.append(el("h3", {}, "합계 (지급 구간 전체)"),
       kvTable(Object.entries(detail.total).map(([k, v]) => [k, won(v) + "원"])));
   }
-  $("member-dialog").showModal();
+  // 처음부터 보고서와 같은 문서 모양으로 띄운다. 감사인에게 그대로 건네는
+  // 근거 자료라, 화면에서 보던 것과 인쇄물이 다르면 두 번 확인해야 한다.
+  openMemberPage();
 }
 
 // ── 개인별 산출 근거 인쇄 ───────────────────────────────────────
@@ -2805,7 +2807,7 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
-$("member-print").addEventListener("click", () => {
+function openMemberPage() {
   const title = $("member-title").textContent;
   const note = $("member-note").textContent;
   const page = `<!doctype html><html lang="ko"><head><meta charset="utf-8">` +
@@ -2827,7 +2829,7 @@ $("member-print").addEventListener("click", () => {
   $("print-download").onclick = () => download(path, filename, "text/html");
   $("print-source").hidden = true;
   $("print-dialog").showModal();
-});
+}
 
 $("lookup-run").addEventListener("click", () => {
   const id = $("lookup-id").value.trim();

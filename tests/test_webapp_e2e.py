@@ -802,11 +802,16 @@ def test_member_lookup_and_reports(page, tmp_path) -> None:
     assert not page.is_visible("#member-empty"), "산출을 마쳤으면 안내문이 빠져야 한다"
     page.fill("#lookup-id", "A0001")
     page.click("#lookup-run")
-    page.wait_for_selector("#member-dialog[open]", timeout=120_000)
-    body = page.inner_text("#member-body")
+    # 보고서와 같은 문서 모양으로 곧바로 떠야 한다.
+    page.wait_for_selector("#print-dialog[open]", timeout=120_000)
+    assert "개인별_산출근거" in page.inner_text("#print-title")
+    doc = page.frame_locator("#print-frame").locator("body")
+    doc.wait_for(timeout=30_000)
+    body = doc.inner_text()
     assert "연차별 계산 근거" in body
     assert "확정급여채무 (DBO)" in body
-    page.click("#member-dialog >> text=닫기")
+    page.click("#print-dialog .toolbar button:last-child")
+    page.wait_for_selector("#print-dialog[open]", state="detached", timeout=10_000)
 
     # 퇴직급여 보고서 — 미리보기 iframe 안에 표지 제목이 있어야 한다.
     page.click("#tab-report")

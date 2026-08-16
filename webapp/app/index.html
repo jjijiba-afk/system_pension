@@ -682,12 +682,14 @@
   <iframe id="print-frame" style="width:100%;height:65vh;border:1px solid var(--line);border-radius:0;background:#fff"></iframe>
 </dialog>
 
+<!-- 개인별 산출 근거를 조립해 두는 자리. 화면에는 이 상자를 띄우지 않고,
+     여기서 만든 내용을 그대로 문서(HTML)로 바꿔 보고서와 같은 창에 띄운다 —
+     감사인에게 건네는 근거 자료라 화면과 인쇄물이 같아야 한다. -->
 <dialog id="member-dialog" style="width:94vw;max-width:980px">
   <h1 style="font-size:1.05rem" id="member-title"></h1>
   <div class="toolbar">
     <span class="hint" id="member-note"></span>
     <span class="spacer"></span>
-    <button class="small primary" type="button" id="member-print">인쇄 / PDF 저장</button>
     <button class="small" type="button" onclick="this.closest('dialog').close()">닫기</button>
   </div>
   <div id="member-body"></div>
