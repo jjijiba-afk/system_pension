@@ -129,8 +129,8 @@ class TestTheInputSheet:
         ws = blank["예치금"]
         text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
                           if c.value)
-        for want in ("회사 납입 부담금", "운용수익", "수수료 (운용관리)",
-                     "수수료 (자산관리)", "당기말 잔액", "대사", "자산 분류",
+        for want in ("부담금 납입액", "이자수익", "운용관리수수료",
+                     "자산관리수수료", "기말 잔액", "검증", "자산 분류",
                      "활성시장 공시가격", "자산인식상한", "기중 장기근속 지급액"):
             assert want in text, f"[예치금] 에 '{want}' 이(가) 없다"
 

@@ -306,16 +306,8 @@ def _parse_rounding(formula: str, base_wage: str) -> tuple[int | None, str]:
 
 #: 라벨 → 필드. 앞뒤 공백·괄호 표기가 흔들려서 부분일치로 본다.
 _OBLIGATION_LABELS: Final = (
-    # 우리 [예치금] 양식의 낱말 (본사 서식과 다르게 지은 것들)
-    ("계열사에서 받음", "transfer_in"),
-    ("합병·양수", "merger_in"),
-    ("퇴직자 지급액", "benefits_paid"),
-    ("중간정산 지급액", "settlement_paid"),
-    ("DC 전환", "dc_converted"),
-    ("위로금·명예퇴직금", "other_paid"),
-    ("계열사로 보냄", "transfer_out"),
-    ("매각·분할", "disposal"),
-    # 자료요청서(옛 서식)의 낱말
+    # '퇴직급여 지급액'(우리 양식)과 '퇴직금 지급액'(자료요청서) 둘 다 읽는다.
+    ("퇴직급여 지급", "benefits_paid"),
     ("계열사 전입", "transfer_in"),
     ("합병", "merger_in"),
     ("퇴직금 지급액", "benefits_paid"),
@@ -327,19 +319,8 @@ _OBLIGATION_LABELS: Final = (
 )
 
 _ASSET_LABELS: Final = (
-    # 우리 [예치금] 양식의 낱말
-    ("납입 부담금", "contributions"),
-    ("운용수익", "actual_return"),
-    ("합병·양수", "merger_in"),
-    ("계열사에서 받음", "transfer_in"),
-    ("퇴직자 지급액", "benefits_paid"),
-    ("중간정산 지급액", "settlement_paid"),
-    ("DC 전환", "dc_converted"),
-    ("계열사로 보냄", "transfer_out"),
-    ("매각·분할", "disposal"),
-    ("수수료 (운용관리)", "management_fee"),
-    ("수수료 (자산관리)", "custody_fee"),
-    # 자료요청서(옛 서식)의 낱말
+    # '퇴직급여 지급액'(우리 양식)과 '퇴직금'(자료요청서) 둘 다 읽는다.
+    ("퇴직급여 지급", "benefits_paid"),
     ("부담금납입", "contributions"),
     ("부담금 납입", "contributions"),
     ("이자수익", "actual_return"),

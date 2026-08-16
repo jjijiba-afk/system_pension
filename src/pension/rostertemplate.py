@@ -826,18 +826,18 @@ def _longterm(ws, row: int, *, filled: bool = False, rows: list | None = None,
 #: 숫자를 두 번 적었다. 한 표로 합치고 열만 갈랐다 — 해당 없는 칸은 회색으로
 #: 막아 두어 "여기는 적는 칸이 아니다" 가 보이게 한다.
 MOVEMENT_ROWS = [
-    ("유입", "회사 납입 부담금",        False, True,  0,             1_500_000_000),
-    ("유입", "운용수익 (이자 등)",       False, True,  0,             420_000_000),
-    ("유입", "합병·양수로 받음",         True,  True,  0,             0),
-    ("유입", "계열사에서 받음 (전입)",    True,  True,  0,             0),
-    ("유출", "퇴직자 지급액",           True,  True,  980_000_000,   980_000_000),
-    ("유출", "중간정산 지급액",          True,  True,  120_000_000,   120_000_000),
-    ("유출", "DC 전환 지급액",          True,  True,  0,             0),
-    ("유출", "위로금·명예퇴직금",        True,  False, 60_000_000,    0),
-    ("유출", "계열사로 보냄 (전출)",     True,  True,  0,             0),
-    ("유출", "사업 매각·분할로 보냄",     True,  True,  0,             0),
-    ("유출", "수수료 (운용관리)",        False, True,  0,             18_000_000),
-    ("유출", "수수료 (자산관리)",        False, True,  0,             9_000_000),
+    ("(+)", "부담금 납입액",          False, True,  0,             1_500_000_000),
+    ("(+)", "이자수익",              False, True,  0,             420_000_000),
+    ("(+)", "합병 인수액",            True,  True,  0,             0),
+    ("(+)", "계열사 전입",            True,  True,  0,             0),
+    ("(-)", "퇴직급여 지급액",         True,  True,  980_000_000,   980_000_000),
+    ("(-)", "중간정산금",             True,  True,  120_000_000,   120_000_000),
+    ("(-)", "DC전환 지급액",          True,  True,  0,             0),
+    ("(-)", "퇴직위로금 (명예퇴직금 등)", True,  False, 60_000_000,    0),
+    ("(-)", "계열사 전출",            True,  True,  0,             0),
+    ("(-)", "사업처분·분할",           True,  True,  0,             0),
+    ("(-)", "운용관리수수료",          False, True,  0,             18_000_000),
+    ("(-)", "자산관리수수료",          False, True,  0,             9_000_000),
 ]
 
 #: 옛 두-표 서식을 읽는 쪽과 시험이 아직 참조한다. 표는 하나가 됐지만 낱말은
@@ -858,7 +858,7 @@ ASSET_CLOSING = (12_793_000_000, 300_000_000)
 #: 자산이 자산의 대부분인 회사가 흔한데, 나누지 않으면 그 사실이 공시에
 #: 드러나지 않는다.
 ASSET_BREAKDOWN = [
-    ("현금·요구불예금", 150_000_000, "있음"),
+    ("현금 및 현금성자산", 150_000_000, "있음"),
     ("정기예금·원리금보장 GIC", 9_800_000_000, "없음"),
     ("국공채", 1_500_000_000, "있음"),
     ("특수채·금융채", 700_000_000, "있음"),
@@ -896,7 +896,7 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
         "신탁·보험 명세서의 숫자를 그대로 옮겨 주세요. 노란 칸이 입력, "
         "굵은 칸은 자동 계산입니다. ① 맨 아랫줄이 0 이어야 합니다.")
     # 부호 칸은 좁게. 항목 이름이 왼쪽 끝에 붙어야 표가 한 덩어리로 읽힌다.
-    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["A"].width = 4
     ws.column_dimensions["B"].width = 32
 
     def money(row: int, column: int, value, *, formula: bool = False):
@@ -931,7 +931,7 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     # 양쪽에 똑같이 들어가 담당자가 같은 숫자를 두 번 적었다. 한 표로 합치고
     # 열만 갈랐다.
     row = _band(ws, row, "① 퇴직급여추계액·예치금 증감", BAND_COLOURS[0],
-                "유출입은 모두 양수로 적으세요 — 방향은 왼쪽 유입/유출이 정합니다. "
+                "유출입은 모두 양수로 적으세요 — 부호는 왼쪽 (+)(−) 가 정합니다. "
                 "회색 칸은 그 축에 해당 없는 항목이고, 해당 없는 줄은 0 으로 "
                 "두세요 — 줄을 지우면 맨 아랫줄 수식이 어긋납니다.")
     row = _heads(ws, row, (
@@ -942,7 +942,7 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     closing = numbers.get("closing", ASSET_CLOSING)
 
     opening_row = row
-    label(opening_row, "", "전기말 잔액 (기초)")
+    label(opening_row, "", "기초 잔액 (전기말)")
     na(opening_row, 3)
     money(opening_row, 4, opening[0])
     money(opening_row, 5, opening[1])
@@ -970,16 +970,16 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     last_move = row - 1
 
     closing_row = row
-    label(closing_row, "", "당기말 잔액 (결산일)")
+    label(closing_row, "", "기말 잔액 (결산일)")
     na(closing_row, 3)
     money(closing_row, 4, closing[0])
     money(closing_row, 5, closing[1])
     _note(ws, closing_row, 6, "결산일 명세서의 잔액")
 
     verify_row = closing_row + 1
-    label(verify_row, "", "대사  (기초 + 유입 − 유출 − 기말)")
+    label(verify_row, "", "검증  (기초 + 유입 − 유출 − 기말)")
     na(verify_row, 3)
-    plus_last = opening_row + 4          # 유입 줄 넷: 부담금·운용수익·합병·전입
+    plus_last = opening_row + 4          # (+) 줄 넷: 부담금·이자수익·합병·전입
     for column in "DE":
         cell = ws.cell(verify_row, ord(column) - 64,
                        f"={column}{opening_row}"
