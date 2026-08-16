@@ -617,3 +617,85 @@ class TestServiceAdjustmentColumns:
         assert first.service_add_years == 2.5
         assert first.service_deduct_years == 1.0
         assert roster.active[1].service_add_years == 0.0
+
+
+class TestAccruedCrossCheck:
+    """회사가 낸 추계액과 우리 값을 실제로 맞대어 본다.
+
+    양식에 "우리 값과 맞대어 봅니다" 라고 적어 놓고 오래도록 음수만 걸러 내고
+    있었다. 추계액이 어긋난다는 것은 근속 기산일·임금·지급률 가운데 무언가를
+    서로 다르게 보고 있다는 뜻이라, 그 위에 얹은 채무가 맞을 리 없다.
+    """
+
+    def _run(self, tmp_path, *, accrued=None, next_accrued=None):
+        import openpyxl
+
+        from pension.rostergen import CASES, write_case_assumptions, write_case_roster
+        from pension.rostertemplate import FIRST_DATA_ROW, HEADER_ROW
+
+        tmp_path = Path(tmp_path)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        spec = CASES[0]
+        roster = write_case_roster(spec, tmp_path / "명부.xlsx")
+        assumptions = write_case_assumptions(spec, tmp_path / "기초율.xlsx")
+
+        book = openpyxl.load_workbook(roster)
+        ws = book["재직자명부"]
+        head = {str(c.value).strip(): c.column for c in ws[HEADER_ROW] if c.value}
+        if accrued is not None:
+            ws.cell(FIRST_DATA_ROW, head["추계액"], accrued)
+        if next_accrued is not None:
+            ws.cell(FIRST_DATA_ROW, head["차년도 추계액"], next_accrued)
+        book.save(roster)
+
+        return run_valuation(RunOptions(
+            roster_path=roster, assumptions_path=assumptions,
+            output_path=tmp_path / "결과.xlsx", allow_errors=True,
+            include_sensitivity=False, include_longterm=False,
+        ))
+
+    def _codes(self, run):
+        return [i.code for i in run.issues.warnings]
+
+    def test_a_wildly_wrong_figure_is_named(self, tmp_path) -> None:
+        run = self._run(tmp_path, accrued=1_000)
+        gaps = [i for i in run.issues.warnings if i.code == "JAE_ACCRUED_MISMATCH"]
+        assert gaps, "10배 넘게 어긋나는 추계액을 짚지 않았다"
+        assert "추계액" in gaps[0].message
+
+    def test_an_unwritten_figure_is_not_a_finding(self, tmp_path) -> None:
+        """안 적어 보낸 칸은 검산 대상이 아니다 — 0 과 맞대면 전원이 어긋난다."""
+        run = self._run(tmp_path, accrued=0)
+        named = [i for i in run.issues.warnings
+                 if i.code == "JAE_ACCRUED_MISMATCH" and "사번" in i.message]
+        assert named == []
+
+    def test_the_next_year_figure_is_checked_on_its_own(self, tmp_path) -> None:
+        """당기가 맞는데 차년도가 틀리면 임금상승 가정이 서로 다른 것이다."""
+        run = self._run(tmp_path, next_accrued=1_000)
+        gaps = [i for i in run.issues.warnings if i.code == "JAE_ACCRUED_MISMATCH"]
+        assert any("차년도 추계액" in i.message for i in gaps)
+
+    def test_a_small_rounding_gap_is_left_alone(self, tmp_path) -> None:
+        """근속 단수·반올림으로 몇 원씩 어긋나는 것은 흔하다. 그걸 다 짚으면
+        진짜 문제가 묻힌다."""
+        clean = self._run(tmp_path / "a")
+        mine = next(m for m in clean.valuation.members if not m.excluded_reason)
+        run = self._run(tmp_path / "b", accrued=round(mine.accrued_benefit) + 500)
+        named = [i for i in run.issues.warnings
+                 if i.code == "JAE_ACCRUED_MISMATCH" and mine.employee_id in i.message]
+        assert named == []
+
+    def test_the_totals_are_reported_even_when_they_match(self, tmp_path) -> None:
+        """맞았다는 사실도 남아야 근거자료가 된다."""
+        clean = self._run(tmp_path / "a")
+        mine = next(m for m in clean.valuation.members if not m.excluded_reason)
+        run = self._run(tmp_path / "b", accrued=round(mine.accrued_benefit))
+        assert any(i.code == "JAE_ACCRUED_TOTAL" for i in run.issues.notices)
+
+    def test_a_roster_without_the_column_is_not_checked(self, tmp_path) -> None:
+        """추계액을 아예 안 보내는 회사도 있다. 그때는 조용해야 한다."""
+        run = self._run(tmp_path)
+        assert not [i for i in run.issues.warnings
+                    if i.code == "JAE_ACCRUED_MISMATCH"]
+        assert not [i for i in run.issues.notices if i.code == "JAE_ACCRUED_TOTAL"]

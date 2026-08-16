@@ -82,7 +82,13 @@ class ActiveMember:
     honorary_wage: float = 0.0
     """명예퇴직 산정용 임금."""
     accrued_benefit: float = 0.0
-    """퇴직급여추계액(K-GAAP)."""
+    """퇴직급여추계액(K-GAAP). 회사가 낸 값이라 우리 값과 맞대어 본다."""
+    next_accrued_benefit: float = 0.0
+    """**1년 후** 퇴직급여추계액. 회사가 함께 내 주면 검산 축이 하나 늘어난다.
+
+    당기 추계액만 맞추면 근속·임금은 맞았는지 알 수 있어도 **임금상승 가정이
+    회사 생각과 같은지** 는 알 수 없다. 두 해를 맞대어 보면 그 축이 드러난다.
+    """
     daily_base_pay: float = 0.0
     """일 기본급(장기급여 휴가용). 0 이면 평균임금/30 으로 채운다."""
     db_ratio: float = 1.0

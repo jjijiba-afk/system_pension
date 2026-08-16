@@ -423,6 +423,7 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog,
         member.monthly_wage = _number(get("monthly_wage"))
         member.honorary_wage = _number(get("honorary_wage"))
         member.accrued_benefit = _number(get("accrued_benefit"))
+        member.next_accrued_benefit = _number(get("next_accrued_benefit"))
         member.daily_base_pay = _number(get("daily_base_pay"))
         member.leave_days = abs(_number(get("leave_days")))
         member.remaining_contract_years = abs(_number(get("remaining_contract_years")))

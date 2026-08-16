@@ -143,6 +143,12 @@ class MemberValuation:
     """차기 이자원가(= DBO × 할인율)."""
     accrued_benefit: float = 0.0
     """기준일 현재 퇴직 시 지급액(퇴직급여추계액). 명부 값이 아니라 지급률로 재계산한 값."""
+    next_accrued_benefit: float = 0.0
+    """**1년 뒤** 퇴직 시 지급액. 명부의 차년도 추계액과 맞대어 보는 값이다.
+
+    당기 추계액만 맞추면 근속·임금이 맞았는지는 알 수 있어도 임금상승 가정이
+    회사 생각과 같은지는 알 수 없다. 두 해를 맞대면 그 축이 드러난다.
+    """
     expected_benefit_pv: float = 0.0
     """미래 급여의 총 현가(귀속 전). 부채비율 점검용."""
     duration: float = 0.0
@@ -222,6 +228,11 @@ class ValuationResult:
     def accrued_benefit(self) -> float:
         """퇴직급여추계액 합계(지급률 기준 재계산)."""
         return sum(m.accrued_benefit for m in self.members)
+
+    @property
+    def next_accrued_benefit(self) -> float:
+        """1년 뒤 퇴직급여추계액 합계."""
+        return sum(m.next_accrued_benefit for m in self.members)
 
     @property
     def headcount(self) -> int:
@@ -687,6 +698,24 @@ def value_member(
     # 추계액은 '지금 자발적으로 나가면 얼마' 이므로 중도퇴직 규정으로 잰다.
     result.accrued_benefit = benefit_at(
         past_service, float(member.age), member.monthly_wage,
+        causes.get(rule, CAUSE_VOLUNTARY),
+    )
+    # 1년 뒤 즉시퇴직 지급액. 임금은 첫 해 인상률만큼 오른다고 본다 — 명부의
+    # 차년도 추계액과 맞대면 근속·임금뿐 아니라 **임금상승 가정** 까지 맞대어
+    # 볼 수 있다. 탈퇴는 보지 않는다. '1년 뒤에도 재직 중이면 얼마' 라는 뜻이라,
+    # 회사가 내는 차년도 추계액과 같은 정의여야 한다.
+    if not closed:
+        next_wage = member.monthly_wage * (
+            1.0
+            + (assumptions.salary.base_up.rate(1) if member.apply_base_up else 0.0)
+            + (assumptions.salary.promotion.rate(
+                salary_rule, age=member.age, service=past_service)
+               if member.apply_promotion else 0.0)
+        )
+    else:
+        next_wage = member.monthly_wage
+    result.next_accrued_benefit = benefit_at(
+        service_at(1.0), float(member.age + 1), next_wage,
         causes.get(rule, CAUSE_VOLUNTARY),
     )
 

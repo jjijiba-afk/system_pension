@@ -387,6 +387,74 @@ def _check_rule_names(roster, assumptions, log: IssueLog) -> None:
         )
 
 
+#: 회사 추계액과 우리 값이 이만큼 넘게 벌어지면 짚는다. 근속 단수·반올림
+#: 차이로 몇 원씩 어긋나는 것은 흔하므로, 비율과 금액을 함께 본다.
+_ACCRUED_TOLERANCE: Final = 0.01
+_ACCRUED_FLOOR: Final = 100_000.0
+#: 개인별로 짚어 줄 최대 인원. 전원이 어긋나는 명부에서 이슈 목록이 통째로
+#: 묻히지 않게 한다.
+_ACCRUED_NAMED: Final = 15
+
+
+def _check_accrued(run: "PensionRun", log: IssueLog) -> None:
+    """회사가 낸 추계액과 우리 값을 맞대어 본다.
+
+    양식에 "우리 값과 맞대어 봅니다" 라고 적어 놓고 실제로는 음수만 걸러
+    내고 있었다. 추계액이 어긋난다는 것은 근속 기산일·임금·지급률 가운데
+    무언가를 서로 다르게 보고 있다는 뜻이라, 채무가 맞을 리 없다.
+
+    **차년도 추계액** 은 축이 하나 더 있다. 당기가 맞는데 차년도가 어긋나면
+    근속·임금이 아니라 **임금상승 가정** 이 회사 생각과 다른 것이다.
+    """
+    told = {m.employee_id: m for m in run.roster.active if m.employee_id}
+
+    for label, mine_of, theirs_of in (
+        ("추계액", lambda r: r.accrued_benefit, lambda m: m.accrued_benefit),
+        ("차년도 추계액",
+         lambda r: r.next_accrued_benefit, lambda m: m.next_accrued_benefit),
+    ):
+        named = 0
+        gaps = 0
+        mine_total = theirs_total = 0.0
+        for result in run.valuation.members:
+            member = told.get(result.employee_id)
+            if member is None or result.excluded_reason:
+                continue
+            theirs = theirs_of(member)
+            if theirs <= 0:                     # 안 적어 보냈으면 검산 대상이 아니다
+                continue
+            mine = mine_of(result)
+            mine_total += mine
+            theirs_total += theirs
+            gap = mine - theirs
+            if abs(gap) <= _ACCRUED_FLOOR or abs(gap) <= abs(theirs) * _ACCRUED_TOLERANCE:
+                continue
+            gaps += 1
+            if named < _ACCRUED_NAMED:
+                named += 1
+                log.warning(
+                    "JAE_ACCRUED_MISMATCH",
+                    f"사번 {result.employee_id}: {label}이 회사 값 {theirs:,.0f}원, "
+                    f"우리 값 {mine:,.0f}원으로 {gap:+,.0f}원 어긋납니다",
+                    sheet=ACTIVE_SHEET, row=member.row, seq=member.seq,
+                    employee_id=result.employee_id, value=theirs,
+                )
+        if gaps > named:
+            log.warning(
+                "JAE_ACCRUED_MISMATCH",
+                f"{label}이 어긋나는 사람이 {gaps:,}명 더 있습니다(위에 {named}명만 "
+                "적었습니다)", sheet=ACTIVE_SHEET,
+            )
+        if theirs_total:
+            gap = mine_total - theirs_total
+            log.info(
+                "JAE_ACCRUED_TOTAL",
+                f"{label} 합계 — 회사 {theirs_total:,.0f}원, 우리 {mine_total:,.0f}원 "
+                f"({gap:+,.0f}원, {gap / theirs_total:+.2%})",
+                sheet=ACTIVE_SHEET,
+            )
+
+
 def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun:
     """산출 전 과정을 실행한다.
 
@@ -424,6 +492,8 @@ def run_valuation(options: RunOptions, progress: Progress = _noop) -> PensionRun
         active_upload=active_upload,
         retired_upload=retired_upload,
     )
+
+    _check_accrued(run, log)
 
     if roster.extra:
         progress("기중 제도변동을 재는 중", 0.50)
