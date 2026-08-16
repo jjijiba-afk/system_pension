@@ -363,6 +363,7 @@ _PRINT_PAGE = """<!doctype html>
   .bar button {{ font:inherit; padding:5px 12px; border-radius:5px;
     border:1px solid var(--navy); background:var(--navy); color:#fff;
     cursor:pointer; }}
+  .bar button.ghost {{ background:#fff; color:var(--navy); margin-left:6px; }}
   @media print {{
     @page {{ size:A4 portrait; margin:15mm 14mm; }}
     body {{ max-width:none; padding:0; font-size:10pt; }}
@@ -373,8 +374,22 @@ _PRINT_PAGE = """<!doctype html>
 </style></head><body>
 <div class="bar">이 화면을 그대로 인쇄하면 PDF 가 됩니다 —
   <button type="button" onclick="window.print()">인쇄 / PDF 로 저장</button>
-  <span>인쇄 대화상자에서 대상을 <b>PDF로 저장</b> 으로 고르세요.</span></div>
+  <button type="button" class="ghost" onclick="closePage()">닫기</button>
+  <span>인쇄 대화상자에서 대상을 <b>PDF로 저장</b> 으로 지정하십시오.</span></div>
 {body}
+<script>
+// 새 창으로 열렸으면 그대로 닫고, 브라우저가 닫기를 막으면(주소창으로 직접
+// 연 경우 등) 앱 화면으로 돌아간다. 문서만 남고 길이 끊기는 일이 없게 한다.
+function closePage() {{
+  window.close();
+  setTimeout(function () {{
+    if (!window.closed) {{
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = "index.html";
+    }}
+  }}, 150);
+}}
+</script>
 </body></html>
 """
 
