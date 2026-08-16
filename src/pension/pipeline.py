@@ -134,7 +134,7 @@ class RunOptions:
     shocks: tuple[Shock, ...] = DEFAULT_SHOCKS
     prior: PriorPeriod = field(default_factory=PriorPeriod)
     plan_assets: PlanAssetInput = field(default_factory=PlanAssetInput)
-    """사외적립자산. 비우면 명부의 ``일반사항`` 5번 표에서 읽어 온다."""
+    """사외적립자산. 비우면 명부의 ``예치금`` 시트에서 읽어 온다."""
     read_general_info: bool = True
     """``일반사항`` 의 회계기간·사외적립자산·추계액 변동내역을 자동으로 쓸지.
 
@@ -337,10 +337,10 @@ def _check_general_sheet(general, log: IssueLog) -> None:
     if round(difference) != 0:
         log.warning(
             "GEN_ASSET_NOT_BALANCED",
-            "사외적립자산 변동내역이 맞지 않습니다 "
+            "예치금 증감이 맞지 않습니다 "
             f"(기초+유입−유출−기말 = {difference:,.0f}원). "
             "회사가 보내온 표를 확인하세요",
-            sheet="사외적립자산",
+            sheet="예치금",
             value=round(difference),
         )
 
@@ -690,7 +690,7 @@ def _split_assumption_change(
 def _build_plan_assets(run: PensionRun, options: RunOptions) -> PlanAssets | None:
     """사외적립자산 증감표.
 
-    담당자가 화면에 넣은 값이 없으면 명부의 ``사외적립자산`` 시트를 그대로
+    담당자가 화면에 넣은 값이 없으면 명부의 ``예치금`` 시트를 그대로
     쓴다. 신탁 명세서를 보고 이미 채워 보낸 표라 다시 옮겨 적을 이유가 없다.
     """
     given = options.plan_assets

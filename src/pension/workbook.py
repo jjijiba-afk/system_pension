@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-__all__ = ["Cell", "Sheet", "Workbook", "find_sheet", "open_workbook"]
+__all__ = ["Cell", "Sheet", "Workbook", "find_sheet", "open_workbook", "save_workbook"]
 
 
 class Cell(Protocol):
@@ -259,3 +259,38 @@ def _simplify(name: str) -> str:
         if head:
             text = head
     return text
+
+
+def save_workbook(book: Any, path: str | Path) -> Path:
+    """워크북을 저장하고 **색이 투명해지는 것을 막는다.**
+
+    openpyxl 은 ``Font(color="FFFFFF")`` 처럼 여섯 자리로 준 색을 ARGB 여덟
+    자리로 늘리면서 앞에 ``00`` 을 붙인다. 그 자리는 알파 채널이고 ``00`` 은
+    **완전 투명** 이다. 엑셀 대부분은 이 자리를 무시하고 그리지만, 그렇지
+    않은 버전에서는 남색 머리글 위의 흰 글자가 통째로 사라진다 — 표는
+    그려지는데 열 이름만 안 보이는, 파일이 깨진 것처럼 보이는 모양이다.
+
+    저장한 뒤 서식표의 알파를 모두 ``FF``(불투명)로 올린다. 색값 자체는
+    건드리지 않으므로 보이던 것이 달라지지는 않는다.
+    """
+    import re
+    import shutil
+    import zipfile
+
+    path = Path(path)
+    book.save(path)
+
+    backup = path.with_suffix(path.suffix + ".alpha")
+    shutil.copy2(path, backup)
+    try:
+        with zipfile.ZipFile(backup) as source, \
+                zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename == "xl/styles.xml":
+                    data = re.sub(
+                        rb'rgb="00([0-9A-Fa-f]{6})"', rb'rgb="FF\1"', data)
+                target.writestr(item, data)
+    finally:
+        backup.unlink(missing_ok=True)
+    return path

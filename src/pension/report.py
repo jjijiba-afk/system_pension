@@ -22,6 +22,7 @@ from typing import Any, Final
 from .errors import Severity
 from .pipeline import PensionRun
 from .upload import ACTIVE_UPLOAD_HEADERS, RETIRED_UPLOAD_HEADERS
+from .workbook import save_workbook
 
 __all__ = ["write_report"]
 
@@ -761,5 +762,5 @@ def write_report(run: PensionRun, path: str | Path) -> Path:
     _upload_sheet(wb, "재직자명부", ACTIVE_UPLOAD_HEADERS, run.active_upload)
     _upload_sheet(wb, "퇴직자명부", RETIRED_UPLOAD_HEADERS, run.retired_upload)
 
-    wb.save(path)
+    save_workbook(wb, path)
     return path

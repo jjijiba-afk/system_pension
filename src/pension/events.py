@@ -160,12 +160,18 @@ def measure_events(
     """
     from .valuation import value_member
 
+    from .rostertemplate import EXAMPLE_MARK
+
     outcome = EventOutcome()
     if not members:
         return outcome
 
     by_date: dict[_dt.date, list[tuple[str, ActiveMember]]] = {}
     for member in members:
+        # 양식의 작성 예시 줄. 지우지 않고 보내도 산출에 섞이지 않아야 한다 —
+        # 있지도 않은 정산이 잡히면 증감표가 그 금액만큼 조용히 틀린다.
+        if member.employee_id.startswith(EXAMPLE_MARK):
+            continue
         kind = _normalize_kind(member.event_kind)
         if not kind or member.event_date is None:
             outcome.skipped += 1

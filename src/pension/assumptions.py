@@ -34,6 +34,7 @@ from typing import Any, Final
 
 from .formula import Formula, FormulaError
 from .normalize import Gender, text
+from .workbook import save_workbook
 
 __all__ = [
     "ATTRIBUTIONS",
@@ -1117,7 +1118,7 @@ def write_assumptions(
             ],
         )
 
-    wb.save(path)
+    save_workbook(wb, path)
     return path
 
 
@@ -1235,5 +1236,5 @@ def write_template(path: str | Path, *, job_groups: Iterable[str] = (),
     )
 
     del wb["Sheet"]
-    wb.save(path)
+    save_workbook(wb, path)
     return path

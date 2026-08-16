@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import datetime as _dt
 import random
+
+from .workbook import save_workbook
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -1087,7 +1089,7 @@ def write_case_roster(
         active_extras=active_extras,
         retired_extras=retired_extras,
     )
-    workbook.save(path)
+    save_workbook(workbook, path)
     # 수식 칸에 값을 심는다. 없으면 엑셀 '제한된 보기' 에서 검증줄과 합계가
     # 빈칸으로 보여, 표가 깨진 것처럼 읽힌다.
     tpl._embed_values(path)

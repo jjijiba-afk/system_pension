@@ -844,7 +844,7 @@ class TestRosterOps:
 
         path = write_roster_template(tmp_path / "명부.xlsx")
         book = openpyxl.load_workbook(path)
-        del book["기본정보"]
+        del book["기초자료"]
         book.save(path)
 
         result = call("roster_groups", path=str(path))
@@ -1177,7 +1177,7 @@ class TestPlanAssetsAndAmendment:
         assert float(fields["asset_contributions"]) > 0
         assert float(fields["asset_paid"]) >= 0
         assert info["grade"]
-        assert any("사외적립자산" in line for line in info["found"])
+        assert any("예치금" in line for line in info["found"])
         assert info["problems"] == []
 
     def test_it_flags_a_table_that_does_not_balance(self, tmp_path) -> None:
@@ -1186,8 +1186,8 @@ class TestPlanAssetsAndAmendment:
 
         case = self._pack(tmp_path)
         wb = openpyxl.load_workbook(case["roster"])
-        ws = wb["사외적립자산"]
-        # 기말 잔액을 흔든다. 구성 열(DB퇴직연금)이 합계보다 우선하므로 거기를 고친다.
+        ws = wb["예치금"]
+        # 기말 잔액을 흔든다. 구성 열(예치금)이 합계보다 우선하므로 거기를 고친다.
         closing = next(r for r in range(1, ws.max_row + 1)
                        if str(ws.cell(r, 2).value or "").startswith("기말 잔액"))
         ws.cell(closing, 3, float(ws.cell(closing, 3).value) + 9_103_134)
@@ -1203,8 +1203,8 @@ class TestPlanAssetsAndAmendment:
 
         case = self._pack(tmp_path)
         wb = openpyxl.load_workbook(case["roster"])
-        # 자산·규정·기본정보를 모두 뺀다 — 셋 중 하나만 남아도 읽을 것이 있다.
-        for name in ("사외적립자산", "퇴직급여규정", "기본정보"):
+        # 예치금과 기초자료를 모두 뺀다 — 둘 중 하나만 남아도 읽을 것이 있다.
+        for name in ("예치금", "기초자료"):
             del wb[name]
         stripped = str(tmp_path / "일반사항없음.xlsx")
         wb.save(stripped)
@@ -1241,7 +1241,7 @@ class TestPlanAssetsAndAmendment:
         import openpyxl
 
         source = openpyxl.load_workbook(case_roster := self._pack(tmp_path)["roster"])
-        del source["사외적립자산"]
+        del source["예치금"]
         stripped = str(tmp_path / "일반사항없음.xlsx")
         source.save(stripped)
         assert case_roster != stripped

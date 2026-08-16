@@ -20,7 +20,7 @@ INPUT_SHEET = "Input"
 #: 같은 시트의 다른 이름. 새 양식은 ``기본정보`` 로 부른다 — 영어 시트명이
 #: 하나만 남아 있어 담당자가 어디를 채워야 할지 알기 어려웠다. 옛 양식도 계속
 #: 읽어야 하므로 둘 다 본다.
-INPUT_SHEET_ALIASES: tuple[str, ...] = (INPUT_SHEET, "기본정보")
+INPUT_SHEET_ALIASES: tuple[str, ...] = (INPUT_SHEET, "기초자료", "기본정보")
 
 #: 직군 규칙 테이블의 첫 데이터 행(``Input`` B12).
 _RULE_FIRST_ROW = 12
@@ -450,6 +450,11 @@ def read_config(workbook, sheet_name: str = INPUT_SHEET, *,
         # 뒤쪽 직군을 통째로 놓친다. 여기서는 전 구간을 훑고 빈 행만 건너뛴다.
         source_name = text(ws.cell(row, 2 + shift).value)
         mapped_name = text(ws.cell(row, 3 + shift).value)
+        # [기초자료] 는 직군 표 아래에 다음 블록(③ 퇴직급여 지급규정…)이 이어
+        # 붙는다. 띠를 만나면 표가 끝난 것이다 — 계속 훑으면 그 표의 항목
+        # 이름이 직군으로 읽혀 있지도 않은 직군이 스무 개쯤 생긴다.
+        if source_name[:1] in "①②③④⑤⑥⑦⑧⑨⑩":
+            break
         if not source_name and not mapped_name:
             continue
 

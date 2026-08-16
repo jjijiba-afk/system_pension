@@ -335,7 +335,7 @@ def test_roster_fills_the_asset_boxes(page, tmp_path) -> None:
     assert page.input_value("#period_start") < page.input_value("#base_date")
     assert float(page.input_value("#asset_opening")) > 0
     assert float(page.input_value("#asset_closing")) > 0
-    assert "사외적립자산" in page.inner_text("#general-filled")
+    assert "예치금" in page.inner_text("#general-filled")
 
     # 사람이 손댄 칸은 덮어쓰지 않는다 — 명부보다 나중 자료일 수 있다.
     page.fill("#asset_opening", "1")

@@ -138,7 +138,7 @@ class TestRelayout:
         """되받은 것이 곧 다음 결산에 보낼 양식이다 — 안내 시트까지 있어야 한다."""
         target, _report = relaid
         assert openpyxl.load_workbook(target).sheetnames == [
-            "작성요령", "기본정보", "퇴직급여규정", "장기급여규정", "사외적립자산",
+            "작성요령", "기초자료", "예치금",
             "재직자명부", "퇴직자명부", "추가명부",
         ]
 

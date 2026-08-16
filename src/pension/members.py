@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import datetime as _dt
+
+from .workbook import save_workbook
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -340,5 +342,5 @@ def write_member_export(run: PensionRun, path: str | Path) -> Path:
     summary_sheet(COST_SHEET, "원가코드", _group_by(rows, lambda r: r.cost_code))
     summary_sheet(GROUP_SHEET, "직군", _group_by(rows, lambda r: r.job_group))
 
-    wb.save(path)
+    save_workbook(wb, path)
     return path

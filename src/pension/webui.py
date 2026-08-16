@@ -534,7 +534,7 @@ def _roster_groups(request: dict) -> dict[str, Any]:
 
 
 def _general_info(request: dict) -> dict[str, Any]:
-    """명부에 딸려 온 [기본정보]·[퇴직급여규정]·[사외적립자산] 에서
+    """명부에 딸려 온 [기초자료]·[예치금] 에서
     화면에 채울 것을 전부 읽는다.
 
     6번 지급규정 초안은 ``values`` 로(지급규정 탭), 담당자가 이미 채워 보낸
@@ -587,7 +587,7 @@ def _general_info(request: dict) -> dict[str, Any]:
             asset_closing=f"{assets.closing:.0f}",
         )
         found.append(
-            f"사외적립자산 기초 {assets.opening:,.0f}원 → 기말 {assets.closing:,.0f}원"
+            f"예치금 기초 {assets.opening:,.0f}원 → 기말 {assets.closing:,.0f}원"
         )
 
     # 양식의 '그 밖의 입력'. 물어봐 놓고 화면에 넣어 주지 않으면 담당자는
@@ -602,7 +602,7 @@ def _general_info(request: dict) -> dict[str, Any]:
     problems: list[str] = []
     if not assets.is_empty() and round(assets.difference) != 0:
         problems.append(
-            f"사외적립자산 변동내역이 {assets.difference:,.0f}원 맞지 않습니다. "
+            f"예치금 증감이 {assets.difference:,.0f}원 맞지 않습니다. "
             "회사가 보내온 표를 확인하세요"
         )
 
@@ -708,7 +708,7 @@ def _run(request: dict) -> dict[str, Any]:
             summary.append((f"  └ 가정변경 · {label}", f"{amount:,.0f} 원"))
     if run.plan_assets is not None:
         assets = run.plan_assets
-        summary.append(("사외적립자산", f"{assets.closing_fair_value:,.0f} 원"))
+        summary.append(("예치금", f"{assets.closing_fair_value:,.0f} 원"))
         summary.append(("순확정급여부채", f"{assets.net_liability:,.0f} 원"))
         summary.append(("적립비율", f"{assets.funded_ratio:.1%}"))
         if assets.ceiling_effect:
@@ -1250,7 +1250,7 @@ def _backup_import(request: dict) -> dict[str, Any]:
 #: 화면에서 내려받을 수 있는 양식. (열쇠, 파일명, 설명, 만드는 함수 이름)
 _TEMPLATES: Final = (
     ("roster", "명부_양식.xlsx",
-     "받는 명부 양식. 작성요령·기본정보·퇴직급여규정·사외적립자산과 "
+     "받는 명부 양식. 작성요령·기초자료·예치금과 "
      "재직자·퇴직자명부가 들어 있습니다", "write_roster_template"),
     ("rates_blank", "기초율_빈양식.xlsx",
      "산출가정 워크북 빈 양식. 표준률은 [산출가정 입력] 에서 불러옵니다",

@@ -101,7 +101,41 @@ class TestTheTwoParts:
         reopened.close()
 
 
-class TestTheLongTermRuleSheet:
+class TestTheInputSheet:
+    """담당자가 채우는 칸은 [기초자료] 한 장에 모은다.
+
+    여기저기 흩어 두면 시트를 오가며 채우다가 한 장을 통째로 빼먹는다.
+    [예치금] 만 따로 두는 것은 그쪽이 신탁·보험 명세서를 보고 옮기는 일이라
+    자료의 출처가 다르기 때문이다.
+    """
+
+    def test_the_workbook_has_exactly_these_sheets(self, blank) -> None:
+        assert blank.sheetnames == [
+            "작성요령", "기초자료", "예치금", "재직자명부", "퇴직자명부", "추가명부",
+        ]
+
+    def test_the_five_blocks_are_all_on_one_sheet(self, blank) -> None:
+        ws = blank["기초자료"]
+        bands = [str(c.value) for row in ws.iter_rows(max_col=1)
+                 for c in row if c.value and str(c.value).startswith(("①", "②", "③",
+                                                                     "④", "⑤"))]
+        assert [b[0] for b in bands] == ["①", "②", "③", "④", "⑤"], bands
+        joined = " ".join(bands)
+        for want in ("회사", "직군 규칙", "퇴직급여 지급규정", "특이사항", "장기급여"):
+            assert want in joined, f"[{want}] 블록이 없다"
+
+    def test_the_deposit_sheet_keeps_the_old_content(self, blank) -> None:
+        """이름만 바꿨다. 적는 내용이 달라지면 지난해와 맞대어 볼 수 없다."""
+        ws = blank["예치금"]
+        text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
+                          if c.value)
+        for want in ("부담금 납입액", "이자수익", "운용관리수수료", "자산관리수수료",
+                     "기말 잔액", "검증", "자산 분류", "활성시장 공시가격",
+                     "자산인식상한", "기중 장기근속 지급액"):
+            assert want in text, f"[예치금] 에 '{want}' 이(가) 없다"
+
+
+class TestTheLongTermRuleBlock:
     """근속포상 규정을 적을 자리.
 
     퇴직급여규정 안에 한 칸으로 끼워 두었더니, 없는 회사는 "뭘 적으라는 건지"
@@ -109,12 +143,15 @@ class TestTheLongTermRuleSheet:
     쪽이든 우리가 되물어야 했다.
     """
 
-    def test_it_is_its_own_sheet_next_to_the_severance_rules(self, blank) -> None:
-        names = blank.sheetnames
-        assert names.index("장기급여규정") == names.index("퇴직급여규정") + 1
+    def test_it_comes_last_so_it_can_be_left_blank(self, blank) -> None:
+        """기타장기는 맨 아래에 둔다 — 없는 회사가 거기서 그냥 멈추면 된다."""
+        ws = blank["기초자료"]
+        marks = {str(c.value)[0]: c.row for row in ws.iter_rows(max_col=1)
+                 for c in row if c.value and str(c.value)[:1] in "①②③④⑤"}
+        assert marks["⑤"] > max(marks[m] for m in "①②③④")
 
     def test_it_asks_for_the_schedule_row_by_row(self, blank) -> None:
-        ws = blank["장기급여규정"]
+        ws = blank["기초자료"]
         heads = {c.value for row in ws.iter_rows() for c in row if c.value}
         for want in ("규정명", "근속년수", "지급 내용", "지급기준 (금액 환산)"):
             assert want in heads, f"'{want}' 을 묻지 않는다"
@@ -134,15 +171,15 @@ class TestTheLongTermRuleSheet:
 
     def test_a_blank_form_still_shows_what_an_answer_looks_like(self, blank) -> None:
         """예시가 없으면 '대상' 칸은 대개 비어서 돌아온다."""
-        ws = blank["장기급여규정"]
+        ws = blank["기초자료"]
         written = [c.value for row in ws.iter_rows(min_col=2, max_col=6)
                    for c in row if isinstance(c.value, str)]
         assert any("휴가" in v for v in written)
         assert any("소멸" in v or "이월" in v for v in written)
 
     def test_it_points_back_at_the_roster_columns(self, blank) -> None:
-        """규정 시트와 명부가 서로를 가리켜야 한 바퀴가 닫힌다."""
-        ws = blank["장기급여규정"]
+        """규정 블록과 명부가 서로를 가리켜야 한 바퀴가 닫힌다."""
+        ws = blank["기초자료"]
         text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
                          if c.value)
         assert "장기급여 대상" in text
@@ -168,3 +205,144 @@ class TestTheGuideStaysHonest:
         """수백 줄을 채우는 동안 열 이름이 화면에서 사라지면 칸을 밀려 적는다."""
         for sheet in ("재직자명부", "퇴직자명부"):
             assert blank[sheet].freeze_panes == f"A{FIRST_DATA_ROW}"
+
+
+class TestColoursAreNotTransparent:
+    """색이 투명하게 저장되면 표는 그려지는데 글자만 사라진다.
+
+    openpyxl 은 여섯 자리로 준 색을 ARGB 여덟 자리로 늘리며 앞에 ``00`` 을
+    붙인다. 그 자리는 알파 채널이고 ``00`` 은 완전 투명이다. 엑셀 대부분은
+    무시하고 그리지만 그렇지 않은 버전에서는 남색 머리글 위의 흰 글자가
+    통째로 안 보인다 — 받는 사람 눈에는 파일이 깨진 것으로 읽힌다.
+    """
+
+    def _transparent(self, path) -> list[str]:
+        import re
+        import zipfile
+
+        styles = zipfile.ZipFile(path).read("xl/styles.xml").decode("utf-8")
+        return re.findall(r'rgb="00[0-9A-Fa-f]{6}"', styles)
+
+    def test_the_blank_form_has_no_transparent_colour(self, tmp_path) -> None:
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "양식.xlsx")
+        assert self._transparent(path) == []
+
+    def test_every_file_we_hand_over_is_opaque(self, tmp_path) -> None:
+        """명부만 고치면 기초율 양식에서 같은 일이 난다."""
+        from pension.samples import write_sample_pack
+
+        for path in write_sample_pack(tmp_path):
+            assert self._transparent(path) == [], f"{path.name} 에 투명한 색이 있다"
+
+    def test_the_header_ink_survives_the_round_trip(self, tmp_path) -> None:
+        import openpyxl
+
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "양식.xlsx")
+        cell = openpyxl.load_workbook(path)["재직자명부"].cell(HEADER_ROW, 1)
+        assert cell.value == "순번"
+        assert cell.font.color.rgb == "FFFFFFFF", "머리글 글자가 흰색 불투명이어야 한다"
+        assert cell.fill.fgColor.rgb.startswith("FF"), "채움색도 불투명이어야 한다"
+
+
+class TestTheSheetReadsBackWhole:
+    """우리가 만든 양식을 우리가 다시 읽을 수 있어야 한다.
+
+    표 제목·항목 이름을 낱말로 찾는 구조라, 안내 문구에 그 낱말을 쓰면 안내
+    줄이 표로 잡힌다. 실제로 ② 블록 안내에 '검증' 이라고 적었더니 그 줄이
+    검증 줄로 읽혀 기말 잔액이 통째로 0 이 됐다 — 오류 없이 그럴듯한 숫자가
+    나오는 쪽이다.
+    """
+
+    def _info(self, tmp_path):
+        from pension.general_info import read_general_info
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "양식.xlsx")
+        return read_general_info(openpyxl.load_workbook(path))
+
+    def test_the_deposit_table_balances(self, tmp_path) -> None:
+        assets = self._info(tmp_path).assets
+        assert assets.opening > 0 and assets.closing > 0
+        assert round(assets.difference) == 0, "검산줄이 0 이 아니다"
+
+    def test_every_block_of_the_deposit_sheet_is_read(self, tmp_path) -> None:
+        info = self._info(tmp_path)
+        assert info.obligation.benefits_paid > 0, "① 추계액 증감을 못 읽었다"
+        assert info.assets.contributions > 0, "② 예치금 증감을 못 읽었다"
+        assert info.assets.breakdown, "③ 예치금 구성을 못 읽었다"
+        assert info.assets.quoted, "③ 활성시장 공시가격 칸을 못 읽었다"
+
+    def test_the_breakdown_adds_up_to_the_closing_balance(self, tmp_path) -> None:
+        assets = self._info(tmp_path).assets
+        assert sum(assets.breakdown.values()) == pytest.approx(assets.closing)
+
+    def test_the_basics_block_is_read(self, tmp_path) -> None:
+        from pension.config import read_config
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "양식.xlsx")
+        config = read_config(openpyxl.load_workbook(path))
+        assert config.base_date.isoformat() == "2025-12-31"
+        assert [r.source_name for r in config.job_group_rules] == [
+            "정규직", "계약직", "임원"]
+
+    def test_the_rule_table_does_not_swallow_the_blocks_below_it(
+        self, tmp_path
+    ) -> None:
+        """세 블록이 한 시트에 있다. 직군 표가 아래 표까지 삼키면 있지도 않은
+        직군이 스무 개쯤 생긴다."""
+        from pension.config import read_config
+        from pension.rostertemplate import write_roster_template
+
+        path = write_roster_template(tmp_path / "양식.xlsx")
+        config = read_config(openpyxl.load_workbook(path))
+        assert len(config.job_group_rules) == 3
+
+
+class TestTheLookIsConsistent:
+    """한 줄만 선이 끊겨 있으면 그 줄이 표 안인지 밖인지 알 수 없다.
+
+    받는 사람은 이 파일 하나로 무엇을 어디에 적는지 알아내야 한다. 선이
+    들쭉날쭉하면 "여기는 안 채워도 되나" 로 읽혀, 비워서 돌아온다.
+    """
+
+    def test_no_row_is_half_boxed(self, blank) -> None:
+        for name in blank.sheetnames:
+            ws = blank[name]
+            for row in ws.iter_rows():
+                written = [c for c in row if c.value is not None]
+                if len(written) < 2:
+                    continue
+                bare = [c.coordinate for c in written
+                        if not (c.border and c.border.left.style)]
+                assert not bare or len(bare) == len(written), (
+                    f"[{name}] {row[0].row}행의 {bare} 만 선이 없다")
+
+    def test_the_face_is_the_same_everywhere(self, blank) -> None:
+        """글꼴이 섞이면 한 사람이 만든 파일로 보이지 않는다."""
+        for name in blank.sheetnames:
+            ws = blank[name]
+            faces = {c.font.name for row in ws.iter_rows() for c in row
+                     if c.value is not None and c.font and c.font.name}
+            assert faces <= {tpl.FACE}, f"[{name}] 에 다른 글꼴 {faces}"
+
+    def test_no_markdown_leaks_into_the_cells(self, blank) -> None:
+        """엑셀은 별표를 굵게 바꿔 주지 않는다. 그대로 별표로 보인다."""
+        for name in blank.sheetnames:
+            ws = blank[name]
+            for row in ws.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        assert "**" not in cell.value, (
+                            f"[{name}] {cell.coordinate} 에 별표가 그대로 있다")
+
+    def test_the_block_colours_match_the_roster(self, blank) -> None:
+        """입력 시트의 띠와 명부의 블록이 같은 색이어야 한 벌로 보인다."""
+        assert tuple(tpl.BAND_COLOURS) == tuple(
+            colour for _part, colour, _ink, _note in BLOCKS.values()
+            if colour in tpl.BAND_COLOURS
+        ) or set(tpl.BAND_COLOURS) <= {v[1] for v in BLOCKS.values()}

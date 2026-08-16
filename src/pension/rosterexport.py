@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .normalize import text
+from .workbook import save_workbook
 
 __all__ = ["ExportReport", "SheetReport", "relayout_roster"]
 
@@ -245,7 +246,7 @@ def relayout_roster(source: str | Path, target: str | Path) -> ExportReport:
         active_extras=active_extras,
         retired_extras=retired_extras,
     )
-    workbook.save(target)
+    save_workbook(workbook, target)
     tpl._embed_values(target)
     return ExportReport(active=active_report, retired=retired_report,
                         basics=basics, groups=groups)

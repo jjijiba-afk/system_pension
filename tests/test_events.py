@@ -30,6 +30,20 @@ from pension.rostertemplate import FIRST_DATA_ROW, HEADER_ROW
 BASE_DATE = dt.date(2025, 12, 31)
 
 
+def config_of() -> CalculationConfig:
+    return CalculationConfig(
+        base_date=BASE_DATE,
+        job_group_rules=[JobGroupRule("정규직", "정규직", severance_nra=60,
+                                      longterm_nra=60, over_nra_add_age=2)],
+    )
+
+
+def assumptions_of():
+    from tests.test_valuation import make_assumptions
+
+    return make_assumptions(discount=0.05, salary=0.0)
+
+
 @pytest.fixture
 def config() -> CalculationConfig:
     return CalculationConfig(
@@ -164,17 +178,32 @@ class TestTheSheetAndTheEngineAgree:
 
         assert ON_FORM == EVENT_KINDS
 
-    def test_a_blank_template_has_no_example_rows(self, tmp_path) -> None:
-        """이 시트는 비어 있는 것이 정상이다.
-
-        예시 줄을 남겨 두면 지우지 않은 채 돌아와, 있지도 않은 정산이 잡힌다.
-        오류 없이 그럴듯한 숫자가 나오는 쪽이라 예시를 아예 넣지 않는다.
-        """
+    def test_the_blank_form_shows_one_row_per_event_kind(self, tmp_path) -> None:
+        """무엇을 적는 칸인지 예시 없이는 알 수 없다."""
         from pension.rostertemplate import write_roster_template
 
         path = write_roster_template(tmp_path / "양식.xlsx")
         ws = openpyxl.load_workbook(path)["추가명부"]
-        assert ws.max_row == HEADER_ROW, "머리글 아래에 무언가 적혀 있다"
+        head = {str(c.value).strip(): c.column for c in ws[HEADER_ROW] if c.value}
+        kinds = [ws.cell(r, head["사건 구분"]).value
+                 for r in range(FIRST_DATA_ROW, FIRST_DATA_ROW + 3)]
+        assert kinds == [SETTLEMENT, MERGER, DISPOSAL]
+
+    def test_an_example_row_left_in_place_is_not_counted(self, tmp_path) -> None:
+        """이 시트는 비어 있는 것이 정상이라 예시가 남은 채 돌아오기 쉽다.
+
+        그대로 세면 있지도 않은 정산이 잡혀 증감표가 그 금액만큼 틀린다 —
+        오류 없이 그럴듯한 숫자가 나오는 쪽이다. 사번의 표시로 걸러낸다.
+        """
+        from pension.rostertemplate import EXAMPLE_MARK
+
+        member = _member(SETTLEMENT, dt.date(2025, 7, 1), paid=90_000_000)
+        member.employee_id = f"{EXAMPLE_MARK}A0007"
+        log = IssueLog()
+        outcome = measure_events([member], config_of(), assumptions_of(), log)
+        assert outcome.is_empty
+        assert outcome.skipped == 0, "예시 줄은 경고 없이 조용히 빠져야 한다"
+        assert log.warnings == []
 
     def test_a_workbook_without_the_sheet_reads_as_no_events(self, tmp_path) -> None:
         """대부분의 회사·대부분의 해에는 이런 일이 없다. 없는 것이 정상이다."""

@@ -67,6 +67,7 @@ from .standard_rates import (
     withdrawal_table,
 )
 from .yieldcurve import INVESTMENT_GRADES
+from .workbook import save_workbook
 
 __all__ = [
     "CURVE_TEMPLATE",
@@ -298,7 +299,7 @@ def write_standard_assumptions(
     )
 
     del wb["Sheet"]
-    wb.save(path)
+    save_workbook(wb, path)
     return path
 
 
@@ -362,7 +363,7 @@ def write_standard_table(path: str | Path) -> Path:
         ws.cell(last + 1, 1).font = note_font
 
     del wb["Sheet"]
-    wb.save(path)
+    save_workbook(wb, path)
     return path
 
 
@@ -459,7 +460,7 @@ def write_curve_template(path: str | Path, *,
                 ws.cell(row, column).fill = fill_input
                 ws.cell(row, column).number_format = "0.000"
 
-    wb.save(path)
+    save_workbook(wb, path)
     return path
 
 

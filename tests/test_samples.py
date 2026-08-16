@@ -649,7 +649,7 @@ class TestBaseDateFromTheScreen:
 
     def _roster_without_a_date(self, pack, tmp_path) -> Path:
         book = openpyxl.load_workbook(pack / ROSTER_TEMPLATE)
-        del book["기본정보"]         # 기준일이 적힌 유일한 자리
+        del book["기초자료"]         # 기준일이 적힌 유일한 자리
         target = tmp_path / "기준일없는명부.xlsx"
         book.save(target)
         return target

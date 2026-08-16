@@ -45,7 +45,8 @@ __all__ = [
 GENERAL_SHEET = "일반사항"
 #: 같은 내용을 담은 다른 시트 이름들. 새 양식은 규정과 자산을 갈라 두었다 —
 #: 한 시트에 규정·자산·기간이 섞여 있어 어디를 채울지 보이지 않았기 때문이다.
-GENERAL_SHEET_ALIASES: tuple[str, ...] = (GENERAL_SHEET, "사외적립자산", "퇴직급여규정")
+GENERAL_SHEET_ALIASES: tuple[str, ...] = (
+    GENERAL_SHEET, "예치금", "사외적립자산", "기초자료", "퇴직급여규정")
 
 #: 6번 항목의 행 배치. 자료요청서 서식이 고정되어 있어 행 번호로 찾는다.
 _ROWS = {
@@ -356,11 +357,15 @@ def _number(value: object) -> float:
     return _opt_number(value) or 0.0
 
 
-def _find_row(ws, needle: str, start: int = 1, limit: int = 200) -> int:
-    """``needle`` 이 들어간 첫 행. 못 찾으면 0."""
+def _find_row(ws, *needles: str, start: int = 1, limit: int = 200) -> int:
+    """``needles`` 중 하나가 들어간 첫 행. 못 찾으면 0.
+
+    표 제목을 바꿔도 옛 파일이 계속 읽혀야 해서 여러 이름을 받는다.
+    """
     for row in range(start, min(ws.max_row, limit) + 1):
         for col in range(1, min(ws.max_column, 8) + 1):
-            if needle in text(ws.cell(row, col).value):
+            label = text(ws.cell(row, col).value)
+            if any(needle in label for needle in needles):
                 return row
     return 0
 
@@ -419,16 +424,18 @@ def _amount_column(ws, header: int, *names: str) -> int:
 
 
 def _read_obligation(ws) -> ObligationMovement:
-    head = _find_row(ws, "퇴직급여추계액 변동내역")
+    head = _find_row(ws, "퇴직급여추계액 증감", "퇴직급여추계액 변동내역")
     result = ObligationMovement()
     if not head:
         return result
-    money = _amount_column(ws, head + 1, "금액") or 5
+    # 표 제목과 머리글 사이에 안내 줄이 들어가기도 한다. 두 줄을 다 본다.
+    money = (_amount_column(ws, head + 1, "금액")
+             or _amount_column(ws, head + 2, "금액") or 5)
 
     # 바로 다음 표(사외적립자산)에서 멈춘다. 회사가 줄을 하나만 끼워 넣어도
     # 고정 길이로 훑으면 그 표까지 넘어가는데, 거기에도 '계열사 전입' 같은
     # 이름이 그대로 있어 방금 읽은 금액을 0 으로 덮어쓴다.
-    stop = _find_row(ws, "사외적립자산 변동내역", start=head + 1) or (head + 14)
+    stop = _find_row(ws, "예치금 증감", "사외적립자산 변동내역", start=head + 1) or (head + 14)
     for row in range(head + 1, stop):
         label = _row_label(ws, row)
         if not label:
@@ -464,7 +471,8 @@ def _asset_columns(ws, header: int) -> _AssetColumns:
     # 칸을 두면 화면에서 표가 한 칸 밀린 것처럼 보이기 때문이다.
     for col in range(2, min(ws.max_column, 12) + 1):
         label = text(ws.cell(header, col).value)
-        if not db and ("DB퇴직연금" in label or "퇴직보험" in label):
+        if not db and ("예치금" in label or "DB퇴직연금" in label
+                       or "퇴직보험" in label):
             db = col
         if not pension and "국민연금전환금" in label:
             pension = col
@@ -493,7 +501,7 @@ def _asset_amount(ws, row: int, cols: _AssetColumns) -> float:
 
 
 def _read_assets(ws) -> AssetMovement:
-    head = _find_row(ws, "사외적립자산 변동내역")
+    head = _find_row(ws, "예치금 증감", "사외적립자산 변동내역")
     result = AssetMovement()
     if not head:
         return result
@@ -530,9 +538,15 @@ def _read_assets(ws) -> AssetMovement:
                     setattr(result, field_name, amount)
                 break
 
-    detail = _find_row(ws, "사외적립자산 세부내역")
+    detail = _find_row(ws, "예치금 구성", "사외적립자산 세부내역")
     if detail:
-        name_col = 2 if text(ws.cell(detail + 1, 2).value).startswith("자산") else 3
+        # 표 제목 바로 아래가 머리글이라는 보장이 없다 — 그 사이에 안내 줄이
+        # 한 줄 들어가기도 한다. 머리글을 이름으로 찾아 그 열을 쓴다.
+        head_row = _find_row(ws, "자산 분류", start=detail) or (detail + 1)
+        name_col = next(
+            (col for col in (2, 3)
+             if text(ws.cell(head_row, col).value).startswith("자산")), 3)
+        detail = head_row
         # 세부내역 다음에 오는 표에서 멈춘다. 고정 길이로 훑으면 그 표의 금액이
         # 자산 분류로 딸려 들어와, 분류별 합계가 기말 잔액과 어긋난다.
         stop = _find_row(ws, "그 밖의 입력", start=detail + 1) or (detail + 14)
@@ -644,9 +658,12 @@ def read_general_info(workbook) -> GeneralInfo:
     # 옛 양식은 규정·자산·기간이 한 시트에 섞여 있었고, 새 양식은 뜻이 다른
     # 것을 갈라 두 시트로 나눴다. 어느 쪽이든 읽는다.
     general = find_sheet(workbook, GENERAL_SHEET)
-    money_ws = find_sheet(workbook, "사외적립자산") or general
-    rules_ws = find_sheet(workbook, "퇴직급여규정") or general
-    basics_ws = find_sheet(workbook, "기본정보") or general
+    # '예치금' 은 지금 이름, '사외적립자산' 은 종전 이름이다. 퇴직금제도만 둔
+    # 단체는 사외적립자산이라는 말을 안 쓰므로 이름을 바꿨고, 옛 파일도 계속
+    # 읽어야 하므로 둘 다 본다. 규정·기본정보는 [기초자료] 한 장으로 합쳤다.
+    money_ws = find_sheet(workbook, "예치금", "사외적립자산") or general
+    rules_ws = find_sheet(workbook, "기초자료", "퇴직급여규정") or general
+    basics_ws = find_sheet(workbook, "기초자료", "기본정보") or general
     if general is None and money_ws is None and rules_ws is None:
         info.draft.unread.append("일반사항 시트가 없습니다")
         return info
