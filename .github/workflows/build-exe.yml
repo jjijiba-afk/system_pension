@@ -160,25 +160,8 @@ jobs:
             dist/연금계리산출_설치.exe
             dist/연금계리산출.zip
 
-      # 아티팩트는 서명된 임시 주소로 내려받게 돼 있어, 로그인 상태나 브라우저에
-      # 따라 'Failed to fetch' 로 막히는 일이 잦다(특히 아이패드·휴대폰).
-      # 릴리스 자산은 평범한 내려받기 주소라 그 문제가 없다. 그래서 개발 branch
-      # 에서도 **한 자리에** 최신 빌드를 얹어 둔다 — 태그마다 새로 나는 정식
-      # 릴리스와 달리, 이 하나를 계속 덮어쓴다.
-      - name: 최신 빌드를 릴리스로 (개발 branch)
-        if: startsWith(github.ref, 'refs/heads/claude/')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: 최신빌드
-          name: 최신 빌드 (개발 중)
-          prerelease: true
-          body: |
-            이 branch 의 가장 최근 빌드입니다. 커밋할 때마다 이 자리에서 갱신됩니다.
-
-            * `연금계리산출_설치.exe` — 설치 프로그램. 관리자 권한 없이 개인 계정에 깔립니다.
-            * `연금계리산출.zip` — 설치 없이 풀어서 바로 실행.
-
-            커밋 ${{ github.sha }}
-          files: |
-            dist/연금계리산출_설치.exe
-            dist/연금계리산출.zip
+      # 개발 branch 에서는 롤링 프리릴리스를 만들지 않는다. GitHub 가 릴리스
+      # 자산을 불변으로 두면서 같은 자리를 덮어쓰지 못하게 됐고("Cannot delete
+      # asset from an immutable release"), 그 한 스텝 때문에 나머지가 다 통과한
+      # 회차도 빨간불이 됐다. 배포는 웹앱(Pages)으로 하고, 실행파일이 필요하면
+      # 위의 아티팩트나 태그(v*) 로 낸 정식 릴리스를 쓴다.
