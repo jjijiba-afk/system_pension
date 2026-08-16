@@ -95,7 +95,8 @@ def value_longterm_member(
         name=member.name,
         job_group=member.job_group,
         age=member.age,
-        past_service=member.service_years(config.base_date),
+        # 장기근속포상은 중간정산을 보지 않는다. 기산일이 다르다.
+        past_service=member.longterm_service_years(config.base_date),
         daily_base_pay=daily,
     )
 
@@ -246,7 +247,7 @@ def _anniversary_delay(item, member, config, target_service: float) -> float:
     """
     if not item.anniversary:
         return 0.0
-    start = member.settlement_date or member.hire_date
+    start = member.longterm_start_date or member.hire_date
     if start is None:
         return 0.0
     month, day = (int(part) for part in item.anniversary.split("-"))

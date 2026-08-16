@@ -160,6 +160,14 @@ class ActiveMember:
     @property
     def has_period(self) -> bool:
         return self.period_start is not None or self.period_end is not None
+    longterm_start_date: _dt.date | None = None
+    """장기근속포상 근속의 기산일. 비면 **입사일** 을 쓴다.
+
+    퇴직급여와 기산일이 다르다. 퇴직금을 중간정산했다고 근속포상 시계가 0 으로
+    돌아가지는 않기 때문이다 — 중간정산은 이미 지급한 퇴직금을 정산한 것이지
+    근속을 끊은 것이 아니다. 실제 자료요청서들도 이 칸을 따로 받는다
+    ('장기근속포상 기산일 (※ 일반적으로 입사일)').
+    """
     service_add_years: float = 0.0
     """지급률 근속에만 **더하는** 가산근속연수(군경력·특례 인정 등).
 
@@ -244,9 +252,24 @@ class ActiveMember:
         return self._service_years(base_date, FRACTION_KEEP)
 
     def _service_years(self, base_date: _dt.date, fraction: str) -> float:
+        return self._years_from(
+            self.settlement_date or self.hire_date, base_date, fraction)
+
+    def longterm_service_years(self, base_date: _dt.date) -> float:
+        """장기근속포상 근속연수. **중간정산을 보지 않는다.**
+
+        기산일은 명부의 :attr:`longterm_start_date`, 없으면 입사일이다.
+        중간정산일부터 세면 중간정산이 있는 회사에서 10년·20년 포상을 통째로
+        놓쳐 장기급여채무가 크게 과소계상된다.
+        """
+        return self._years_from(
+            self.longterm_start_date or self.hire_date, base_date,
+            self.service_fraction)
+
+    def _years_from(self, start: _dt.date | None, base_date: _dt.date,
+                    fraction: str) -> float:
         from .actuarial import service_years as _service_years
 
-        start = self.settlement_date or self.hire_date
         if start is None or base_date < start:
             return 0.0
         return _service_years(

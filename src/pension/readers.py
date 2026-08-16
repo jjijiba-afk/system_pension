@@ -421,6 +421,12 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog) -> li
         member.extra_pay_base_wage = _number(get("extra_pay_base_wage"))
         member.progressive_service = _number(get("progressive_service"))
         member.progressive_rate = _number(get("progressive_rate"))
+        # 장기근속포상 근속의 기산일. 비면 입사일을 쓴다(중간정산일이 아니다).
+        member.longterm_start_date = _read_date(
+            get("longterm_start_date"), config, log,
+            col=_col_of(cols, "longterm_start_date"),
+            code="JAE_LONGTERM_START_DATE", required=False, **kw,
+        )
         member.service_add_years = _number(get("service_add_years"))
         member.service_deduct_years = _number(get("service_deduct_years"))
 

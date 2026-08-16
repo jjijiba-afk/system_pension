@@ -154,3 +154,58 @@ def test_end_to_end_longterm_is_calculated(
     assert run.longterm is not None
     assert run.longterm.headcount == 2  # 명부에서 'Y' 인 두 명
     assert run.longterm.dbo > 0
+
+
+class TestLongTermServiceIgnoresSettlement:
+    """장기근속포상 근속은 **중간정산을 보지 않는다.**
+
+    퇴직금을 중간정산했다고 근속포상 시계가 0 으로 돌아가지 않는다. 중간정산은
+    이미 지급한 퇴직금을 정산한 것이지 근속을 끊은 것이 아니다. 종전에는
+    퇴직급여와 같은 기산일(중간정산일)을 써서, 중간정산이 있는 회사의
+    10년·20년 포상을 통째로 놓쳤다 — 장기급여채무가 크게 과소계상됐다.
+
+    실제 자료요청서들도 이 칸을 따로 받는다
+    ('장기근속포상 기산일 (※ 일반적으로 입사일)').
+    """
+
+    def _member(self, **kw):
+        member = ActiveMember(seq=1, row=26)
+        member.employee_id = "A1"
+        member.gender = Gender.MALE
+        member.birth_date = dt.date(1980, 1, 1)
+        member.hire_date = dt.date(2010, 1, 1)      # 근속 16년
+        member.settlement_date = dt.date(2022, 1, 1)  # 중간정산 후로는 4년
+        member.monthly_wage = 3_000_000
+        member.daily_base_pay = 100_000
+        member.plan = BenefitPlan.DB
+        member.job_group = "정규직"
+        member.job_group_index = 0
+        member.longterm_target = "Y"
+        member.age = 46
+        member.longterm_nra = 60
+        member.rules = RateRules(longterm_benefit="포상", longterm_withdrawal="기본",
+                                 longterm_salary_increase="기본")
+        for name, value in kw.items():
+            setattr(member, name, value)
+        return member
+
+    def test_service_is_counted_from_the_hire_date(self, config, assumptions) -> None:
+        result = value_longterm_member(self._member(), config, assumptions)
+        # 중간정산일부터 세면 4년이 되어 10년 포상을 아직 못 받은 것이 된다.
+        assert result.past_service == pytest.approx(16.0, abs=0.02)
+
+    def test_a_declared_start_date_wins(self, config, assumptions) -> None:
+        """명부에 장기급여 기산일이 적혀 있으면 그것을 쓴다."""
+        member = self._member(longterm_start_date=dt.date(2005, 1, 1))
+        result = value_longterm_member(member, config, assumptions)
+        assert result.past_service == pytest.approx(21.0, abs=0.02)
+
+    def test_the_settlement_no_longer_shrinks_the_liability(
+        self, config, assumptions
+    ) -> None:
+        """중간정산이 있든 없든 장기급여채무는 같아야 한다."""
+        with_settlement = value_longterm_member(self._member(), config, assumptions)
+        without = value_longterm_member(
+            self._member(settlement_date=None), config, assumptions)
+        assert with_settlement.dbo == pytest.approx(without.dbo)
+        assert with_settlement.dbo > 0
