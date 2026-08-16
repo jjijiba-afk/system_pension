@@ -460,8 +460,20 @@ def build() -> Path:
 
     # index.html 에 휠 목록을 심는다. 파일명이 버전을 담고 있으므로 하드코딩하면
     # 버전을 올릴 때마다 손으로 고쳐야 한다.
+    #
+    # 이름 뒤에 **내용 해시** 를 붙인다 (`이름.whl?v=해시`). 우리 휠은 버전
+    # 번호가 그대로인 채 내용만 바뀌므로, 주소가 같으면 캐시 우선 정책이 옛
+    # 휠을 계속 내준다 — 새 화면(app.js)에 옛 엔진이 붙는 반쪽 업데이트가
+    # 실제로 났다. 주소가 내용을 따라 바뀌면 화면이 요구하는 엔진 판이
+    # 정확히 그 판으로 받아진다 (안 바뀐 휠은 해시가 같아 캐시를 그대로 쓴다).
+    import hashlib as _hashlib
+
+    stamped = [
+        f"{name}?v={_hashlib.md5((DIST / 'wheels' / name).read_bytes()).hexdigest()[:10]}"
+        for name in wheels
+    ]
     page = (DIST / "index.html").read_text(encoding="utf-8")
-    page = page.replace("__WHEELS__", json.dumps(wheels, ensure_ascii=False))
+    page = page.replace("__WHEELS__", json.dumps(stamped, ensure_ascii=False))
     (DIST / "index.html").write_text(page, encoding="utf-8")
 
     # 서비스워커 — 내용 해시를 캐시 이름에 넣어 앱을 고치면 캐시가 자연히 갈린다.

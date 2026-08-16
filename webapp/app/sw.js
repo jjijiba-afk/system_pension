@@ -77,8 +77,11 @@ self.addEventListener("fetch", (event) => {
 
   // 런타임·휠·아이콘. 캐시에 있으면 그대로, 없으면 받아서 넣어 둔다. 설치 때
   // 미리 받지 않으므로 여기서 채워야 다음부터 네트워크 없이 돈다.
+  //
+  // 여기서는 ?v= 붙은 주소를 **그대로** 대조한다 — 휠 주소의 v 가 내용
+  // 해시라, 이걸 무시하면 옛 휠이 새 화면에 물리는 반쪽 업데이트가 난다.
   event.respondWith(
-    caches.match(event.request, { ignoreSearch: true }).then((hit) => {
+    caches.match(event.request).then((hit) => {
       if (hit) return hit;
       return fetch(event.request).then((response) => {
         if (response.ok && response.type === "basic") {

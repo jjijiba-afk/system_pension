@@ -175,8 +175,11 @@ async function boot() {
     pyodide.FS.mkdirTree("/wheels");
     pyodide.FS.mkdirTree("/work");
     for (const wheel of WHEELS) {
+      // 목록 항목은 `이름.whl?v=내용해시` — 주소가 내용을 따라 바뀌어, 캐시가
+      // 옛 엔진을 새 화면에 물려 주는 반쪽 업데이트가 원천적으로 없다.
+      const [file] = wheel.split("?");
       const payload = await (await fetch("wheels/" + wheel)).arrayBuffer();
-      pyodide.FS.writeFile("/wheels/" + wheel, new Uint8Array(payload));
+      pyodide.FS.writeFile("/wheels/" + file, new Uint8Array(payload));
     }
     // 순수 파이썬 휠은 압축을 풀어 놓기만 하면 된다. micropip 없이도 확정적이다.
     await pyodide.runPythonAsync(`
@@ -3578,6 +3581,15 @@ try {
 } catch (err) {
   showIntro();      // 저장을 못 하는 브라우저에서도 안내는 보여야 한다
 }
+
+// 새로고침·탭 닫기 경고 — 산출 결과와 만들어 둔 시험 명부는 메모리에만
+// 있어, 떠나면 사라진다. 저장 안 된 작업이 있을 때만 묻는다 (앱 업데이트도
+// 새로고침 때 적용되므로, 이 물음이 곧 "업데이트 전 마지막 확인" 이 된다).
+window.addEventListener("beforeunload", (event) => {
+  if (!lastRun && !generated && !features) return;
+  event.preventDefault();
+  event.returnValue = "";      // 브라우저 표준 문구가 뜬다
+});
 
 document.getElementById("help-open").addEventListener("click", openHelp);
 document.getElementById("help-close").addEventListener("click", closeHelp);
