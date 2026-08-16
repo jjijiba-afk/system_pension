@@ -308,7 +308,7 @@ def _preset_save(request: dict) -> dict[str, Any]:
     """
     name = text(request.get("name"))
     if not name:
-        raise ValueError("가정세트 이름을 입력하세요 (예: A사 퇴직금규정)")
+        raise ValueError("가정세트 이름을 입력하십시오 (예: A사 퇴직금규정)")
     problems = form.state_problems(request["state"])
     if problems:
         return {"problems": problems, "saved": False}
@@ -603,7 +603,7 @@ def _general_info(request: dict) -> dict[str, Any]:
     if not assets.is_empty() and round(assets.difference) != 0:
         problems.append(
             f"예치금 증감이 {assets.difference:,.0f}원 맞지 않습니다. "
-            "회사가 보내온 표를 확인하세요"
+            "회사가 보내온 표를 확인하십시오"
         )
 
     return {
@@ -913,7 +913,7 @@ def _member_detail(request: dict) -> dict[str, Any]:
         assumptions_path = (text(request.get("assumptions"))
                             or text(last.get("assumptions")))
         if not roster_path or not Path(roster_path).exists():
-            raise ValueError("먼저 산출을 실행하거나 저장된 산출을 고르세요")
+            raise ValueError("먼저 산출을 실행하거나 저장된 산출을 선택하십시오")
         base_date = _as_date(request.get("base_date") or last.get("base_date"))
 
     return lookup(
@@ -930,7 +930,7 @@ def _dashboard(request: dict) -> dict[str, Any]:
     from .dashboard import build
 
     if not _LAST_RUN:
-        raise ValueError("먼저 산출을 실행하세요. 분석 화면은 방금 산출한 결과를 봅니다")
+        raise ValueError("먼저 산출을 실행하십시오. 분석 화면은 방금 산출한 결과를 봅니다")
     return build(_LAST_RUN["run"], text(request.get("employee_id")))
 
 
@@ -942,7 +942,7 @@ def _report_html(request: dict) -> dict[str, Any]:
     from .webreport import REPORT_KINDS, render_html
 
     if not _LAST_RUN:
-        raise ValueError("먼저 산출을 실행하세요. 보고서는 방금 산출한 결과로 만듭니다")
+        raise ValueError("먼저 산출을 실행하십시오. 보고서는 방금 산출한 결과로 만듭니다")
     run = _LAST_RUN["run"]
     remembered = _LAST_RUN.get("request") or {}
 
@@ -1257,7 +1257,7 @@ def _backup_import(request: dict) -> dict[str, Any]:
         if _BACKUP_MARK not in names:
             raise ValueError(
                 "이 앱에서 내보낸 보관함 파일이 아닙니다 "
-                "(연금계리보관함_YYYYMMDD.zip 을 고르세요)"
+                "(연금계리보관함_YYYYMMDD.zip 을 선택하십시오)"
             )
         if request.get("replace"):
             for child in home.iterdir():

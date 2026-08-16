@@ -202,7 +202,7 @@ from pension.webui import api
     refreshRuns();
     syncRunPages();
 
-    status("준비 완료. 명부를 고르고 기초율을 정한 뒤 [산출 실행]을 누르세요.");
+    status("준비 완료. 명부를 고르고 기초율을 정한 뒤 [산출 실행]을 누르십시오.");
     $("run").disabled = false;
     // 화면이 다 뜬 뒤에 묻는다. 이것 때문에 부팅이 늦어질 이유가 없다.
     askForPersistentStorage();
@@ -485,7 +485,7 @@ function gridColumns(sheet) {
 }
 
 function addGridColumn(sheet) {
-  const name = prompt("항목 이름을 정하세요. (예: 사망가산, 금, 특별상여)", "");
+  const name = prompt("항목 이름을 지정하십시오. (예: 사망가산, 금, 특별상여)", "");
   if (name === null) return;
   const clean = name.trim();
   if (!clean) return;
@@ -715,7 +715,7 @@ async function loadGeneralInfo() {
     if (info.unread.length) lines.push("확인 필요: " + info.unread.join(", "));
     $("payout-evidence").textContent = lines.join("  |  ") || "읽어낸 항목이 없습니다.";
     if (info.unread.length) {
-      alert("규정에서 읽지 못한 항목이 있습니다. 직접 채워 주세요.\n\n· "
+      alert("규정에서 읽지 못한 항목이 있습니다. 직접 기입해 주십시오.\n\n· "
             + info.unread.join("\n· "));
     }
   } catch (error) {
@@ -1059,7 +1059,7 @@ function buildMapTab(page) {
     el("div", { class: "hint" },
        "명부 직군이 곧 산출 직군입니다 — 퇴직률·승급률·사망률·정년이 이 " +
        "단위로 걸립니다. 지급률 규정(재직자명부 [규정명] 칸)은 별개의 축이라 " +
-       "무관하게 [지급률] 열로 갑니다. 임원 판정만 여기서 확인하세요."),
+       "무관하게 [지급률] 열로 갑니다. 임원 판정만 여기서 확인하십시오."),
     toolbar, mapSummary, el("div", { class: "scroll-x" }, table));
 }
 
@@ -1171,7 +1171,7 @@ function renderState(state) {
 // 직군을 바꾸면 값은 직군 이름으로 이어받는다. 이름이 사라진 직군의 값은 버린다.
 function applyGroups(names) {
   const cleaned = names.map((n) => n.trim()).filter(Boolean);
-  if (!cleaned.length) { alert("직군을 하나 이상 입력하세요."); return; }
+  if (!cleaned.length) { alert("직군을 하나 이상 입력하십시오."); return; }
   if (new Set(cleaned).size !== cleaned.length) {
     alert("같은 직군 이름이 두 번 들어갔습니다."); return;
   }
@@ -1206,7 +1206,7 @@ $("ed-groups-roster").addEventListener("click", async () => {
     const result = py("roster_groups", { path });
     if (!result.groups.length) {
       alert("명부에서 직군을 찾지 못했습니다.\n\n"
-            + "[기본정보] 의 직군 규칙, 또는 재직자명부의 [직군] 칸을 확인하세요.");
+            + "[기본정보] 의 직군 규칙, 또는 재직자명부의 [직군] 칸을 확인하십시오.");
       return;
     }
     // 직군과 지급규정은 별개의 축이다. 직군은 퇴직률·승급률·정년(지급규정)
@@ -1302,7 +1302,7 @@ $("ed-groups-roster").addEventListener("click", async () => {
     const notes = [];
     if (result.rules?.length && !result.rule_column) {
       notes.push("재직자명부에서 규정명 칸을 찾지 못했습니다. 그 칸의 머리글이 "
-                 + "아래에 있는지 확인하세요.\n\n"
+                 + "아래에 있는지 확인하십시오.\n\n"
                  + (result.headers?.length ? result.headers.join("\n") : ""));
     }
     if (result.blank_rule) {
@@ -1313,7 +1313,7 @@ $("ed-groups-roster").addEventListener("click", async () => {
       notes.push(`[${result.extra_pay_column}] 에 금액이 적힌 사람이 `
                  + `${result.extra_pay}명 있습니다. 이 금액은 저절로 더해지지 `
                  + "않습니다 — 사망 위로금이라면 [퇴직사유] 탭에서 사유를 사망으로 "
-                 + "두고 가산액에 적으세요.");
+                 + "두고 가산액에 기재하십시오.");
     }
     if (notes.length) alert(notes.join("\n\n"));
   } catch (error) {
@@ -1325,13 +1325,13 @@ $("ed-groups-roster").addEventListener("click", async () => {
 // 지급률·지급규정·직군 매핑까지 통째로 저장해 두고 다음 결산에 그대로 쓴다.
 $("ed-preset-save").addEventListener("click", async () => {
   const suggestion = $("ed-preset").value || "";
-  const name = prompt("가정세트 이름을 정하세요. (예: A사 퇴직금규정)", suggestion);
+  const name = prompt("가정세트 이름을 지정하십시오. (예: A사 퇴직금규정)", suggestion);
   if (name === null || !name.trim()) return;
   try {
     flushEditor();
     const result = py("preset_save", { name: name.trim(), state: collectState() });
     if (!result.saved) {
-      alert("저장하기 전에 고쳐 주세요.\n\n· " + result.problems.join("\n· "));
+      alert("저장하기 전에 수정해 주십시오.\n\n· " + result.problems.join("\n· "));
       return;
     }
     await persistHome();
@@ -1395,7 +1395,7 @@ $("ed-rates-load").addEventListener("click", () => {
       (name === "__builtin__"
         ? `내장 표준률 ${META.standard_year} (${size})`
         : `표준률 '${name}'`) +
-      " 을(를) 불러왔습니다. 회사에 맞게 고친 뒤 쓰세요.";
+      " 을(를) 불러왔습니다. 회사에 맞게 수정한 뒤 사용하십시오.";
   } catch (error) {
     alert(error.message);
   }
@@ -1438,7 +1438,7 @@ $("ed-curve-apply").addEventListener("click", () => {
 $("ed-example").addEventListener("click", () => {
   renderState(py("state_example", { groups }).state);
   saveEditorLocal();
-  $("ed-status").textContent = "예시 값을 채웠습니다. 회사 규정에 맞게 고쳐 주세요.";
+  $("ed-status").textContent = "예시 값을 채웠습니다. 회사 규정에 맞게 수정해 주십시오.";
 });
 
 $("ed-load").addEventListener("change", async () => {
@@ -1462,7 +1462,7 @@ $("ed-save").addEventListener("click", () => {
     const result = py("state_write", { state: collectState(), path: "/work/산출가정.xlsx" });
     if (!result.written) {
       $("ed-problems").append(el("div", { class: "error" },
-        "저장하기 전에 고쳐 주세요.\n\n· " + result.problems.join("\n· ")));
+        "저장하기 전에 수정해 주십시오.\n\n· " + result.problems.join("\n· ")));
       return;
     }
     saveEditorLocal();
@@ -1635,7 +1635,7 @@ function renderLibraryList(kind, data, target, options = {}) {
 
 async function registerAsset(kind, fileInput, nameInput) {
   const file = fileInput.files[0];
-  if (!file) { alert("먼저 파일을 골라 주세요."); return; }
+  if (!file) { alert("먼저 파일을 선택해 주십시오."); return; }
   try {
     await intoFS(file, "/work/등록원본.xlsx");
     const name = nameInput.value.trim() || file.name.replace(/\.(xlsx|xlsm)$/i, "");
@@ -1760,9 +1760,9 @@ async function fillFromGeneralSheet() {
 
 $("roster-save").addEventListener("click", async () => {
   const file = $("roster").files[0];
-  if (!file) { alert("먼저 명부 파일을 고르세요."); return; }
+  if (!file) { alert("먼저 명부 파일을 선택하십시오."); return; }
   const suggestion = file.name.replace(/\.(xls|xlsx|xlsm)$/i, "");
-  const name = prompt("목록에 표시할 이름을 정하세요.", suggestion);
+  const name = prompt("목록에 표시할 이름을 지정하십시오.", suggestion);
   if (name === null) return;
   try {
     const path = await rosterIntoFS();
@@ -1793,7 +1793,7 @@ $("roster-export").addEventListener("click", async () => {
       // 말해 주지 않으면 '왜 여기 있지' 로 끝난다.
       alert("알아보지 못한 열은 오른쪽에 그대로 붙였습니다.\n"
             + "회사가 쓰는 열이면 그대로 두셔도 되고, 우리 열과 같은 뜻이면 "
-            + "머리글을 우리 이름으로 고쳐 주세요.\n\n"
+            + "머리글을 우리 이름으로 수정해 주십시오.\n\n"
             + made.carried.join("\n"));
     }
   } catch (error) {
@@ -1866,7 +1866,7 @@ let loadedRun = null;   // {name, roster, assumptions, rosterName}
 let lastRun = null;     // 방금 마친 산출 — 저장 버튼이 이것을 보관한다
 
 // 보고서·사번 조회 탭은 산출이 있어야 쓸 수 있다. 눌러 본 뒤에 '먼저 산출을
-// 실행하세요' 라고 하는 대신, 탭을 열자마자 지금 무엇을 볼 수 있는지 알린다.
+// 실행하십시오' 라고 하는 대신, 탭을 열자마자 지금 무엇을 볼 수 있는지 알린다.
 function syncRunPages() {
   const ready = Boolean(lastRun);
   for (const id of ["report-empty", "member-empty"]) {
@@ -1890,7 +1890,7 @@ async function rosterIntoFS() {
   const saved = $("roster-saved").value;
   if (saved) return py("library_path", { kind: "명부", name: saved }).path;
   if (loadedRun) return loadedRun.roster;
-  throw new Error("[산출] 탭에서 명부 파일을 고르거나 저장된 명부를 선택하세요.");
+  throw new Error("[산출] 탭에서 명부 파일을 고르거나 저장된 명부를 선택하십시오.");
 }
 
 function currentRosterName() {
@@ -1912,7 +1912,7 @@ $("form").addEventListener("submit", async (event) => {
     if ($("asrc-editor").checked) {
       const saved = py("state_write", { state: collectState(), path: assumptionsPath });
       if (!saved.written) {
-        status("산출가정 입력에 문제가 있습니다. [산출가정 입력] 탭을 확인하세요.");
+        status("산출가정 입력에 문제가 있습니다. [산출가정 입력] 탭을 확인하십시오.");
         $("errors").append(el("div", { class: "error" }, "· " + saved.problems.join("\n· ")));
         return;
       }
@@ -1921,7 +1921,7 @@ $("form").addEventListener("submit", async (event) => {
       assumptionsPath = loadedRun.assumptions;
     } else {
       const file = $("assumptions").files[0];
-      if (!file) throw new Error("기초율 파일을 고르거나, 산출가정 입력 화면을 사용하세요.");
+      if (!file) throw new Error("기초율 파일을 고르거나, 산출가정 입력 화면을 사용하십시오.");
       await intoFS(file, assumptionsPath);
     }
 
@@ -2525,7 +2525,7 @@ function drawDashLongterm() {
   if (!roll.length && !t.lt_head) {
     $("dash-lt").innerHTML = `<tr><td class="hint">${
       DASH_DATA.has_longterm
-        ? "장기급여 대상자가 없습니다. 명부의 [장기급여 대상] 열과 장기급여 지급률 규정을 확인하세요."
+        ? "장기급여 대상자가 없습니다. 명부의 [장기급여 대상] 열과 장기급여 지급률 규정을 확인하십시오."
         : "장기급여를 끄고 산출했습니다. [산출] 탭 옵션에서 켜세요."}</td></tr>`;
     return;
   }
@@ -2563,8 +2563,51 @@ $("dash-emp").addEventListener("keydown", (e) => {
 // 표지부터 용어정리까지 갖춘 인쇄용 HTML 을 파이썬이 만들고, 여기서는
 // 미리보기(iframe)와 인쇄만 한다. 인쇄 화면에서 PDF 로 저장하면 끝이다.
 
+// ── 문서 보기 ────────────────────────────────────────────────────
+// 사용설명서·계리방법론을 보고서와 **같은 창** 에서 읽는다. 링크로 두면 눌렀을
+// 때 곧바로 내려받기로 넘어가, 화면에서 훑어보려던 사람이 파일부터 받게 된다.
+
+/** 문자열을 그대로 파일로 내려준다 — 엔진(FS)을 거치지 않는다. */
+function saveText(text, filename, mime) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([text], { type: mime }));
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 30000);
+}
+
+async function showDoc(name) {
+  try {
+    status(`${name} 을(를) 여는 중…`);
+    const [page, source] = await Promise.all([
+      fetch(`${name}.html`).then((r) => r.text()),
+      fetch(`${name}.md`).then((r) => r.text()),
+    ]);
+    $("print-title").textContent = name;
+    const frame = $("print-frame");
+    frame.srcdoc = page;
+    $("print-go").onclick = () => {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    };
+    $("print-download").onclick = () =>
+      saveText(page, `${name}.html`, "text/html");
+    const md = $("print-source");
+    md.hidden = false;
+    md.onclick = () => saveText(source, `${name}.md`, "text/markdown");
+    $("print-dialog").showModal();
+    status(`${name} 을(를) 열었습니다.`);
+  } catch (error) {
+    alert("문서를 열지 못했습니다.\n\n" + (error.message || error));
+  }
+}
+
+document.querySelectorAll("#lib-docs button[data-doc]").forEach((button) => {
+  button.addEventListener("click", () => showDoc(button.dataset.doc));
+});
+
 function showValuationReport(kind) {
-  if (!lastRun) { alert("먼저 산출을 실행하세요."); return; }
+  if (!lastRun) { alert("먼저 산출을 실행하십시오."); return; }
   try {
     const { path, filename } = py("report_html", { kind, client: CLIENT, work: "/work" });
     const page = new TextDecoder().decode(pyodide.FS.readFile(path));
@@ -2576,6 +2619,7 @@ function showValuationReport(kind) {
       frame.contentWindow.print();
     };
     $("print-download").onclick = () => download(path, filename, "text/html");
+    $("print-source").hidden = true;      // 보고서에는 원본(.md) 이 없다
     $("print-dialog").showModal();
   } catch (error) {
     alert(error.message);
@@ -2781,13 +2825,14 @@ $("member-print").addEventListener("click", () => {
     frame.contentWindow.print();
   };
   $("print-download").onclick = () => download(path, filename, "text/html");
+  $("print-source").hidden = true;
   $("print-dialog").showModal();
 });
 
 $("lookup-run").addEventListener("click", () => {
   const id = $("lookup-id").value.trim();
-  if (!id) { alert("사번 또는 성명을 입력하세요."); return; }
-  if (!lastRun) { alert("먼저 산출을 실행하세요."); return; }
+  if (!id) { alert("사번 또는 성명을 입력하십시오."); return; }
+  if (!lastRun) { alert("먼저 산출을 실행하십시오."); return; }
   showMemberDetail({ employee_id: id }, "방금 산출한 명부·기초율");
 });
 
@@ -2796,9 +2841,9 @@ $("lookup-run").addEventListener("click", () => {
 // "2412 1번단체" 를 저장해 두면 다음 결산 때 전기 입력을 그대로 끌어온다.
 
 $("run-save").addEventListener("click", async () => {
-  if (!lastRun) { alert("먼저 산출을 실행하세요."); return; }
+  if (!lastRun) { alert("먼저 산출을 실행하십시오."); return; }
   const name = $("run-name").value.trim();
-  if (!name) { alert("산출명을 입력하세요. 예: 2412 1번단체"); return; }
+  if (!name) { alert("산출명을 입력하십시오. 예: 2412 1번단체"); return; }
   try {
     py("run_save", {
       name, roster: lastRun.roster, assumptions: lastRun.assumptions,
@@ -3136,7 +3181,7 @@ function showRun(name) {
     $("run-dl-members").onclick = () => downloadRunFile(name, "개인별결과.xlsx");
     $("run-lookup-go").onclick = () => {
       const id = $("run-lookup-id").value.trim();
-      if (!id) { alert("사번을 입력하세요."); return; }
+      if (!id) { alert("사번을 입력하십시오."); return; }
       showMemberDetail({ name, employee_id: id }, `저장된 산출 '${name}'`);
     };
     $("run-dialog").showModal();
@@ -3191,7 +3236,7 @@ $("backup-export").addEventListener("click", async () => {
 
 async function importBackup(replace) {
   const file = $("backup-file").files[0];
-  if (!file) { alert("먼저 보관함 zip 파일을 고르세요."); return; }
+  if (!file) { alert("먼저 보관함 zip 파일을 선택하십시오."); return; }
   if (replace && !confirm(
     "지금 이 기기의 등록 자료와 산출 내역을 모두 지우고 보관함 내용으로 바꿉니다.\n계속할까요?")) return;
   try {
@@ -3256,7 +3301,7 @@ $("lock-ok").addEventListener("click", () => {
     // 안 풀리는 것처럼 보인다. 그 경우를 갈라서 말해 준다.
     $("lock-msg").textContent = message.includes("비밀번호")
       ? message
-      : "앱이 이전 버전으로 떠 있습니다 — 화면을 새로고침한 뒤 다시 시도하세요. ("
+      : "앱이 이전 버전으로 떠 있습니다 — 화면을 새로고침한 뒤 다시 시도하십시오. ("
         + message + ")";
     return;
   }
@@ -3364,7 +3409,7 @@ function useGenerated(item) {
   $("tab-calc").click();
   // 시험 명부에도 [일반사항] 이 들어 있다. 올린 파일과 똑같이 채워 준다.
   fillFromGeneralSheet();
-  status(`시험 명부 '${item.title}' 을(를) 산출 탭에 넣었습니다. [산출 실행]을 누르세요.`);
+  status(`시험 명부 '${item.title}' 을(를) 산출 탭에 넣었습니다. [산출 실행]을 누르십시오.`);
 }
 
 function showReport(item) {

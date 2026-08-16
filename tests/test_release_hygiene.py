@@ -636,8 +636,17 @@ class TestPrintablePages:
 
     @pytest.mark.skipif(not (ROOT / "webapp/dist/index.html").exists(),
                         reason="webapp/build.py 를 먼저 실행")
-    def test_the_library_links_to_them(self) -> None:
+    def test_the_library_opens_them_on_screen(self) -> None:
+        """자료실에서 눌렀을 때 **화면에서 열려야** 한다.
+
+        링크로 두면 누르는 즉시 내려받기로 넘어간다 — 훑어보려던 사람이
+        파일부터 받게 된다. 보고서와 같은 창에서 읽고, 그 창에서 받는다.
+        """
         page = (ROOT / "webapp/dist/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "webapp/dist/app.js").read_text(encoding="utf-8")
         for name in ("사용설명서", "계리방법론"):
-            assert f'href="{name}.html"' in page, name
-            assert f'download="{name}.md"' in page, name
+            assert f'data-doc="{name}"' in page, name
+        assert "showDoc" in script
+        # 열린 창에서 인쇄(PDF)와 원본 내려받기가 모두 가능해야 한다.
+        assert 'id="print-source"' in page
+        assert "saveText" in script

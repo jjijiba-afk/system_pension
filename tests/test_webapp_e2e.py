@@ -1476,18 +1476,22 @@ def test_the_manuals_download_from_the_library(page, tmp_path) -> None:
     page.click("#tab-lib")
     open_section(page, "#lib-docs")
 
-    for name in ("사용설명서.md", "계리방법론.md"):
-        link = page.locator(f'#lib-docs a[download="{name}"]')
-        assert link.count() == 1, name
+    for name in ("사용설명서", "계리방법론"):
+        # 화면에서 먼저 읽고(보고서와 같은 창), 그 창에서 원본을 받는다.
+        page.click(f'#lib-docs button[data-doc="{name}"]')
+        page.wait_for_selector("#print-dialog[open]", timeout=60_000)
+        assert page.locator("#print-title").inner_text().strip() == name
         with page.expect_download(timeout=60_000) as got:
-            link.click()
+            page.click("#print-source")
         made = got.value
-        saved = tmp_path / name
+        saved = tmp_path / f"{name}.md"
         made.save_as(str(saved))
         text = saved.read_text(encoding="utf-8")
         assert len(text.splitlines()) > 100, name
         # 주소가 실려 나가면 문서만 돌아다녀도 주소까지 같이 돈다.
         assert "http" not in text, name
+        page.click("#print-dialog .toolbar button:last-child")
+        page.wait_for_selector("#print-dialog[open]", state="detached", timeout=10_000)
 
     # 물음표 안의 설명과 같은 문서여야 한다.
     manual = (tmp_path / "사용설명서.md").read_text(encoding="utf-8")
