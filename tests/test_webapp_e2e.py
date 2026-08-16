@@ -1419,6 +1419,63 @@ def test_help_opens_over_the_screen(page) -> None:
     assert page.input_value("#base_date") == "2025-12-31"
 
 
+def test_it_runs_with_the_network_cut(browser, tmp_path) -> None:
+    """한 번 열어 둔 기기는 **인터넷 없이도** 돌아야 한다.
+
+    이 앱을 쓰는 자리는 사내망이거나 회선이 나쁜 곳이다. 화면만 뜨고 엔진이
+    없으면 아무 소용이 없는데, 실제로 그랬다 — 서비스워커가 화면 파일만
+    캐시하고 런타임(14MB)·휠은 한 번도 담지 않아, 회선을 끊으면
+    `pyodide.asm.wasm` 부터 실패했다. 화면이 다 뜬 뒤 무거운 것을 하나씩
+    채우게 고쳤고, 여기서 **서버를 완전히 내린 채** 다시 열어 확인한다.
+    """
+    import http.server
+    import shutil
+    import threading
+
+    site = tmp_path / "site"
+    shutil.copytree(DIST, site)
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(site))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+    stopped = False
+    context = browser.new_context()
+    try:
+        page = context.new_page()
+        page.goto(url)
+        page.wait_for_selector("#run:not([disabled])", timeout=180_000)
+        # 오프라인 채비가 끝날 때까지 — 런타임과 휠이 모두 캐시에 담겨야 한다.
+        page.wait_for_function("""async () => {
+            const names = await caches.keys();
+            if (!names.length) return false;
+            const box = await caches.open(names[0]);
+            const urls = (await box.keys()).map((r) => r.url);
+            return urls.some((u) => u.includes('pyodide.asm.wasm'))
+                && urls.some((u) => u.includes('python_stdlib'))
+                && urls.filter((u) => u.includes('/wheels/')).length >= 4;
+        }""", timeout=180_000)
+        page.close()
+
+        # 서버를 내린다 — 캐시에 없는 것은 이제 어디서도 받을 수 없다.
+        server.shutdown()
+        server.server_close()
+        stopped = True
+        context.set_offline(True)
+
+        offline = context.new_page()
+        offline.goto(url)
+        offline.wait_for_selector("#run:not([disabled])", timeout=240_000)
+        assert "준비 완료" in offline.inner_text("#status")
+        # 엔진이 실제로 도는지 — 화면만 뜬 것과 구별한다.
+        assert offline.evaluate("() => Boolean(META && META.sheets.length)")
+    finally:
+        context.close()
+        if not stopped:
+            server.shutdown()
+            server.server_close()
+
+
 def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
     """새 판을 올렸을 때 실제로 그 판이 뜨는지.
 
@@ -1483,7 +1540,9 @@ def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
         code = re.sub(r"/\*.*?\*/", "", worker, flags=re.S)
         code = re.sub(r"//.*", "", code)
         assert "skipWaiting(" not in code
-        assert "clients.claim(" not in code
+        # claim 은 반대로 **있어야** 한다 — 첫 방문이 통제되지 않으면 그 방문에서
+        # 받은 런타임·휠이 캐시에 담기지 않아 오프라인에서 엔진이 없다.
+        assert "clients.claim(" in code
         context.close()
     finally:
         server.shutdown()

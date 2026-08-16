@@ -224,6 +224,9 @@ from pension.webui import api
     bootStage = "완료";
     status("준비 완료. 명부를 고르고 기초율을 정한 뒤 [산출 실행]을 누르십시오.");
     $("run").disabled = false;
+    // 화면이 다 떴으니 이제 오프라인 채비를 시킨다. 런타임·휠은 방금 받아
+    // 브라우저 캐시에 남아 있어, 대개 회선을 다시 쓰지 않고 채워진다.
+    navigator.serviceWorker?.controller?.postMessage({ type: "warm" });
     // 화면이 다 뜬 뒤에 묻는다. 이것 때문에 부팅이 늦어질 이유가 없다.
     askForPersistentStorage();
   } catch (error) {

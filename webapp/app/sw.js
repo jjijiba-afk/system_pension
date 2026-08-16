@@ -22,6 +22,24 @@
 const CACHE = "pension-__VERSION__";
 const PRECACHE = __PRECACHE__;
 
+//: 런타임·휠. 설치 때 한꺼번에 받지 않고, 화면이 다 뜬 뒤에 **하나씩** 채운다.
+//: 이것이 캐시에 없으면 인터넷이 끊겼을 때 화면만 뜨고 엔진이 없다.
+const HEAVY = __HEAVY__;
+
+/** 무거운 파일을 하나씩 캐시에 채운다. 실패해도 다음 것을 계속 받는다. */
+async function warmUp() {
+  const cache = await caches.open(CACHE);
+  for (const url of HEAVY) {
+    try {
+      if (await cache.match(url)) continue;      // 이미 있으면 건너뛴다
+      const response = await fetch(url, { credentials: "same-origin" });
+      if (response.ok) await cache.put(url, response.clone());
+    } catch (error) {
+      /* 회선이 끊기면 다음 방문에 다시 채운다 */
+    }
+  }
+}
+
 //: 주소에 빌드 값이 붙지 않는 파일들. 이것만 네트워크를 먼저 본다.
 const SHELL = ["index.html", "app.js", "app.css", "manifest.webmanifest"];
 
@@ -42,13 +60,31 @@ self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)));
 });
 
-// 옛 캐시는 새 일꾼이 실제로 넘겨받은 뒤에 지운다. `clients.claim()` 도 쓰지
-// 않는다 — 이미 떠 있는 화면은 자기가 받은 판 그대로 끝까지 돌아야 한다.
+// 옛 캐시는 새 일꾼이 실제로 넘겨받은 뒤에 지운다.
+//
+// `clients.claim()` 은 **처음 설치될 때** 필요하다. 이것이 없으면 첫 방문은
+// 일꾼의 통제를 받지 않아, 그 방문에서 받은 런타임·휠(14MB)이 캐시에 하나도
+// 담기지 않는다 — 곧바로 인터넷을 끊으면 화면만 뜨고 엔진이 없다. 처음 연
+// 그 자리에서 오프라인 준비가 끝나야 한다.
+//
+// 새 판으로 **갈아타는** 것과는 다른 이야기다. `skipWaiting()` 을 쓰지 않으므로
+// 이미 떠 있는 화면은 자기가 받은 판 그대로 끝까지 돌고, 새 일꾼은 그 화면들이
+// 닫힌 뒤에야 활성화된다. 그때 claim 이 불려도 빼앗을 화면이 없다.
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((names) => Promise.all(
-      names.filter((name) => name !== CACHE).map((name) => caches.delete(name))))
+    caches.keys()
+      .then((names) => Promise.all(
+        names.filter((name) => name !== CACHE).map((name) => caches.delete(name))))
+      .then(() => self.clients.claim())
   );
+});
+
+// 화면이 다 뜨면 앱이 알려 준다 — 그때 런타임을 캐시에 채운다. 부팅 직후라
+// 대개 브라우저 캐시에 남아 있어 회선을 다시 쓰지 않고 채워진다.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "warm") {
+    event.waitUntil(warmUp());
+  }
 });
 
 self.addEventListener("fetch", (event) => {

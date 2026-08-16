@@ -522,9 +522,19 @@ def build() -> Path:
         and p.name != "sw.js"
         and not p.relative_to(DIST).as_posix().startswith(heavy)
     )
+    # 런타임·휠은 설치 때 받지 않는다(14MB — 하나만 실패해도 설치가 통째로
+    # 실패한다). 대신 목록만 넘겨, 화면이 다 뜬 뒤 하나씩 채우게 한다. 이게
+    # 없으면 인터넷이 끊겼을 때 화면만 뜨고 엔진이 없다.
+    heavy = [
+        "./" + p.relative_to(DIST).as_posix()
+        for p in sorted(DIST.rglob("*"))
+        if p.is_file() and p.relative_to(DIST).as_posix().startswith("pyodide/")
+    ] + ["./wheels/" + name for name in stamped]
+
     worker = (APP / "sw.js").read_text(encoding="utf-8")
     worker = worker.replace("__VERSION__", stamp)
     worker = worker.replace("__PRECACHE__", json.dumps(files, ensure_ascii=False))
+    worker = worker.replace("__HEAVY__", json.dumps(heavy, ensure_ascii=False))
     (DIST / "sw.js").write_text(worker, encoding="utf-8")
 
     # 화면 아래에도 같은 값을 박아 둔다. 새 빌드를 올렸는데 옛 캐시가 도는지
