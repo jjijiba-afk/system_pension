@@ -2585,7 +2585,10 @@ async function showDoc(name) {
     ]);
     $("print-title").textContent = name;
     const frame = $("print-frame");
-    frame.srcdoc = page;
+    // 문서 안에도 인쇄·닫기 줄이 있다. 이 창에는 같은 단추가 위에 이미
+    // 있으므로 그 줄을 떼고 넣는다 — 문서 파일 자체는 그대로 둔다.
+    frame.srcdoc = page.replace(
+      /<div class="bar">[\s\S]*?<\/div>\s*(?=<h1|<p|<table)/, "");
     $("print-go").onclick = () => {
       frame.contentWindow.focus();
       frame.contentWindow.print();
