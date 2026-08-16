@@ -468,8 +468,11 @@ class TestPagesDeploy:
         assert "gen_features" in script
         assert "gen_features" in (
             ROOT / "src/pension/webui.py").read_text(encoding="utf-8")
+        # 교육용 자료는 잠겨 있으므로, 설명서에는 그런 자료가 있다는 것과
+        # 별도 권한이 필요하다는 것만 적힌다.
         manual = (ROOT / "docs/웹앱-사용설명서.md").read_text(encoding="utf-8")
-        assert "특이사항 한 가지씩" in manual
+        assert "특이사항을 한 가지씩" in manual
+        assert "별도 권한" in manual
 
     def test_every_saved_input_comes_back(self) -> None:
         """저장한 입력칸은 [입력 불러오기] 로 하나도 빠짐없이 돌아와야 한다.
@@ -524,7 +527,7 @@ class TestPagesDeploy:
 
         # 같은 내용이 물음표(사용설명서) 안에도 있어야 한다.
         manual = (ROOT / "docs/웹앱-사용설명서.md").read_text(encoding="utf-8")
-        assert "받은 명부가 없어도" in manual
+        assert "수령한 명부가 없어도" in manual
         assert "다시 보지 않기" in manual
 
     def test_the_current_year_column_is_named_for_what_it_holds(self) -> None:
@@ -535,9 +538,11 @@ class TestPagesDeploy:
         """
         script = (ROOT / "webapp/app/app.js").read_text(encoding="utf-8")
         assert "당기 1년치" not in script
-        assert "귀속액 (누적)" in script
-        assert "당기 귀속액" in script
-        assert "당기근무원가 기여" in script
+        # '기여' 는 무엇에 대한 기여인지 말해 주지 않는다. 연차별 표는 줄 합계가
+        # 곧 그 사람의 값이므로 항목 이름을 그대로 쓴다.
+        assert "당기근무원가 기여" not in script
+        for name in ("퇴직 시 지급액", "귀속액", "채무 기여", "당기근무원가"):
+            assert name in script, name
 
     def test_touch_inputs_do_not_trigger_zoom(self) -> None:
         """아이폰은 16px 미만 입력칸에 포커스가 가면 화면을 확대한다.
