@@ -472,6 +472,11 @@ function longtermGuide() {
 function gridColumns(sheet) {
   const grid = gridBodies[sheet];
   if (grid.spec.fixed.length) return [...grid.spec.fixed];
+  // 규정 축만 쓰는 표. 전원이 규정명을 달고 있으면 직군 열은 아무에게도
+  // 닿지 않는데, 표 앞에 늘어서 있으면 "여기도 채워야 하나" 로 읽힌다.
+  if (grid.rulesOnly && (grid.extra || []).some((n) => n)) {
+    return [...new Set((grid.extra || []).filter(Boolean))];
+  }
   const extra = (grid.extra || []).filter((n) => n && !groups.includes(n));
   return [...groups, ...new Set(extra)];
 }
@@ -491,15 +496,18 @@ function addGridColumn(sheet) {
 function removeGridColumn(sheet, name) {
   if (!confirm(`'${name}' 열을 지웁니다. 그 열의 값도 함께 사라집니다.`)) return;
   const state = collectState();
-  state.grids[sheet].extra = (state.grids[sheet].extra || []).filter((n) => n !== name);
+  const grid = state.grids[sheet];
+  grid.extra = (grid.extra || []).filter((n) => n !== name);
+  if (!grid.extra.length) grid.rules_only = false;
   renderState(state);
   saveEditorLocal();
 }
 
-function renderGrid(sheet, key, rows, extra, columnValues) {
+function renderGrid(sheet, key, rows, extra, columnValues, rulesOnly) {
   const grid = gridBodies[sheet];
   if (grid.keySelect) grid.keySelect.value = key || grid.spec.key;
   grid.extra = [...(extra || [])];
+  if (rulesOnly !== undefined) grid.rulesOnly = Boolean(rulesOnly);
   const columns = gridColumns(sheet);
   const keyLabel = grid.keySelect ? grid.keySelect.value : grid.spec.key;
 
@@ -1104,6 +1112,7 @@ function collectState() {
       key: grid.keySelect ? grid.keySelect.value : spec.key,
       rows: gridRows(spec.sheet),
       extra: [...(grid.extra || [])],
+      rules_only: Boolean(grid.rulesOnly),
     };
   }
   return {
@@ -1139,7 +1148,7 @@ function renderState(state) {
   for (const spec of META.sheets) {
     const item = state.grids?.[spec.sheet] || {};
     renderGrid(spec.sheet, item.key || spec.key, item.rows || [], item.extra || [],
-               state[PANEL_SOURCE[spec.column_panel]] || {});
+               state[PANEL_SOURCE[spec.column_panel]] || {}, item.rules_only);
   }
   renderCauses(state.exit_causes || []);
   const scanned = new Map(mapData.map((r) => [pairKey(r.source, r.kind), r]));
@@ -1226,6 +1235,12 @@ $("ed-groups-roster").addEventListener("click", async () => {
     };
     addExtras(benefitSheet(), result.scale_rules);
     addExtras("장기급여지급률", result.longterm_rules);
+    // 직군은 퇴직률·승급률·정년의 축이고 지급률의 축은 규정이다. 전원이
+    // 규정명을 달고 있으면 지급률 표의 직군 열은 아무에게도 닿지 않으므로
+    // 빼고, 규정명이 빈 사람이 있으면 그 사람들이 직군 열로 떨어지므로 둔다.
+    if (result.scale_rules?.length && !result.blank_rule) {
+      state.grids[benefitSheet()].rules_only = true;
+    }
     renderState(state);
     saveEditorLocal();
 

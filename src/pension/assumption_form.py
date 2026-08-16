@@ -294,10 +294,14 @@ def grid_columns(state: dict[str, Any], sheet: str) -> list[str]:
     if spec is None or spec["fixed"]:
         return list(spec["fixed"]) if spec else []
     groups = [text(g) for g in state.get("job_groups", []) if text(g)]
-    extra = [
-        text(name) for name in state.get("grids", {}).get(sheet, {}).get("extra", [])
-        if text(name) and text(name) not in groups
-    ]
+    grid = state.get("grids", {}).get(sheet, {})
+    raw = [text(name) for name in grid.get("extra", []) if text(name)]
+    # 규정 축만 쓰는 표. 명부 전원이 규정명을 달고 있으면 직군 열은 아무에게도
+    # 닿지 않는데, 표 앞에 늘어서 있으면 "여기도 채워야 하나" 로 읽힌다.
+    # 직군은 퇴직률·승급률·정년의 축이고, 지급률의 축은 규정이다.
+    if grid.get("rules_only") and raw:
+        return list(dict.fromkeys(raw))
+    extra = [name for name in raw if name not in groups]
     return groups + list(dict.fromkeys(extra))
 
 
@@ -808,6 +812,11 @@ def read_state(path: str | Path, *, size: object = "") -> dict[str, Any]:
                     name for name in file_columns[1:]
                     if name and name not in state["job_groups"]
                 ]
+                # 파일에 직군 열이 하나도 없으면 규정 축만으로 쓰던 표다.
+                # 직군 열을 도로 앞세워 그리면 빈 직군 열이 되살아난다.
+                grid["rules_only"] = bool(grid["extra"]) and not any(
+                    name in state["job_groups"] for name in file_columns[1:] if name
+                )
                 targets = grid_columns(state, spec["sheet"])
             at = {name: pos for pos, name in enumerate(file_columns) if name}
 

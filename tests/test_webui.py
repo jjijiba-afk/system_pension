@@ -1420,3 +1420,63 @@ class TestAllocationChoice:
 
     def test_meta_offers_the_choices(self) -> None:
         assert call("meta")["allocations"] == ["급여식", "근속비례"]
+
+
+class TestRuleOnlyScaleAxis:
+    """지급률 표의 축은 규정이다 — 직군이 아니라.
+
+    규정이 임원4배수·임원2.5배수·1배수인 단체에서 명부 전원이 규정명을 달고
+    있으면, 지급률 표의 직군 열(정규직·계약직·임원)은 아무에게도 닿지 않는다.
+    그런데도 표 앞에 늘어서 있으면 담당자는 "여기도 채워야 하나" 로 읽고
+    일곱 열을 채운다 — 넷은 버려지는 줄 모른 채.
+    """
+
+    RULES = ["임원4배수", "임원2.5배수", "1배수"]
+
+    def _state(self):
+        state = form.example_state(["정규직", "계약직", "임원"])
+        grid = state["grids"]["지급률"]
+        grid["extra"] = list(self.RULES)
+        grid["rules_only"] = True
+        grid["rows"] = [["1", "4.0", "2.5", "1.0"], ["10", "40.0", "25.0", "10.0"]]
+        for rule in self.RULES:
+            state["benefit_rules"][rule] = form.default_benefit_rule()
+            state["benefit_rules"][rule]["mode"] = "누적"
+        return state
+
+    def test_the_grid_shows_only_the_rules(self) -> None:
+        assert form.grid_columns(self._state(), "지급률") == self.RULES
+
+    def test_the_flag_off_keeps_the_old_shape(self) -> None:
+        state = self._state()
+        state["grids"]["지급률"]["rules_only"] = False
+        assert form.grid_columns(state, "지급률") == [
+            "정규직", "계약직", "임원"] + self.RULES
+
+    def test_the_written_sheet_has_no_job_group_columns(self, tmp_path) -> None:
+        import openpyxl
+
+        path = form.write_state(self._state(), tmp_path / "규정축.xlsx")
+        ws = openpyxl.load_workbook(path)["지급률"]
+        heads = [ws.cell(1, c).value for c in range(2, ws.max_column + 1)]
+        assert heads == self.RULES, "직군 열이 지급률 표에 되살아났다"
+
+    def test_the_round_trip_keeps_the_axis(self, tmp_path) -> None:
+        """파일을 다시 열 때 빈 직군 열이 되살아나면 한 바퀴마다 표가 붇는다."""
+        path = form.write_state(self._state(), tmp_path / "규정축.xlsx")
+        back = form.read_state(path)
+        assert back["grids"]["지급률"]["rules_only"] is True
+        assert form.grid_columns(back, "지급률") == self.RULES
+
+    def test_a_member_with_the_rule_gets_that_scale(self, tmp_path) -> None:
+        """규정 해당 인원에게 저기서 설정한 지급률이 실제로 걸려야 한다."""
+        from pension.assumptions import load_assumptions
+
+        path = form.write_state(self._state(), tmp_path / "규정축.xlsx")
+        scale = load_assumptions(path).severance_benefit
+        assert scale.knows("임원4배수")
+        assert scale.multiple("임원4배수", service=10.0) == 40.0
+        assert scale.multiple("1배수", service=10.0) == 10.0
+        # 직군 이름은 지급률 축에 없다 — 규정명이 빈 사람이 직군으로 떨어지면
+        # 법정 배수(근속=배수)로 계산되고, 그 사실은 경고로 드러난다.
+        assert not scale.knows("정규직")
