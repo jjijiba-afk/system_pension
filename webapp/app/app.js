@@ -1520,7 +1520,16 @@ function libCount(sectionId, data) {
 
 function refreshLibrary() {
   fillTemplates();
-  const { library, backup } = py("library_list");
+  const raw = py("library_list");
+  const backup = raw.backup;
+  // 잠금 중에는 예전에 등록해 둔 강사용 자료(시험명부3 등록본·짝 기초율)도
+  // 목록에서 감춘다. 지우지는 않는다 — 풀면 다시 나타난다.
+  const veiled = (data) => genUnlocked() ? data : {
+    ...data,
+    entries: data.entries.filter((e) => !/^시험명부3/.test(String(e.name || ""))),
+  };
+  const library = Object.fromEntries(
+    Object.entries(raw.library).map(([kind, data]) => [kind, veiled(data)]));
   renderLibraryList("금리표", library["금리표"], $("lib-curve-list"));
   renderLibraryList("표준률", library["표준률"], $("lib-rates-list"));
   renderLibraryList("명부", library["명부"], $("lib-roster-list"), { pin: false });
@@ -3230,17 +3239,27 @@ function askUnlock(then) {
 }
 
 $("lock-ok").addEventListener("click", () => {
-  const value = $("lock-pass").value;
+  const value = $("lock-pass").value.trim();
   if (!value) { $("lock-dialog").close(); return; }   // 그냥 확인 — 닫는다.
   try {
     py("gen_unlock", { password: value });
   } catch (error) {
-    $("lock-msg").textContent = error.message || String(error);
+    const message = error.message || String(error);
+    // 옛 엔진이 캐시에 남아 있으면 이 명령 자체가 없어, 맞는 비밀번호도
+    // 안 풀리는 것처럼 보인다. 그 경우를 갈라서 말해 준다.
+    $("lock-msg").textContent = message.includes("비밀번호")
+      ? message
+      : "앱이 이전 버전으로 떠 있습니다 — 화면을 새로고침한 뒤 다시 시도하세요. ("
+        + message + ")";
     return;
   }
   try { sessionStorage.setItem(LOCK_STORE, value); } catch (err) { /* 사설 모드 */ }
   $("lock-dialog").close();
   status("잠금을 풀었습니다 — 이 탭을 닫을 때까지 유지됩니다.");
+  // 잠겨 있던 것들을 그 자리에서 되살린다 — 명부 목록의 숨은 등록본,
+  // 이미 만들어 둔 시험 명부의 특이케이스까지.
+  try { refreshLibrary(); } catch (err) { /* 엔진 준비 전이면 다음 갱신 때 */ }
+  if (generated) $("gen-run").click();
   if (afterUnlock) { const go = afterUnlock; afterUnlock = null; go(); }
 });
 
@@ -3257,7 +3276,9 @@ $("gen-run").addEventListener("click", () => {
       specials: genUnlocked(), password: lockKey(),
     });
     renderGenerated();
-    status(`시험 명부 ${generated.cases.length}종을 만들었습니다.` +
+    const visible = generated.cases
+      .filter((c) => genUnlocked() || c.key !== "특이케이스").length;
+    status(`시험 명부 ${visible}종을 만들었습니다.` +
            (generated.base_date ? ` (기준일 ${generated.base_date})` : ""));
   } catch (error) {
     status("만들지 못했습니다: " + (error.message || error));
@@ -3267,7 +3288,11 @@ $("gen-run").addEventListener("click", () => {
 
 function renderGenerated() {
   const target = $("gen-cases");
-  target.replaceChildren(...generated.cases.map((item) => {
+  // 잠금은 화면에서 한 번 더 지킨다 — 캐시에 옛 엔진이 남아 잠금을 모르는
+  // 채로 특이케이스를 만들어 와도, 풀기 전에는 카드도 버튼도 보이지 않는다.
+  const open = genUnlocked();
+  const shown = generated.cases.filter((c) => open || c.key !== "특이케이스");
+  target.replaceChildren(...shown.map((item) => {
     const box = el("fieldset", {},
       el("legend", {}, item.title),
       el("div", { class: "hint" }, item.summary),
@@ -3287,7 +3312,7 @@ function renderGenerated() {
     }
     return box;
   }));
-  if (generated.locked) {
+  if (!open) {
     target.append(el("fieldset", {},
       el("legend", {}, "시험명부3_특이케이스 🔒"),
       el("div", { class: "hint" }, "현재 개발중인 메뉴로 추후 오픈 예정입니다."),
