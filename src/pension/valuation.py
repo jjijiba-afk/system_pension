@@ -347,6 +347,42 @@ def _projection_years(member: ActiveMember, assumptions: Assumptions) -> int:
     return max(1, min(remaining, assumptions.max_projection_years))
 
 
+#: 정년 도달 시점 선택지.
+NRA_AT_YEAR_END: Final = "연말"
+"""정년에 이른 날이 속한 **사업연도 말일** 에 퇴직한다고 본다. 종전 동작."""
+NRA_AT_BIRTHDAY: Final = "도달 즉시"
+"""만 나이가 정년에 닿는 **그 날** 퇴직한다고 본다."""
+
+NRA_TIMINGS: Final = (NRA_AT_YEAR_END, NRA_AT_BIRTHDAY)
+
+
+def _final_year_span(member: ActiveMember, config: CalculationConfig,
+                     years: int, timing: str) -> float:
+    """마지막 투영 연도 중 실제로 재직하는 몫 (0, 1].
+
+    ``연말`` 이면 마지막 해를 통째로 산다 — 1.0. ``도달 즉시`` 면 생일까지만
+    살고, 그 뒤 남은 몇 달은 퇴직률에도 임금상승에도 노출되지 않는다.
+
+    상반기 생일자가 많은 집단에서는 이 반년이 근속 반년치와 할인 반년치라,
+    합치면 채무가 눈에 띄게 갈린다.
+    """
+    if timing != NRA_AT_BIRTHDAY or member.birth_date is None:
+        return 1.0
+    birth = member.birth_date
+    try:
+        reached = birth.replace(year=birth.year + member.severance_nra)
+    except ValueError:                       # 2월 29일생 — 그 해에는 3월 1일로
+        reached = birth.replace(year=birth.year + member.severance_nra,
+                                month=3, day=1)
+    offset = (reached - config.base_date).days / 365.25
+    # 투영 연차 수는 그대로 두고 **마지막 해의 길이만** 줄인다. 정년이
+    # 기준일보다 앞서는 사람(가산연령으로 이미 넘긴 사람)은 손대지 않는다.
+    span = offset - (years - 1)
+    if not 0.0 < span <= 1.0:
+        return 1.0
+    return span
+
+
 def value_member(
     member: ActiveMember,
     config: CalculationConfig,
@@ -457,10 +493,13 @@ def value_member(
         member.job_group_raw, member.employee_type.value, member.employee_type_raw
     )
     allocation = ""
+    nra_timing = ""
     if found is not None:
         rounding_unit = found[1].benefit_rounding_unit
         rounding_mode = found[1].benefit_rounding_mode
         allocation = found[1].allocation_method
+        nra_timing = found[1].nra_timing
+    final_span = _final_year_span(member, config, years, nra_timing)
     result.rounding_unit = rounding_unit
 
     # 명부의 추가지급 기본급과 개인 지급배수는 **엔진이 자동으로 얹지 않는다.**
@@ -693,19 +732,28 @@ def value_member(
         # 막는다.
         mortality = min(max(mortality, 0.0), 1.0 - withdrawal)
 
+        # 마지막 해는 통째로 살지 않을 수 있다 — 정년을 '도달 즉시' 로 두면
+        # 생일까지만 산다. 남은 몇 달은 재직하지 않으므로 퇴직률에도 사망률에도
+        # 노출되지 않는다. 그만큼 요율을 줄인다.
+        span = final_span if t == years else 1.0
+        if span < 1.0:
+            withdrawal *= span
+            mortality *= span
+
         # 중도·사망은 연중에 일어난다고 보아 그 해 한가운데에 둔다. 두 원인을
         # 갈라 놓는 것은, 사유별로 지급률이 다르면 뭉뚱그린 탈퇴율로는 어느
         # 규정을 적용할지 정할 수 없기 때문이다.
+        middle = t - 1.0 + span / 2.0
         exits = [
-            (CAUSE_VOLUNTARY, t - 0.5, survival * withdrawal),
-            (CAUSE_DEATH, t - 0.5, survival * mortality),
+            (CAUSE_VOLUNTARY, middle, survival * withdrawal),
+            (CAUSE_DEATH, middle, survival * mortality),
         ]
         if t == years:
             # 마지막 해라고 중도퇴직·사망이 멈추는 것이 아니다. 그 해를 넘긴
             # 사람만 정년을 맞는다. 마지막 해를 통째로 정년으로 두면 정년
             # 지급률이 더 높은 회사에서 그만큼 채무가 부풀고, 마지막 해의
             # 중도퇴직 급부가 통째로 사라진다.
-            exits.append((CAUSE_NORMAL, float(t),
+            exits.append((CAUSE_NORMAL, t - 1.0 + span,
                           survival * (1.0 - withdrawal - mortality)))
 
         for cause_name, timing, exit_probability in exits:

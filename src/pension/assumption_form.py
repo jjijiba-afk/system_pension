@@ -56,12 +56,17 @@ from .standard_rates import SALARY_BASE_UP
 ALLOCATION_CHOICES: "Final[tuple[str, ...]]" = ("급여식", "근속비례")
 """확정급여채무 할당 방식 선택지."""
 
+NRA_TIMING_CHOICES: "Final[tuple[str, ...]]" = ("연말", "도달 즉시")
+"""정년 도달 시점 선택지. :data:`pension.valuation.NRA_TIMINGS` 와 같아야 한다."""
+
 __all__ = [
+    "ALLOCATION_CHOICES",
     "APPLY_CHOICES",
     "CAUSE_COLUMN_SEP",
     "EDITOR_GROUPS",
     "EXIT_CAUSE_HEADERS",
     "FORM_SHEETS",
+    "NRA_TIMING_CHOICES",
     "PAYOUT_HEADERS",
     "PAYOUT_SHEET",
     "ROUNDING_UNITS",
@@ -95,6 +100,7 @@ PAYOUT_HEADERS: Final[tuple[str, ...]] = (
     "가입자격(최소근속)", "임원 정년연령", "임원 정년초과 가산연령", "산출 제외",
     "근속 산정방법", "단수 처리", "지급액 반올림 단위", "반올림 방식", "임직원구분",
     "Base-up 적용", "승급률 적용", "퇴직률 적용", "사망률 적용", "할당 방식",
+    "정년 도달 시점",
 )
 
 #: 퇴직사유 탭의 열. 자유 입력이 아니라 정해진 자리에 넣게 한다.
@@ -230,6 +236,7 @@ def default_payout() -> dict[str, Any]:
         "add_age": "2", "basis": SERVICE_DAILY, "fraction": FRACTION_KEEP,
         "unit": "없음", "base_up": "반영", "promotion": "반영",
         "withdrawal": "반영", "mortality": "반영", "allocation": "급여식",
+        "nra_timing": "연말",
     }
 
 
@@ -639,6 +646,7 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
             text(item.get("withdrawal")) or "반영",
             text(item.get("mortality")) or "반영",
             text(item.get("allocation")) or "급여식",
+            text(item.get("nra_timing")) or "연말",
         ])
     sheets[PAYOUT_SHEET] = (list(PAYOUT_HEADERS), rows_out)
 
@@ -846,6 +854,7 @@ def read_state(path: str | Path, *, size: object = "") -> dict[str, Any]:
                     "withdrawal": text(ws.cell(row, 25).value) or "반영",
                     "mortality": text(ws.cell(row, 26).value) or "반영",
                     "allocation": text(ws.cell(row, 27).value) or "급여식",
+                    "nra_timing": text(ws.cell(row, 28).value) or "연말",
                 }
             # 명부 직군이 변환 직군과 다른 행이 하나라도 있으면 진짜 매핑이다.
             if any(source != target or kind for source, kind, target in mapping):

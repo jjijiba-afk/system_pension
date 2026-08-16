@@ -680,3 +680,93 @@ class TestAllocationMethod:
         benefit = (total + 1.5) * 1_000_000          # 배수 = 근속 + 1.5
         expected = benefit * (past / total) / 1.05**10
         assert result.dbo == pytest.approx(expected, rel=1e-9)
+
+
+class TestRetirementTiming:
+    """정년에 이른 날 나가는가, 그 해 사업연도 말일에 나가는가.
+
+    회사 규정이 갈린다 — '만 60세가 되는 날' 인 곳과 '정년에 이른 날이 속한
+    사업연도 말일' 인 곳이 있다. 상반기 생일자가 많은 집단에서는 그 차이가
+    근속 반년치와 할인 반년치라, 합치면 채무가 눈에 띄게 달라진다.
+    """
+
+    def _config(self, timing: str) -> CalculationConfig:
+        return CalculationConfig(
+            base_date=BASE_DATE,
+            job_group_rules=[JobGroupRule(
+                "정규직", "정규직", severance_nra=60, longterm_nra=60,
+                over_nra_add_age=2, nra_timing=timing)],
+        )
+
+    def _member(self, birth: dt.date) -> ActiveMember:
+        member = make_member(age=57, past_service=10.0, wage=1_000_000, nra=60)
+        member.birth_date = birth
+        member.job_group_raw = "정규직"
+        return member
+
+    def test_year_end_is_what_we_have_always_done(self) -> None:
+        """빈 값과 '연말' 은 같아야 한다 — 옛 파일이 그대로 돌아간다."""
+        member, other = (self._member(dt.date(1968, 6, 30)) for _ in range(2))
+        assumptions = make_assumptions(discount=0.05)
+        blank = value_member(member, self._config(""), assumptions)
+        named = value_member(other, self._config("연말"), assumptions)
+        assert blank.dbo == pytest.approx(named.dbo)
+
+    def test_a_mid_year_birthday_retires_half_a_year_earlier(self) -> None:
+        """7월 1일생은 마지막 해의 절반만 산다 — 그만큼 할인이 덜 풀린다."""
+        assumptions = make_assumptions(discount=0.05)
+        birth = dt.date(1968, 7, 1)
+        year_end = value_member(self._member(birth), self._config("연말"), assumptions)
+        birthday = value_member(
+            self._member(birth), self._config("도달 즉시"), assumptions)
+
+        # 근속이 반년 짧아 급여가 작고, 시점이 반년 빨라 할인이 덜 풀린다.
+        # 할인(5%)이 근속 증가분(반년/13년)보다 커서 채무는 오히려 늘어난다.
+        assert birthday.dbo != pytest.approx(year_end.dbo)
+        assert abs(birthday.dbo - year_end.dbo) / year_end.dbo > 0.005
+
+    def test_the_last_cash_flow_lands_on_the_birthday(self) -> None:
+        birthday = value_member(
+            self._member(dt.date(1968, 7, 1)),
+            self._config("도달 즉시"), make_assumptions(discount=0.05))
+        last = max(birthday.cash_flows)
+        # 2025-12-31 → 1968-07-01 + 60년 = 2028-07-01 ≈ 2.5년 뒤.
+        assert last == pytest.approx(2.5, abs=0.02)
+
+    def test_a_december_31_birthday_is_the_same_either_way(self) -> None:
+        """생일이 결산일과 같으면 두 규정이 같은 날을 가리킨다."""
+        assumptions = make_assumptions(discount=0.05, withdrawal=0.05)
+        birth = dt.date(1968, 12, 31)
+        year_end = value_member(self._member(birth), self._config("연말"), assumptions)
+        birthday = value_member(
+            self._member(birth), self._config("도달 즉시"), assumptions)
+        assert birthday.dbo == pytest.approx(year_end.dbo, rel=1e-6)
+
+    def test_the_final_partial_year_carries_less_withdrawal(self) -> None:
+        """반년만 재직하면 그 해 중도퇴직 확률도 반이어야 한다."""
+        assumptions = make_assumptions(discount=0.0, withdrawal=0.10)
+        member = self._member(dt.date(1968, 7, 1))
+        result = value_member(member, self._config("도달 즉시"), assumptions)
+
+        trace: list[dict] = []
+        value_member(self._member(dt.date(1968, 7, 1)), self._config("도달 즉시"),
+                     assumptions, trace=trace)
+        last = [row for row in trace if row["t"] == result.projection_years]
+        assert last, "마지막 해가 투영되지 않았다"
+        # 2025-12-31 → 2028-07-01 은 정확히 2.5년이 아니라 913/365.25 년이다.
+        assert last[0]["withdrawal"] == pytest.approx(0.05, abs=1e-4)
+
+    def test_a_leap_day_birthday_does_not_crash(self) -> None:
+        """2월 29일생 — 정년 해가 평년이면 그 날짜가 없다."""
+        member = self._member(dt.date(1968, 2, 29))
+        result = value_member(member, self._config("도달 즉시"),
+                              make_assumptions(discount=0.05))
+        assert result.dbo > 0
+
+
+def test_the_timing_words_are_the_same_on_both_sides() -> None:
+    """화면 선택지와 엔진이 아는 말이 갈리면, 고른 대로 계산되지 않는다."""
+    from pension.assumption_form import NRA_TIMING_CHOICES
+    from pension.valuation import NRA_TIMINGS
+
+    assert NRA_TIMING_CHOICES == NRA_TIMINGS

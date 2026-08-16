@@ -599,7 +599,7 @@ function renderPayout(payout) {
   // 파일 서식과 엔진은 그대로 두고(옛 파일이 그대로 읽혀야 한다) 화면만
   // 한 칸으로 합친다 — 저장할 때 임원 정년에도 같은 값을 넣는다.
   const headers = ["직군", "명부 인원", "산출 제외", "가입자격(년)", "정년",
-    "가산연령", "근속 산정", "단수 처리", "지급액 반올림", "할당",
+    "가산연령", "근속 산정", "단수 처리", "지급액 반올림", "할당", "정년 시점",
     "Base-up", "승급률", "퇴직률", "사망률"];
   payoutBody.replaceChildren(el("tr", {}, ...headers.map((h) => el("th", {}, h))));
   for (const group of groups) {
@@ -614,6 +614,8 @@ function renderPayout(payout) {
       unit: makeSelect(META.rounding_units, item.unit || "없음"),
       // 할당(귀속) 방식. 급여식이 기본이고, 참고 시스템과 맞출 때 근속비례.
       allocation: makeSelect(META.allocations, item.allocation || "급여식"),
+      // 정년에 이른 해의 사업연도 말일에 나가는지, 생일에 바로 나가는지.
+      nra_timing: makeSelect(META.nra_timings, item.nra_timing || "연말"),
       base_up: makeSelect(META.apply_choices, item.base_up || "반영"),
       promotion: makeSelect(META.apply_choices, item.promotion || "반영"),
       withdrawal: makeSelect(META.apply_choices, item.withdrawal || "반영"),
@@ -681,7 +683,7 @@ function payoutValues() {
       nra: w.nra.value.trim(), executive_nra: w.nra.value.trim(),
       add_age: w.add_age.value.trim(), basis: w.basis.value,
       fraction: w.fraction.value, unit: w.unit.value,
-      allocation: w.allocation.value,
+      allocation: w.allocation.value, nra_timing: w.nra_timing.value,
       base_up: w.base_up.value, promotion: w.promotion.value,
       withdrawal: w.withdrawal.value, mortality: w.mortality.value,
     };

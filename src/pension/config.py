@@ -104,6 +104,15 @@ class JobGroupRule:
     ``과거근속 ÷ 총근속`` 으로 귀속한다. 배수가 근속에 비례하는 법정 퇴직금
     에서는 두 방식이 같은 값을 낸다. 참고 산출 시스템과 맞출 때는 근속비례.
     """
+    nra_timing: str = ""
+    """정년 도달 시점. ``연말``(기본) / ``도달 즉시``.
+
+    회사 규정이 '정년에 이른 날이 속한 사업연도 말일에 퇴직한다' 인지 '만
+    60세가 되는 날 퇴직한다' 인지가 갈린다. 상반기 생일자가 많은 집단에서는
+    둘의 차이가 반년치 근속과 반년치 할인이라 채무가 눈에 띄게 달라진다.
+
+    빈 값은 ``연말`` 로 본다 — 종전 동작이다.
+    """
     excluded: bool = False
     """이 직군을 퇴직급여 산출에서 통째로 뺄지. ``Input`` R열.
 
@@ -335,8 +344,9 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
                 apply_promotion=_apply(ws.cell(row, 24).value),
                 apply_withdrawal=_apply(ws.cell(row, 25).value),
                 apply_mortality=_apply(ws.cell(row, 26).value),
-                # 27열이 없던 파일은 빈 값 → 급여식. 옛 파일이 그대로 읽힌다.
+                # 27·28열이 없던 파일은 빈 값 → 급여식·연말. 옛 파일이 그대로 읽힌다.
                 allocation_method=text(ws.cell(row, 27).value),
+                nra_timing=text(ws.cell(row, 28).value),
             )
         )
     return rules
