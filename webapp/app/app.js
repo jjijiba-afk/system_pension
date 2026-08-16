@@ -2191,6 +2191,12 @@ function drawDashReadout(s) {
   const rows = s.trace.filter((r) => r.t === dashYear);
   const total = rows.reduce((sum, r) => sum + r.dbo, 0);
   const cum = s.trace.filter((r) => r.t <= dashYear).reduce((sum, r) => sum + r.dbo, 0);
+  // '0.0%' 는 오류처럼 읽힌다. 이 해까지 채무가 아예 없으면(임원처럼 퇴직률이
+  // 0 이라 정년에 몰린 경우) 그렇다고 말하고, 있는데 작으면 '0.1% 미만' 으로.
+  const share = s.dbo > 0 ? (cum / s.dbo) * 100 : 0;
+  const shareText = cum <= 0 ? "0% — 이 해까지 쌓인 채무 없음"
+    : share < 0.05 ? "0.1% 미만"
+    : `${share.toFixed(1)}%`;
   const f = rows[0];
   const causes = rows.map((r) => {
     const c = CAUSES.find((x) => x.key === r.cause) || CAUSES[0];
@@ -2205,7 +2211,7 @@ function drawDashReadout(s) {
         <dt>그때 근속</dt><dd>${f.service.toFixed(2)}년</dd>
         <dt>그때 월평균임금</dt><dd>${won(f.wage)}</dd>
         <dt>연초 잔존확률</dt><dd>${pctOf(f.survival)}</dd>
-        <dt>누적 채무</dt><dd>${(cum / s.dbo * 100).toFixed(1)}%</dd></dl></div>
+        <dt>누적 채무</dt><dd>${shareText}</dd></dl></div>
     <div class="causes">${causes}</div>`;
 }
 
