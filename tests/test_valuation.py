@@ -770,3 +770,48 @@ def test_the_timing_words_are_the_same_on_both_sides() -> None:
     from pension.valuation import NRA_TIMINGS
 
     assert NRA_TIMING_CHOICES == NRA_TIMINGS
+
+
+class TestTraceCarriesTheMultiple:
+    """연차별 근거 표의 '지급률' 열 (요구사항 6).
+
+    담당자가 표를 규정과 맞대어 보는 칸은 급여액이 아니라 **누적 지급배수** 다.
+    급여액만 있으면 임금을 나눠 되짚어야 하는데, 반올림·가산이 섞이면 그 나눗셈이
+    규정과 안 맞아 보인다.
+    """
+
+    def test_the_statutory_multiple_equals_the_service(self, config) -> None:
+        member = make_member(age=57, past_service=10.0, wage=1_000_000, nra=60)
+        trace: list[dict] = []
+        value_member(member, config, make_assumptions(discount=0.05), trace=trace)
+        for row in trace:
+            # 법정: 배수 = 그 시점 근속.
+            assert row["multiple"] == pytest.approx(row["service"], rel=1e-9)
+
+    def test_each_cause_reports_its_own_multiple(self) -> None:
+        """정년만 2배인 규정이면 정년 줄의 지급률만 2배여야 한다."""
+        from pension.assumptions import CauseBenefit, CauseBenefits, RateCurve
+
+        assumptions = make_assumptions(discount=0.05, withdrawal=0.05)
+        assumptions.severance_benefit.curves["정년2배"] = RateCurve(
+            {1: 2.0, 40: 80.0})
+        assumptions.exit_causes = CauseBenefits(rules={
+            ("정규직", "정년"): CauseBenefit(benefit_rule="정년2배"),
+        })
+        config = CalculationConfig(
+            base_date=BASE_DATE,
+            job_group_rules=[JobGroupRule("정규직", "정규직", severance_nra=60,
+                                          longterm_nra=60)],
+        )
+        member = make_member(age=58, past_service=10.0, wage=1_000_000, nra=60)
+        member.job_group_raw = "정규직"
+        trace: list[dict] = []
+        value_member(member, config, assumptions, trace=trace)
+
+        normal = [r for r in trace if r["cause"] == "정년"]
+        voluntary = [r for r in trace if r["cause"] == "중도"]
+        assert normal and voluntary
+        assert normal[-1]["multiple"] == pytest.approx(normal[-1]["service"] * 2,
+                                                       rel=1e-6)
+        assert voluntary[-1]["multiple"] == pytest.approx(
+            voluntary[-1]["service"], rel=1e-6)

@@ -2540,24 +2540,52 @@ function kvTable(pairs) {
 }
 
 function traceTable(trace) {
-  // '귀속액' 은 기준일까지 쌓인 몫, '당기 귀속액' 은 그중 올해 한 해가 더한
-  // 몫이다. 둘 다 확률·할인 **전** 금액이라 당기근무원가 자체가 아니다 —
-  // 확률과 할인계수를 곱한 것이 오른쪽 끝의 '당기근무원가 기여' 다.
-  const head = ["연차", "시점", "연령", "근속", "월평균임금", "중도퇴직률", "사망률",
-                "연초 재직확률", "퇴직사유", "그 해 퇴직확률", "지급액",
-                "귀속액 (누적)", "당기 귀속액", "할인계수", "DBO 기여",
-                "당기근무원가 기여"];
-  const rows = trace.map((r) => [
-    r.t, r.timing, r.age.toFixed(1), r.service.toFixed(2), won(r.wage),
-    pctOf(r.withdrawal), pctOf(r.mortality, 3), pctOf(r.survival),
-    r.cause, pctOf(r.exit_probability, 3), won(r.benefit),
-    won(r.attributed), won(r.unit), r.discount.toFixed(6),
-    won(r.dbo), won(r.service_cost),
-  ]);
-  return el("div", { class: "scroll-x" }, el("table", { class: "data" },
+  // 한 해 = 한 줄. 퇴직사유(중도·사망·정년)는 줄을 늘리는 대신 **열로** 가른다.
+  // 사유마다 줄이 하나씩 더 생기면 30년 투영이 60~90줄이 되어, 담당자가 규정과
+  // 맞대어 보던 리듬(한 해 한 줄)이 사라진다.
+  const years = new Map();
+  for (const r of trace) {
+    if (!years.has(r.t)) years.set(r.t, { causes: {} });
+    const slot = years.get(r.t);
+    slot.causes[r.cause] = r;
+    // 공통 칸(연령·임금·요율·잔존확률)은 연중 시점의 중도퇴직 줄에서 읽고,
+    // 그 해에 중도가 없으면(확률 0) 아무 사유나 쓴다.
+    if (!slot.base || r.cause === "중도") slot.base = r;
+  }
+
+  const head = ["연차", "시점", "연령", "근속", "월평균임금", "지급률",
+                "중도퇴직률", "사망률", "연초 재직확률", "할인계수",
+                "DBO 기여 — 중도", "사망", "정년", "당기근무원가 기여"];
+  const sums = { 중도: 0, 사망: 0, 정년: 0, cost: 0 };
+  const rows = [...years.entries()].sort((a, b) => a[0] - b[0]).map(([t, slot]) => {
+    const b = slot.base;
+    const of = (cause) => slot.causes[cause]?.dbo || 0;
+    const cost = Object.values(slot.causes).reduce((n, r) => n + r.service_cost, 0);
+    sums.중도 += of("중도"); sums.사망 += of("사망");
+    sums.정년 += of("정년"); sums.cost += cost;
+    return [
+      t, b.timing, b.age.toFixed(1), b.service.toFixed(2), won(b.wage),
+      (b.multiple ?? 0).toFixed(4),
+      pctOf(b.withdrawal), pctOf(b.mortality, 3), pctOf(b.survival),
+      b.discount.toFixed(6),
+      won(of("중도")), won(of("사망")), won(of("정년")), won(cost),
+    ];
+  });
+
+  const table = el("table", { class: "data" },
     el("tr", {}, ...head.map((h) => el("th", {}, h))),
     ...rows.map((cells) => el("tr", {},
-      ...cells.map((c, i) => el("td", { class: i >= 4 ? "num" : "" }, String(c)))))));
+      ...cells.map((c, i) => el("td", { class: i >= 4 ? "num" : "" }, String(c))))),
+    el("tr", {}, el("td", { colspan: "10" }, "합계 — 줄 합계가 곧 이 사람의 확정급여채무입니다"),
+      el("td", { class: "num" }, won(sums.중도)),
+      el("td", { class: "num" }, won(sums.사망)),
+      el("td", { class: "num" }, won(sums.정년)),
+      el("td", { class: "num" }, won(sums.cost))));
+  const note = el("p", { class: "hint" },
+    "지급률은 그 시점 누적 지급배수(중도 기준)입니다. 중도·사망은 연중"
+    + "(시점 열), 정년은 마지막 해 말에 일어난 것으로 봅니다. 사유별로 지급률이"
+    + " 다른 규정은 사번 카드(채무 해부)에서 사유별 급여액까지 보입니다.");
+  return el("div", {}, el("div", { class: "scroll-x" }, table), note);
 }
 
 function longtermTraceTable(trace) {

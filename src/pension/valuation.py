@@ -794,9 +794,8 @@ def value_member(
             exit_age = member.age + timing
             discount = assumptions.discount.discount_factor(timing)
             attributed, unit = weigh(cause_name, total_service, exit_age, wage)
-            benefit = benefit_at(
-                total_service, exit_age, wage, causes.get(rule, cause_name)
-            )
+            cause_spec = causes.get(rule, cause_name)
+            benefit = benefit_at(total_service, exit_age, wage, cause_spec)
 
             part_dbo = attributed * exit_probability * discount
             part_cost = unit * exit_probability * discount
@@ -829,6 +828,11 @@ def value_member(
                     "withdrawal": withdrawal, "mortality": mortality,
                     "survival": survival, "cause": cause_name,
                     "exit_probability": exit_probability,
+                    # 이 시점·이 사유의 누적 지급배수(지급률). 담당자가 표에서
+                    # 규정과 맞대어 보는 칸이라 급여가 아니라 배수로 남긴다.
+                    "multiple": multiple_at(
+                        max(total_service, cause_spec.min_service), exit_age,
+                        cause_spec.benefit_rule),
                     "benefit": benefit, "attributed": attributed, "unit": unit,
                     "discount": discount,
                     "dbo": attributed * exit_probability * discount,
