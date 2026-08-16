@@ -2672,6 +2672,58 @@ function showMemberDetail(args, sourceLabel) {
   $("member-dialog").showModal();
 }
 
+// ── 개인별 산출 근거 인쇄 ───────────────────────────────────────
+// 화면의 카드를 그대로 종이 한 부로 옮긴다. 연차별 근거 표가 넓어 가로로 눕힌다.
+
+const MEMBER_PRINT_CSS = `
+  @page { size: A4 landscape; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+         color: #1c2430; font-size: 12px; margin: 0; }
+  h1 { font-size: 16px; margin: 0 0 2px; }
+  .note { color: #5a6472; margin: 0 0 14px; font-size: 11px; }
+  h2 { font-size: 13px; margin: 16px 0 4px; }
+  h3 { font-size: 12.5px; margin: 14px 0 4px; }
+  .scroll-x { overflow: visible; }
+  table.data { border-collapse: collapse; width: 100%; }
+  table.data th, table.data td { border: 1px solid #B9BCC4; padding: 3px 6px; }
+  table.data th { background: #E9EDF4; font-weight: 600; white-space: nowrap; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.total td { font-weight: 700; background: #F4F6FA; }
+  .warn-box, .notice { border: 1px solid #B9BCC4; padding: 6px 8px; margin: 6px 0; }
+  table.data.trace { font-size: 10.5px; }
+  table.data.trace th, table.data.trace td { padding: 2px 4px; }
+  h3, table { break-inside: avoid; }
+`;
+
+function escapeHtml(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+$("member-print").addEventListener("click", () => {
+  const title = $("member-title").textContent;
+  const note = $("member-note").textContent;
+  const page = `<!doctype html><html lang="ko"><head><meta charset="utf-8">` +
+    `<title>${escapeHtml(title)}</title><style>${MEMBER_PRINT_CSS}</style></head>` +
+    `<body><h1>${escapeHtml(title)}</h1><p class="note">${escapeHtml(note)}</p>` +
+    $("member-body").innerHTML + `</body></html>`;
+  const who = (title.split("·")[1] || "개인").split("—")[0].trim()
+    .replace(/[\\/:*?"<>|]/g, "");
+  const filename = `개인별_산출근거_${who || "개인"}.html`;
+  const path = `/work/${filename}`;
+  pyodide.FS.writeFile(path, new TextEncoder().encode(page));
+  $("print-title").textContent = filename.replace(/\.html$/, "");
+  const frame = $("print-frame");
+  frame.srcdoc = page;
+  $("print-go").onclick = () => {
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  };
+  $("print-download").onclick = () => download(path, filename, "text/html");
+  $("print-dialog").showModal();
+});
+
 $("lookup-run").addEventListener("click", () => {
   const id = $("lookup-id").value.trim();
   if (!id) { alert("사번 또는 성명을 입력하세요."); return; }
