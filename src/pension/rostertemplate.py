@@ -22,16 +22,43 @@ from openpyxl.utils import get_column_letter
 
 FACE = "맑은 고딕"
 
-# 블록별 색 — 필수인지 아닌지가 열 색만 보고 판단되게 한다.
-BLOCKS = {
-    "필수": ("1F3864", "FFFFFF", "이 열이 비면 그 사람은 산출되지 않습니다."),
-    "제도·근속": ("2E6F6A", "FFFFFF", "해당자만 채우세요. 비우면 아래 '비우면' 대로 봅니다."),
-    "장기급여": ("7A5470", "FFFFFF",
-              "근속포상·장기근속휴가가 있는 회사만. 없으면 블록째 지워도 됩니다."),
-    "개인 예외": ("8F6318", "FFFFFF",
-              "이 사람만 직군 규칙과 달라야 할 때. 대부분 비웁니다 — 블록째 지워도 됩니다."),
-    "기타": ("5B6478", "FFFFFF", "드물게 쓰는 항목과 관리용. 블록째 지워도 됩니다."),
+# 명부를 크게 두 부분으로 가른다. 시트는 한 장이되, 퇴직급여로 사는 열과
+# 기타장기(근속포상·장기근속휴가)로 사는 열이 섞여 있으면 안 된다 — 기타장기가
+# 없는 회사가 대부분인데, 섞여 있으면 "우리는 이 칸을 채워야 하나" 를 열마다
+# 되묻게 된다. 기타장기 파트는 언제나 **오른쪽 끝** 이라, 통째로 지우고 보내도
+# 왼쪽 파트의 열 자리가 흔들리지 않는다.
+#
+# 시트를 아예 둘로 가르지 않는 이유는 한 사람이 두 줄이 되기 때문이다. 사번을
+# 두 시트에 맞춰 두어야 하고, 한쪽에만 있는 사람이 생긴다.
+PARTS = {
+    "퇴직급여": ("1F3864",
+             "퇴직급여채무를 산출하는 데 쓰는 부분입니다. 여기까지는 모든 회사가 채웁니다."),
+    "기타장기": ("7A5470",
+             "근속포상·장기근속휴가가 있는 회사만. 없으면 여기부터 오른쪽 끝까지 "
+             "통째로 비우거나 지우고 보내셔도 됩니다."),
 }
+
+# 블록별 색 — (파트, 채움색, 글자색, 안내). 필수인지 아닌지가 열 색만 보고
+# 판단되게 한다.
+BLOCKS = {
+    "필수": ("퇴직급여", "1F3864", "FFFFFF", "이 열이 비면 그 사람은 산출되지 않습니다."),
+    "제도·근속": ("퇴직급여", "2E6F6A", "FFFFFF",
+              "해당자만 채우세요. 비우면 아래 '비우면' 대로 봅니다."),
+    "개인 예외": ("퇴직급여", "8F6318", "FFFFFF",
+              "이 사람만 직군 규칙과 달라야 할 때. 대부분 비웁니다 — 블록째 지워도 됩니다."),
+    "기타": ("퇴직급여", "5B6478", "FFFFFF", "드물게 쓰는 항목과 관리용. 블록째 지워도 됩니다."),
+    "장기급여": ("기타장기", "7A5470", "FFFFFF",
+              "근속포상 대상자만. 대상이 아닌 사람은 '장기급여 대상' 에 N 만 적으면 됩니다."),
+    "장기급여 예외": ("기타장기", "9C7799", "FFFFFF",
+                 "이 사람만 장기급여 규칙이 직군과 달라야 할 때. 대부분 비웁니다."),
+}
+
+#: 시트의 고정 줄. 파트 → 블록 → 열 이름 → 자료. 읽을 때는 머리글 이름으로
+#: 찾으므로 여기가 바뀌어도 산출은 흔들리지 않는다.
+PART_ROW = 2
+BLOCK_ROW = 3
+HEADER_ROW = 4
+FIRST_DATA_ROW = 5
 
 # (블록, 열이름, 뜻, 예시, 비우면)
 ACTIVE = [
@@ -79,13 +106,6 @@ ACTIVE = [
      "그때 퇴직하는 것으로 봅니다", "", "직군 규칙의 정년까지 근무"),
     ("제도·근속", "원가코드", "제조원가 / 판관비 등 배분 코드", "판관비", "배분표를 안 만듭니다"),
 
-    ("장기급여", "장기급여 대상", "Y / N", "N", "N (대상 아님)"),
-    ("장기급여", "장기급여 기산일",
-     "근속포상 근속을 세기 시작하는 날. **중간정산과 무관합니다** — 퇴직금을 "
-     "중간정산했다고 근속포상 시계가 0 으로 돌아가지는 않습니다", "", "입사일"),
-    ("장기급여", "1일 통상임금", "장기근속휴가를 금액으로 환산할 때 씁니다(원)", "", "0"),
-    ("장기급여", "장기급여 기지급액", "이미 지급한 근속포상 금액(원)", "", "0"),
-
     ("개인 예외", "정년연령", "이 사람만 정년이 다를 때", "", "직군 규칙의 정년"),
     ("개인 예외", "임금피크 연령", "임금피크가 시작되는 연령", "", "적용 안 함"),
     ("개인 예외", "임원지급배수",
@@ -94,12 +114,6 @@ ACTIVE = [
      "", "쓰지 않습니다"),
     ("개인 예외", "퇴직률 규정", "중도·사망퇴직률을 다르게 걸 때", "", "직군에 걸린 규정"),
     ("개인 예외", "승급률 규정", "승급률을 다르게 걸 때", "", "직군에 걸린 규정"),
-    ("개인 예외", "장기급여 지급률 규정", "장기급여만 다른 지급률을 걸 때", "",
-     "직군에 걸린 규정"),
-    ("개인 예외", "장기급여 퇴직률 규정", "장기급여만 다른 퇴직률을 걸 때", "",
-     "직군에 걸린 규정"),
-    ("개인 예외", "장기급여 승급률 규정", "장기급여만 다른 승급률을 걸 때", "",
-     "직군에 걸린 규정"),
 
     ("기타", "명예퇴직 기준임금", "명예퇴직 급여를 다른 임금으로 계산할 때(원)",
      "", "30일 평균임금을 씁니다"),
@@ -112,6 +126,21 @@ ACTIVE = [
      "않습니다 — 어느 사유에 붙는지는 [퇴직사유] 표의 가산액에 적으세요",
      "", "쓰지 않습니다"),
     ("기타", "비고", "자유 기재. 산출에는 쓰지 않습니다", "", ""),
+
+    # ── 여기부터 오른쪽 끝까지가 기타장기 파트다. 통째로 지워도 된다. ──
+    ("장기급여", "장기급여 대상", "Y / N", "N", "N (대상 아님)"),
+    ("장기급여", "장기급여 기산일",
+     "근속포상 근속을 세기 시작하는 날. **중간정산과 무관합니다** — 퇴직금을 "
+     "중간정산했다고 근속포상 시계가 0 으로 돌아가지는 않습니다", "", "입사일"),
+    ("장기급여", "1일 통상임금", "장기근속휴가를 금액으로 환산할 때 씁니다(원)", "", "0"),
+    ("장기급여", "장기급여 기지급액", "이미 지급한 근속포상 금액(원)", "", "0"),
+
+    ("장기급여 예외", "장기급여 지급률 규정", "장기급여만 다른 지급률을 걸 때", "",
+     "직군에 걸린 규정"),
+    ("장기급여 예외", "장기급여 퇴직률 규정", "장기급여만 다른 퇴직률을 걸 때", "",
+     "직군에 걸린 규정"),
+    ("장기급여 예외", "장기급여 승급률 규정", "장기급여만 다른 승급률을 걸 때", "",
+     "직군에 걸린 규정"),
 ]
 
 RETIRED = [
@@ -139,16 +168,18 @@ RETIRED = [
     ("제도·근속", "국민연금 전환금", "국민연금 전환금 지급액(원)", "", "0"),
     ("제도·근속", "원가코드", "제조원가 / 판관비 등 배분 코드", "제조원가", "배분표를 안 만듭니다"),
 
-    ("장기급여", "장기급여 대상", "Y / N", "N", "N (대상 아님)"),
-    ("장기급여", "장기급여 지급액", "퇴직하며 지급한 장기급여(원)", "", "0"),
-
     ("개인 예외", "퇴직률 규정", "이 사람만 다른 퇴직률을 걸 때", "", "직군에 걸린 규정"),
-    ("개인 예외", "장기급여 퇴직률 규정", "장기급여만 다른 퇴직률을 걸 때", "",
-     "직군에 걸린 규정"),
 
     ("기타", "퇴직위로금 등", "퇴직급여 외에 지급한 금액(원)", "", "0"),
     ("기타", "전출 지급액", "계열사 전출·사업처분으로 넘긴 금액(원)", "", "0"),
     ("기타", "비고", "자유 기재. 산출에는 쓰지 않습니다", "", ""),
+
+    # ── 여기부터 오른쪽 끝까지가 기타장기 파트다. 통째로 지워도 된다. ──
+    ("장기급여", "장기급여 대상", "Y / N", "N", "N (대상 아님)"),
+    ("장기급여", "장기급여 지급액", "퇴직하며 지급한 장기급여(원)", "", "0"),
+
+    ("장기급여 예외", "장기급여 퇴직률 규정", "장기급여만 다른 퇴직률을 걸 때", "",
+     "직군에 걸린 규정"),
 ]
 
 #: 작성 예시 두 줄이 쓰는 규정명. 기초율 양식이 이 이름으로 지급률 열을 함께
@@ -185,39 +216,69 @@ SECOND_RETIRED = {
 }
 
 
-def _sheet(wb, name: str, columns: list, first_row: int = 4, second: dict | None = None,
+#: 우리 양식에 없는, 회사가 원래 두고 있던 열. 파트를 정할 수 없으므로 따로 센다.
+EXTRA_BLOCK = "회사 열"
+EXTRA_PART = "회사 열"
+
+
+def _look(block: str) -> tuple[str, str, str]:
+    """블록 이름 → (채움색, 글자색, 안내)."""
+    if block == EXTRA_BLOCK:
+        return ("8A8F9C", "FFFFFF",
+                "우리 양식에 없어 원래 이름 그대로 오른쪽에 옮겨 둔 열입니다.")
+    _part, fill, ink, note = BLOCKS[block]
+    return fill, ink, note
+
+
+def _part_of(block: str) -> str:
+    return EXTRA_PART if block == EXTRA_BLOCK else BLOCKS[block][0]
+
+
+def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
+           second: dict | None = None,
            rows: list[dict] | None = None, extras: tuple[str, ...] = ()):
     """명부 시트 한 장.
+
+    줄 차례는 파트(2) → 블록(3) → 열 이름(4) → 자료(5). 파트 줄이 있어야
+    "우리 회사는 근속포상이 없는데 이 칸도 채워야 하나" 를 열마다 되묻지 않는다.
 
     :param rows: 채워 넣을 자료. 주면 작성 예시 두 줄 대신 이것을 적는다.
         열쇠는 **열 이름** 이다(:data:`ACTIVE` 의 두 번째 항목).
     :param extras: 고정 서식에 없는 열. 오른쪽에 덧붙인다 — 회사가 누진 보전·
-        지급구간처럼 자기네 열을 더해 보내는 모양 그대로다.
+        지급구간처럼 자기네 열을 더해 보내는 모양 그대로다. 기타장기 파트보다
+        더 오른쪽에 붙으므로, 파트를 통째로 지우는 손질과 부딪히지 않는다.
     """
-    columns = list(columns) + [("기타", label, "", "", "") for label in extras]
+    columns = list(columns) + [(EXTRA_BLOCK, label, "", "", "") for label in extras]
 
     ws = wb.create_sheet(name)
     ws.cell(1, 1, f"{name} — 색이 진한 앞쪽 열이 필수입니다."
                   + ("" if rows else " 노란 줄은 작성 예시이니 지우고 쓰세요."))
     ws.cell(1, 1).font = Font(name=FACE, size=9, italic=True, color="5B6478")
 
-    # 2행: 블록 이름을 병합해 얹는다. 어디까지가 필수인지 한눈에 보이게.
-    start = 1
-    for index in range(1, len(columns) + 1):
-        block = columns[index - 1][0]
-        last = index == len(columns)
-        if last or columns[index][0] != block:
-            fill, ink, _note = BLOCKS[block]
-            ws.merge_cells(start_row=2, start_column=start, end_row=2, end_column=index)
-            cell = ws.cell(2, start, block)
-            cell.font = Font(name=FACE, size=9, bold=True, color=ink)
-            cell.fill = PatternFill("solid", fgColor=fill)
-            cell.alignment = Alignment(horizontal="center")
-            start = index + 1
+    def band(row: int, name_of, colors) -> None:
+        """같은 값이 이어지는 구간마다 칸을 병합해 이름을 얹는다."""
+        start = 1
+        for index in range(1, len(columns) + 1):
+            here = name_of(columns[index - 1][0])
+            last = index == len(columns)
+            if last or name_of(columns[index][0]) != here:
+                fill, ink = colors(here)
+                ws.merge_cells(start_row=row, start_column=start,
+                               end_row=row, end_column=index)
+                cell = ws.cell(row, start, here)
+                cell.font = Font(name=FACE, size=9, bold=True, color=ink)
+                cell.fill = PatternFill("solid", fgColor=fill)
+                cell.alignment = Alignment(horizontal="center")
+                start = index + 1
+
+    # 2행: 파트. 3행: 블록. 어디까지가 필수이고 어디부터 지워도 되는지 한눈에.
+    band(PART_ROW, _part_of,
+         lambda part: (PARTS[part][0] if part in PARTS else "8A8F9C", "FFFFFF"))
+    band(BLOCK_ROW, lambda block: block, lambda block: _look(block)[:2])
 
     for index, (block, label, _mean, sample, _blank) in enumerate(columns, start=1):
-        fill, ink, _note = BLOCKS[block]
-        cell = ws.cell(3, index, label)
+        fill, ink = _look(block)[:2]
+        cell = ws.cell(HEADER_ROW, index, label)
         cell.font = Font(name=FACE, size=9, bold=True, color=ink)
         cell.fill = PatternFill("solid", fgColor=fill)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -248,17 +309,19 @@ def _sheet(wb, name: str, columns: list, first_row: int = 4, second: dict | None
                     continue
                 ws.cell(row, index, value).font = body
 
-    ws.row_dimensions[3].height = 34
+    ws.row_dimensions[HEADER_ROW].height = 34
+    ws.freeze_panes = ws.cell(FIRST_DATA_ROW, 1)
     return ws
 
 
 def _guide(wb) -> None:
     ws = wb.create_sheet("작성요령", 0)
-    ws.column_dimensions["A"].width = 13
-    ws.column_dimensions["B"].width = 22
-    ws.column_dimensions["C"].width = 56
-    ws.column_dimensions["D"].width = 16
-    ws.column_dimensions["E"].width = 34
+    ws.column_dimensions["A"].width = 11
+    ws.column_dimensions["B"].width = 13
+    ws.column_dimensions["C"].width = 22
+    ws.column_dimensions["D"].width = 56
+    ws.column_dimensions["E"].width = 16
+    ws.column_dimensions["F"].width = 34
 
     ws["A1"] = "명부 작성요령"
     ws["A1"].font = Font(name=FACE, size=14, bold=True, color="1F3864")
@@ -268,8 +331,12 @@ def _guide(wb) -> None:
     ws["A3"] = ("우리 회사에 해당 없는 블록은 열째 지우고 보내도 됩니다. "
                 "머리글 이름으로 열을 찾으므로 순서를 바꿔도 됩니다.")
     ws["A3"].font = Font(name=FACE, size=9, color="5B6478")
+    ws["A4"] = ("명부 시트는 한 장이지만 열이 [퇴직급여] 와 [기타장기] 두 파트로 "
+                "갈려 있습니다(맨 윗줄). 근속포상·장기근속휴가가 없으면 "
+                "[기타장기] 는 통째로 비우거나 지우고 보내시면 됩니다.")
+    ws["A4"].font = Font(name=FACE, size=9, color="5B6478")
 
-    row = 5
+    row = 6
     ws.cell(row, 1, "시트").font = Font(name=FACE, size=11, bold=True, color="1F3864")
     row += 1
     for name, what in (
@@ -284,14 +351,25 @@ def _guide(wb) -> None:
         row += 1
     row += 1
 
+    ws.cell(row, 1, "명부 열 파트").font = Font(name=FACE, size=11, bold=True, color="1F3864")
+    row += 1
+    for part, (fill, note) in PARTS.items():
+        cell = ws.cell(row, 1, part)
+        cell.font = Font(name=FACE, size=9, bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=fill)
+        cell.border = BORDER
+        ws.cell(row, 2, note).font = Font(name=FACE, size=9, color="5B6478")
+        row += 1
+    row += 1
+
     ws.cell(row, 1, "명부 열 블록").font = Font(name=FACE, size=11, bold=True, color="1F3864")
     row += 1
-    for block, (fill, ink, note) in BLOCKS.items():
+    for block, (part, fill, ink, note) in BLOCKS.items():
         cell = ws.cell(row, 1, block)
         cell.font = Font(name=FACE, size=9, bold=True, color=ink)
         cell.fill = PatternFill("solid", fgColor=fill)
         cell.border = BORDER
-        ws.cell(row, 2, note).font = Font(name=FACE, size=9, color="5B6478")
+        ws.cell(row, 2, f"[{part}] {note}").font = Font(name=FACE, size=9, color="5B6478")
         row += 1
     row += 1
 
@@ -299,19 +377,21 @@ def _guide(wb) -> None:
         ws.cell(row, 1, f"{title} ({len(columns)}열)").font = Font(
             name=FACE, size=11, bold=True, color="1F3864")
         row += 1
-        for index, head in enumerate(("구분", "열 이름", "뜻", "예시", "비우면")):
+        for index, head in enumerate(("파트", "구분", "열 이름", "뜻", "예시", "비우면")):
             cell = ws.cell(row, index + 1, head)
             cell.font = Font(name=FACE, size=9, bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="44546A")
             cell.border = BORDER
         row += 1
         for block, label, meaning, sample, blank in columns:
-            ws.cell(row, 1, block).font = Font(name=FACE, size=9, color=BLOCKS[block][0])
-            ws.cell(row, 2, label).font = Font(name=FACE, size=9, bold=block == "필수")
-            ws.cell(row, 3, meaning).font = Font(name=FACE, size=9)
-            ws.cell(row, 4, sample).font = Font(name=FACE, size=9, color="9C6500")
-            ws.cell(row, 5, blank).font = Font(name=FACE, size=9, color="5B6478")
-            for column in range(1, 6):
+            part = _part_of(block)
+            ws.cell(row, 1, part).font = Font(name=FACE, size=9, color=PARTS[part][0])
+            ws.cell(row, 2, block).font = Font(name=FACE, size=9, color=_look(block)[0])
+            ws.cell(row, 3, label).font = Font(name=FACE, size=9, bold=block == "필수")
+            ws.cell(row, 4, meaning).font = Font(name=FACE, size=9)
+            ws.cell(row, 5, sample).font = Font(name=FACE, size=9, color="9C6500")
+            ws.cell(row, 6, blank).font = Font(name=FACE, size=9, color="5B6478")
+            for column in range(1, 7):
                 ws.cell(row, column).border = BORDER
                 ws.cell(row, column).alignment = Alignment(vertical="top", wrap_text=True)
             row += 1

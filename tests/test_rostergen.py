@@ -11,6 +11,7 @@ import pytest
 
 from pension.errors import PensionDataError, Severity
 from pension.pipeline import RunOptions, run_valuation
+from pension.rostertemplate import FIRST_DATA_ROW, HEADER_ROW
 from pension.rostergen import CASES, write_case_pack
 
 
@@ -216,7 +217,7 @@ def test_same_seed_gives_the_same_file(tmp_path) -> None:
         ws = openpyxl.load_workbook(path)["재직자명부"]
         return [
             [ws.cell(r, c).value for c in range(2, 11)]
-            for r in range(4, 20)
+            for r in range(FIRST_DATA_ROW, FIRST_DATA_ROW + 16)
         ]
 
     assert rows(first) == rows(second)
@@ -237,10 +238,10 @@ class TestPracticeCases:
         roster, _ = pack["자료불량"]
         wb = openpyxl.load_workbook(roster, data_only=True)
         ws = wb["재직자명부"]
-        head = {c.value: c.column for c in ws[3] if c.value}
+        head = {c.value: c.column for c in ws[HEADER_ROW] if c.value}
         rows = [
             {name: ws.cell(r, col).value for name, col in head.items()}
-            for r in range(4, ws.max_row + 1)
+            for r in range(FIRST_DATA_ROW, ws.max_row + 1)
             if ws.cell(r, head["사번"]).value
         ]
         wb.close()

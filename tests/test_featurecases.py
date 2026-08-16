@@ -11,6 +11,7 @@ from __future__ import annotations
 import openpyxl
 import pytest
 
+from pension.rostertemplate import FIRST_DATA_ROW, HEADER_ROW
 from pension.featurecases import (
     BASE_SPEC,
     FEATURES,
@@ -36,10 +37,10 @@ def measured(pack):
 def _rows(path, sheet="재직자명부"):
     book = openpyxl.load_workbook(path, data_only=True)
     ws = book[sheet]
-    head = {c.value: c.column for c in ws[3] if c.value}
+    head = {c.value: c.column for c in ws[HEADER_ROW] if c.value}
     out = [
         {name: ws.cell(r, col).value for name, col in head.items()}
-        for r in range(4, ws.max_row + 1)
+        for r in range(FIRST_DATA_ROW, ws.max_row + 1)
         if ws.cell(r, head["사번"]).value
     ]
     book.close()

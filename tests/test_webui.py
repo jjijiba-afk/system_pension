@@ -16,6 +16,7 @@ import pytest
 from pension import assumption_form as form
 from pension import clients
 from pension.assumptions import DISCOUNT_SHEET, FORMULA, load_assumptions
+from pension.rostertemplate import FIRST_DATA_ROW, HEADER_ROW
 from pension.webui import api
 
 
@@ -1334,9 +1335,9 @@ class TestRemainingGapsClosed:
         ws = book["재직자명부"]
         # 열 번호를 박아 두면 양식이 한 칸 움직일 때 엉뚱한 칸을 채운다.
         # 머리글로 찾는다 — 명부를 읽는 쪽과 같은 방식이다.
-        head = {str(c.value).strip(): c.column for c in ws[3] if c.value}
-        ws.cell(25, head["추가지급 기본급"], 3_000_000)
-        ws.cell(26, head["명예퇴직 기준임금"], 8_000_000)
+        head = {str(c.value).strip(): c.column for c in ws[HEADER_ROW] if c.value}
+        ws.cell(FIRST_DATA_ROW, head["추가지급 기본급"], 3_000_000)
+        ws.cell(FIRST_DATA_ROW + 1, head["명예퇴직 기준임금"], 8_000_000)
         marked = str(tmp_path / "표시명부.xlsx")
         book.save(marked)
 

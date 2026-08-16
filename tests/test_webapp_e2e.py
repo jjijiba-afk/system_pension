@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from pension.rostertemplate import FIRST_DATA_ROW, HEADER_ROW
+
 playwright_api = pytest.importorskip("playwright.sync_api")
 
 DIST = Path(__file__).resolve().parent.parent / "webapp" / "dist"
@@ -189,7 +191,7 @@ def test_an_uploaded_roster_comes_back_in_our_template(page, tmp_path) -> None:
     download.save_as(got)
     book = openpyxl.load_workbook(got)
     assert "재직자명부" in book.sheetnames
-    assert book["재직자명부"].cell(3, 2).value == "사번"
+    assert book["재직자명부"].cell(HEADER_ROW, 2).value == "사번"
 
 
 def test_font_scale_is_small_on_a_pc_and_safe_on_touch(browser, app_url) -> None:
@@ -1033,8 +1035,8 @@ def test_prior_roster_comparison_runs_before_the_valuation(page, tmp_path) -> No
     sheet = book["재직자명부"]
     # 열은 머리글로 찾는다. 번호를 못박으면 양식이 한 칸만 움직여도 빈 칸을
     # 고치게 되고, 그러면 '바뀐 것이 없다' 로 조용히 통과한다.
-    birth = next(c.column for c in sheet[3] if c.value == "생년월일")
-    sheet.cell(4, birth, "1955-01-01")
+    birth = next(c.column for c in sheet[HEADER_ROW] if c.value == "생년월일")
+    sheet.cell(FIRST_DATA_ROW, birth, "1955-01-01")
     book.save(changed)
 
     page.click("#tab-calc")
