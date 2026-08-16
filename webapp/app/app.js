@@ -3258,6 +3258,7 @@ $("lock-ok").addEventListener("click", () => {
   }
   try { sessionStorage.setItem(LOCK_STORE, value); } catch (err) { /* 사설 모드 */ }
   $("lock-dialog").close();
+  syncLockedUI();
   status("잠금을 풀었습니다 — 이 탭을 닫을 때까지 유지됩니다.");
   // 잠겨 있던 것들을 그 자리에서 되살린다 — 명부 목록의 숨은 등록본,
   // 이미 만들어 둔 시험 명부의 특이케이스까지.
@@ -3269,6 +3270,17 @@ $("lock-ok").addEventListener("click", () => {
 $("lock-pass").addEventListener("keydown", (event) => {
   if (event.key === "Enter") { event.preventDefault(); $("lock-ok").click(); }
 });
+
+/** 잠금 상태를 화면에 반영 — 잠겨 있으면 설명 한 줄과 [안내] 만 남는다. */
+function syncLockedUI() {
+  const open = genUnlocked();
+  $("feat-locked").hidden = open;
+  $("feat-open").hidden = !open;
+  $("feat-mark").hidden = open;
+  if (!open) { features = null; $("feat-cases").replaceChildren(); }
+}
+
+$("feat-ask").addEventListener("click", () => askUnlock(null));
 
 $("gen-run").addEventListener("click", () => {
   try {
@@ -3590,6 +3602,8 @@ window.addEventListener("beforeunload", (event) => {
   event.preventDefault();
   event.returnValue = "";      // 브라우저 표준 문구가 뜬다
 });
+
+syncLockedUI();      // 첫 화면부터 잠금 상태대로 (features 선언 뒤라야 한다)
 
 document.getElementById("help-open").addEventListener("click", openHelp);
 document.getElementById("help-close").addEventListener("click", closeHelp);
