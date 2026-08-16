@@ -1187,10 +1187,10 @@ class TestPlanAssetsAndAmendment:
         case = self._pack(tmp_path)
         wb = openpyxl.load_workbook(case["roster"])
         ws = wb["예치금"]
-        # 기말 잔액을 흔든다. 구성 열(예치금)이 합계보다 우선하므로 거기를 고친다.
+        # 기말 잔액을 흔든다. 합쳐진 증감표에서 예치금은 4열이다.
         closing = next(r for r in range(1, ws.max_row + 1)
-                       if str(ws.cell(r, 2).value or "").startswith("기말 잔액"))
-        ws.cell(closing, 3, float(ws.cell(closing, 3).value) + 9_103_134)
+                       if str(ws.cell(r, 2).value or "").startswith("당기말 잔액"))
+        ws.cell(closing, 4, float(ws.cell(closing, 4).value) + 9_103_134)
         broken = str(tmp_path / "안맞는표.xlsx")
         wb.save(broken)
 

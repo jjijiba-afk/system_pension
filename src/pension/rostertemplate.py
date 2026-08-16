@@ -341,24 +341,28 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
     ws.cell(1, 1).font = Font(name=FACE, size=9, italic=True, color="5B6478")
 
     def band(row: int, name_of, colors) -> None:
-        """같은 값이 이어지는 구간마다 칸을 병합해 이름을 얹는다."""
+        """같은 값이 이어지는 구간마다 이름을 얹는다.
+
+        병합 대신 **'선택 영역의 가운데로'** 정렬을 쓴다. 고정(freeze)된
+        머리글 행에 병합 칸이 있으면 엑셀 제한된 보기에서 그리기가 깨져,
+        멀쩡한 파일인데 글자가 군데군데 사라져 보였다. 이 정렬은 병합 없이
+        같은 모양을 낸다 — 값은 구간 첫 칸에만 있고, 빈 칸들이 이어지는
+        동안 가운데로 그려진다.
+        """
         start = 1
         for index in range(1, len(columns) + 1):
             here = name_of(columns[index - 1][0])
             last = index == len(columns)
             if last or name_of(columns[index][0]) != here:
                 fill, ink = colors(here)
-                ws.merge_cells(start_row=row, start_column=start,
-                               end_row=row, end_column=index)
                 cell = ws.cell(row, start, here)
                 cell.font = Font(name=FACE, size=9, bold=True, color=ink)
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-                # 병합 범위의 칸마다 칠하고 두른다. 왼쪽 첫 칸에만 주면 띠가
-                # 반쯤 그려진 것처럼 보인다 — 병합 셀의 서식은 이어지지 않는다.
                 for span in range(start, index + 1):
                     target = ws.cell(row, span)
                     target.fill = PatternFill("solid", fgColor=fill)
                     target.border = BORDER
+                    target.alignment = Alignment(horizontal="centerContinuous",
+                                                 vertical="center")
                 start = index + 1
 
     # 2행: 파트. 3행: 블록. 어디까지가 필수이고 어디부터 지워도 되는지 한눈에.
@@ -815,31 +819,33 @@ def _longterm(ws, row: int, *, filled: bool = False, rows: list | None = None,
 # ── 사외적립자산 ────────────────────────────────────────────────
 
 #: 퇴직급여추계액 변동내역. (부호, 항목, 예시금액)
-OBLIGATION_ROWS = [
-    ("(+)", "계열사 전입", 0),
-    ("(+)", "합병으로 받은 금액", 0),
-    ("(-)", "퇴직금 지급액", 980_000_000),
-    ("(-)", "중간정산금", 120_000_000),
-    ("(-)", "DC전환 지급액", 0),
-    ("(-)", "퇴직위로금 (명예퇴직금 등)", 60_000_000),
-    ("(-)", "계열사 전출", 0),
-    ("(-)", "사업처분·분할", 0),
+#: 증감 한 표. (부호, 항목, 추계액에 해당?, 예치금에 해당?, 예시추계액, 예시예치금)
+#:
+#: 종전에는 추계액 증감과 예치금 증감이 표 두 개였는데, 항목 대부분(지급액·
+#: 중간정산금·DC전환·전입·합병…)이 양쪽에 똑같이 들어가 담당자가 같은
+#: 숫자를 두 번 적었다. 한 표로 합치고 열만 갈랐다 — 해당 없는 칸은 회색으로
+#: 막아 두어 "여기는 적는 칸이 아니다" 가 보이게 한다.
+MOVEMENT_ROWS = [
+    ("유입", "회사 납입 부담금",        False, True,  0,             1_500_000_000),
+    ("유입", "운용수익 (이자 등)",       False, True,  0,             420_000_000),
+    ("유입", "합병·양수로 받음",         True,  True,  0,             0),
+    ("유입", "계열사에서 받음 (전입)",    True,  True,  0,             0),
+    ("유출", "퇴직자 지급액",           True,  True,  980_000_000,   980_000_000),
+    ("유출", "중간정산 지급액",          True,  True,  120_000_000,   120_000_000),
+    ("유출", "DC 전환 지급액",          True,  True,  0,             0),
+    ("유출", "위로금·명예퇴직금",        True,  False, 60_000_000,    0),
+    ("유출", "계열사로 보냄 (전출)",     True,  True,  0,             0),
+    ("유출", "사업 매각·분할로 보냄",     True,  True,  0,             0),
+    ("유출", "수수료 (운용관리)",        False, True,  0,             18_000_000),
+    ("유출", "수수료 (자산관리)",        False, True,  0,             9_000_000),
 ]
 
-#: 사외적립자산 변동내역. (부호, 항목, DB, 국민연금전환금)
-ASSET_ROWS = [
-    ("(+)", "부담금 납입액", 1_500_000_000, 0),
-    ("(+)", "이자수익", 420_000_000, 0),
-    ("(+)", "계열사 전입", 0, 0),
-    ("(+)", "합병으로 받은 금액", 0, 0),
-    ("(-)", "퇴직금 지급액", 980_000_000, 0),
-    ("(-)", "중간정산금", 120_000_000, 0),
-    ("(-)", "DC전환 지급액", 0, 0),
-    ("(-)", "계열사 전출", 0, 0),
-    ("(-)", "사업처분·분할", 0, 0),
-    ("(-)", "운용관리수수료", 18_000_000, 0),
-    ("(-)", "자산관리수수료", 9_000_000, 0),
-]
+#: 옛 두-표 서식을 읽는 쪽과 시험이 아직 참조한다. 표는 하나가 됐지만 낱말은
+#: 그대로여야 한다.
+OBLIGATION_ROWS = [(sign, name, ob) for sign, name, has_ob, _a, ob, _av in MOVEMENT_ROWS
+                   if has_ob]
+ASSET_ROWS = [(sign, name, av, 0) for sign, name, _o, has_asset, _ov, av in MOVEMENT_ROWS
+              if has_asset]
 
 ASSET_OPENING = (12_000_000_000, 300_000_000)
 #: 기말은 신탁 명세서의 숫자를 그대로 적는 자리다. 검증 줄이 0 이 되는 값.
@@ -852,7 +858,7 @@ ASSET_CLOSING = (12_793_000_000, 300_000_000)
 #: 자산이 자산의 대부분인 회사가 흔한데, 나누지 않으면 그 사실이 공시에
 #: 드러나지 않는다.
 ASSET_BREAKDOWN = [
-    ("현금 및 현금등가물", 150_000_000, "있음"),
+    ("현금·요구불예금", 150_000_000, "있음"),
     ("정기예금·원리금보장 GIC", 9_800_000_000, "없음"),
     ("국공채", 1_500_000_000, "있음"),
     ("특수채·금융채", 700_000_000, "있음"),
@@ -888,9 +894,9 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     row = _prepare(
         ws, "예치금",
         "신탁·보험 명세서의 숫자를 그대로 옮겨 주세요. 노란 칸이 입력, "
-        "굵은 칸은 자동 계산입니다. ② 맨 아랫줄이 0 이어야 합니다.")
+        "굵은 칸은 자동 계산입니다. ① 맨 아랫줄이 0 이어야 합니다.")
     # 부호 칸은 좁게. 항목 이름이 왼쪽 끝에 붙어야 표가 한 덩어리로 읽힌다.
-    ws.column_dimensions["A"].width = 4
+    ws.column_dimensions["A"].width = 6
     ws.column_dimensions["B"].width = 32
 
     def money(row: int, column: int, value, *, formula: bool = False):
@@ -912,61 +918,69 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
         cell.font = Font(name=FACE, size=9)
         cell.border = BORDER
 
-    # ── ① 퇴직급여추계액 증감 ────────────────────────────────────
-    row = _band(ws, row, "① 퇴직급여추계액 증감", BAND_COLOURS[0],
-                "회사가 계산한 추계액(K-GAAP)의 기중 증감입니다. "
-                "유출입은 모두 양수로 적으세요 — 부호는 왼쪽 (+)(−) 가 정합니다.")
-    row = _heads(ws, row, ((1, ""), (2, "구분"), (3, "금액"), (4, "적는 법")),
-                 spans={4: 6})
-    for sign, text_, amount in OBLIGATION_ROWS:
-        label(row, sign, text_)
-        money(row, 3, amount if obligation_of is None else obligation_of.get(text_, 0))
-        _note(ws, row, 4, "")
-        row += 1
+    #: 그 축에 해당 없는 칸의 회색. "여기는 적는 칸이 아니다" 가 보여야 한다.
+    blocked = PatternFill("solid", fgColor="E4E7ED")
 
-    # ── ② 예치금 증감 ────────────────────────────────────────────
-    row += 1
-    row = _band(ws, row, "② 예치금 증감", BAND_COLOURS[1],
-                "명세서의 기초·기말 잔액과 그 사이 오간 돈. 해당 없는 줄은 0 으로 "
-                "두세요 — 줄을 지우면 맨 아래 수식이 어긋납니다.")
-    header_row = _heads(ws, row, (
-        (1, ""), (2, "구분"), (3, "예치금"), (4, "국민연금전환금"),
-        (5, "합계"), (6, "적는 법")))
-    row = header_row
+    def na(row: int, column: int) -> None:
+        cell = ws.cell(row, column)
+        cell.fill = blocked
+        cell.border = BORDER
+
+    # ── ① 추계액·예치금 증감 (한 표) ─────────────────────────────
+    # 종전에는 추계액 증감과 예치금 증감이 표 두 개였는데, 항목 대부분이
+    # 양쪽에 똑같이 들어가 담당자가 같은 숫자를 두 번 적었다. 한 표로 합치고
+    # 열만 갈랐다.
+    row = _band(ws, row, "① 퇴직급여추계액·예치금 증감", BAND_COLOURS[0],
+                "유출입은 모두 양수로 적으세요 — 방향은 왼쪽 유입/유출이 정합니다. "
+                "회색 칸은 그 축에 해당 없는 항목이고, 해당 없는 줄은 0 으로 "
+                "두세요 — 줄을 지우면 맨 아랫줄 수식이 어긋납니다.")
+    row = _heads(ws, row, (
+        (1, ""), (2, "구분"), (3, "퇴직급여추계액"), (4, "예치금"),
+        (5, "국민연금전환금"), (6, "적는 법")))
 
     opening = numbers.get("opening", ASSET_OPENING)
     closing = numbers.get("closing", ASSET_CLOSING)
 
     opening_row = row
-    label(opening_row, "", "기초 잔액 (전기말)")
-    money(opening_row, 3, opening[0])
-    money(opening_row, 4, opening[1])
-    money(opening_row, 5, f"=C{opening_row}+D{opening_row}", formula=True)
+    label(opening_row, "", "전기말 잔액 (기초)")
+    na(opening_row, 3)
+    money(opening_row, 4, opening[0])
+    money(opening_row, 5, opening[1])
     _note(ws, opening_row, 6, "전기말 명세서의 잔액")
 
     row = opening_row + 1
-    for sign, text_, db, pension in ASSET_ROWS:
+    for sign, text_, has_ob, has_asset, ob_amount, asset_amount in MOVEMENT_ROWS:
         label(row, sign, text_)
-        if asset_of is not None:
-            db, pension = asset_of.get(text_, (0, 0))
-        money(row, 3, db)
-        money(row, 4, pension)
-        money(row, 5, f"=C{row}+D{row}", formula=True)
-        ws.cell(row, 6).border = BORDER
+        if has_ob:
+            money(row, 3, ob_amount if obligation_of is None
+                  else obligation_of.get(text_, 0))
+        else:
+            na(row, 3)
+        if has_asset:
+            db, pension = asset_amount, 0
+            if asset_of is not None:
+                db, pension = asset_of.get(text_, (0, 0))
+            money(row, 4, db)
+            money(row, 5, pension)
+        else:
+            na(row, 4)
+            na(row, 5)
+        _note(ws, row, 6, "")
         row += 1
     last_move = row - 1
 
     closing_row = row
-    label(closing_row, "", "기말 잔액 (결산일)")
-    money(closing_row, 3, closing[0])
-    money(closing_row, 4, closing[1])
-    money(closing_row, 5, f"=C{closing_row}+D{closing_row}", formula=True)
+    label(closing_row, "", "당기말 잔액 (결산일)")
+    na(closing_row, 3)
+    money(closing_row, 4, closing[0])
+    money(closing_row, 5, closing[1])
     _note(ws, closing_row, 6, "결산일 명세서의 잔액")
 
     verify_row = closing_row + 1
-    label(verify_row, "", "검증  (기초 + 유입 − 유출 − 기말)")
-    plus_last = opening_row + 4          # (+) 줄 넷: 부담금·이자수익·전입·합병
-    for column in "CDE":
+    label(verify_row, "", "대사  (기초 + 유입 − 유출 − 기말)")
+    na(verify_row, 3)
+    plus_last = opening_row + 4          # 유입 줄 넷: 부담금·운용수익·합병·전입
+    for column in "DE":
         cell = ws.cell(verify_row, ord(column) - 64,
                        f"={column}{opening_row}"
                        f"+SUM({column}{opening_row + 1}:{column}{plus_last})"
@@ -979,7 +993,7 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     row = verify_row + 2
 
     # ── ③ 예치금 구성 (문단 142) ─────────────────────────────────
-    row = _band(ws, row, "③ 예치금 구성  ※ 문단 142 공시", BAND_COLOURS[2],
+    row = _band(ws, row, "② 예치금 구성  ※ 문단 142 공시", BAND_COLOURS[2],
                 "기말 공정가치를 자산 종류별로. 분류마다 활성시장 공시가격이 "
                 "있는지도 함께 적어 주세요 — 공시에 그대로 실립니다. 분류가 더 "
                 "있으면 줄을 늘려도 됩니다.")
@@ -1012,7 +1026,7 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
     row += 2
 
     # ── ④ 그 밖의 입력 ───────────────────────────────────────────
-    row = _band(ws, row, "④ 그 밖의 입력", BAND_COLOURS[3],
+    row = _band(ws, row, "③ 그 밖의 입력", BAND_COLOURS[3],
                 "해당 없으면 0 으로 두세요. 자산인식상한은 비워 두면 미적용입니다.")
     row = _heads(ws, row, ((1, ""), (2, "항목"), (3, "금액"), (4, "적는 법")),
                  spans={4: 6})

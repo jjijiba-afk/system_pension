@@ -306,6 +306,16 @@ def _parse_rounding(formula: str, base_wage: str) -> tuple[int | None, str]:
 
 #: 라벨 → 필드. 앞뒤 공백·괄호 표기가 흔들려서 부분일치로 본다.
 _OBLIGATION_LABELS: Final = (
+    # 우리 [예치금] 양식의 낱말 (본사 서식과 다르게 지은 것들)
+    ("계열사에서 받음", "transfer_in"),
+    ("합병·양수", "merger_in"),
+    ("퇴직자 지급액", "benefits_paid"),
+    ("중간정산 지급액", "settlement_paid"),
+    ("DC 전환", "dc_converted"),
+    ("위로금·명예퇴직금", "other_paid"),
+    ("계열사로 보냄", "transfer_out"),
+    ("매각·분할", "disposal"),
+    # 자료요청서(옛 서식)의 낱말
     ("계열사 전입", "transfer_in"),
     ("합병", "merger_in"),
     ("퇴직금 지급액", "benefits_paid"),
@@ -317,6 +327,19 @@ _OBLIGATION_LABELS: Final = (
 )
 
 _ASSET_LABELS: Final = (
+    # 우리 [예치금] 양식의 낱말
+    ("납입 부담금", "contributions"),
+    ("운용수익", "actual_return"),
+    ("합병·양수", "merger_in"),
+    ("계열사에서 받음", "transfer_in"),
+    ("퇴직자 지급액", "benefits_paid"),
+    ("중간정산 지급액", "settlement_paid"),
+    ("DC 전환", "dc_converted"),
+    ("계열사로 보냄", "transfer_out"),
+    ("매각·분할", "disposal"),
+    ("수수료 (운용관리)", "management_fee"),
+    ("수수료 (자산관리)", "custody_fee"),
+    # 자료요청서(옛 서식)의 낱말
     ("부담금납입", "contributions"),
     ("부담금 납입", "contributions"),
     ("이자수익", "actual_return"),
@@ -424,18 +447,21 @@ def _amount_column(ws, header: int, *names: str) -> int:
 
 
 def _read_obligation(ws) -> ObligationMovement:
-    head = _find_row(ws, "퇴직급여추계액 증감", "퇴직급여추계액 변동내역")
+    head = _find_row(ws, "추계액·예치금 증감", "퇴직급여추계액 증감",
+                     "퇴직급여추계액 변동내역")
     result = ObligationMovement()
     if not head:
         return result
     # 표 제목과 머리글 사이에 안내 줄이 들어가기도 한다. 두 줄을 다 본다.
-    money = (_amount_column(ws, head + 1, "금액")
-             or _amount_column(ws, head + 2, "금액") or 5)
+    # 합쳐진 표에서는 열 이름이 '금액' 이 아니라 '퇴직급여추계액' 이다.
+    money = (_amount_column(ws, head + 1, "추계액", "금액")
+             or _amount_column(ws, head + 2, "추계액", "금액") or 5)
 
     # 바로 다음 표(사외적립자산)에서 멈춘다. 회사가 줄을 하나만 끼워 넣어도
     # 고정 길이로 훑으면 그 표까지 넘어가는데, 거기에도 '계열사 전입' 같은
     # 이름이 그대로 있어 방금 읽은 금액을 0 으로 덮어쓴다.
-    stop = _find_row(ws, "예치금 증감", "사외적립자산 변동내역", start=head + 1) or (head + 14)
+    stop = _find_row(ws, "예치금 증감", "사외적립자산 변동내역", "대사", "검증",
+                     start=head + 1) or (head + 16)
     for row in range(head + 1, stop):
         label = _row_label(ws, row)
         if not label:
@@ -502,6 +528,7 @@ def _asset_amount(ws, row: int, cols: _AssetColumns) -> float:
 
 def _read_assets(ws) -> AssetMovement:
     head = _find_row(ws, "예치금 증감", "사외적립자산 변동내역")
+    # 합쳐진 표에서는 ① 제목 한 줄이 추계액·예치금 둘 다 담당한다.
     result = AssetMovement()
     if not head:
         return result
@@ -510,7 +537,7 @@ def _read_assets(ws) -> AssetMovement:
     # 기초 잔액, '검증' 바로 앞줄이 기말 잔액이다. 두 줄 모두 항목 이름 대신
     # 날짜가 적혀 있어 라벨로는 찾을 수 없다.
     header = _find_row(ws, "국민연금전환금", start=head)
-    verify = _find_row(ws, "검증", start=head)
+    verify = _find_row(ws, "대사", "검증", start=head)
 
     # 국민연금전환금까지 더한 금액을 쓴다. DB퇴직연금 열만 보면 전환금이
     # 통째로 빠져, 전환금을 가진 회사에서 자산이 그만큼 모자라게 잡힌다.

@@ -124,14 +124,14 @@ class TestTheInputSheet:
         for want in ("회사", "직군 규칙", "퇴직급여 지급규정", "특이사항", "장기급여"):
             assert want in joined, f"[{want}] 블록이 없다"
 
-    def test_the_deposit_sheet_keeps_the_old_content(self, blank) -> None:
-        """이름만 바꿨다. 적는 내용이 달라지면 지난해와 맞대어 볼 수 없다."""
+    def test_the_deposit_sheet_covers_every_item(self, blank) -> None:
+        """낱말은 우리식이되 항목은 빠짐없어야 한다."""
         ws = blank["예치금"]
         text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
                           if c.value)
-        for want in ("부담금 납입액", "이자수익", "운용관리수수료", "자산관리수수료",
-                     "기말 잔액", "검증", "자산 분류", "활성시장 공시가격",
-                     "자산인식상한", "기중 장기근속 지급액"):
+        for want in ("회사 납입 부담금", "운용수익", "수수료 (운용관리)",
+                     "수수료 (자산관리)", "당기말 잔액", "대사", "자산 분류",
+                     "활성시장 공시가격", "자산인식상한", "기중 장기근속 지급액"):
             assert want in text, f"[예치금] 에 '{want}' 이(가) 없다"
 
 
@@ -346,3 +346,28 @@ class TestTheLookIsConsistent:
             colour for _part, colour, _ink, _note in BLOCKS.values()
             if colour in tpl.BAND_COLOURS
         ) or set(tpl.BAND_COLOURS) <= {v[1] for v in BLOCKS.values()}
+
+
+class TestFrozenRowsCarryNoMerge:
+    """고정(freeze)된 머리글 행에는 병합 칸을 두지 않는다.
+
+    그 조합이 엑셀 제한된 보기에서 그리기를 깨뜨려, 멀쩡한 파일인데 머리글
+    글자가 군데군데 사라져 보였다 — 어떤 칸은 윗줄만, 어떤 칸은 아랫줄만
+    그려졌다. 파트·블록 띠는 '선택 영역의 가운데로' 정렬로 같은 모양을 낸다.
+    """
+
+    def test_roster_sheets_have_zero_merged_cells(self, blank) -> None:
+        for name in ("재직자명부", "퇴직자명부", "추가명부"):
+            ws = blank[name]
+            assert ws.freeze_panes == f"A{FIRST_DATA_ROW}"
+            assert not ws.merged_cells.ranges, (
+                f"[{name}] 에 병합 칸 {len(ws.merged_cells.ranges)}개 — "
+                "고정 행과 만나면 제한된 보기에서 글자가 사라진다")
+
+    def test_the_bands_still_read_as_one_ribbon(self, blank) -> None:
+        """병합을 뺐어도 띠 전체가 칠해지고 가운데 정렬로 이어져야 한다."""
+        ws = blank["재직자명부"]
+        for column in range(1, len(ACTIVE) + 1):
+            cell = ws.cell(PART_ROW, column)
+            assert cell.alignment.horizontal == "centerContinuous", cell.coordinate
+            assert cell.fill.fgColor.rgb.startswith("FF")
