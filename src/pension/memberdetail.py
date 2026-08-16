@@ -63,6 +63,36 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
         "가입자격(최소 근속)": result.min_service_years,
         "지급액 반올림 단위": result.rounding_unit,
     }
+    # 정년·적용 여부의 **출처** — "임원인데 왜 65세까지 투영되나 / 퇴직률이 왜
+    # 0 인가" 는 늘 여기서 갈린다. 어느 칸이 그렇게 시켰는지를 그대로 적는다.
+    index = getattr(member, "job_group_index", None)
+    rule = (config.job_group_rules[index]
+            if index is not None and index < len(config.job_group_rules)
+            else None)
+    if member.declared_nra:
+        applied["정년연령 근거"] = (
+            f"{result.retirement_age}세 — 명부의 개인별 정년 칸 (직군 규정보다 우선)"
+        )
+    elif (rule is not None and rule.executive_nra
+          and result.retirement_age == rule.executive_nra):
+        applied["정년연령 근거"] = (
+            f"{result.retirement_age}세 — [기본가정] 임원 정년연령 칸"
+        )
+    elif result.retirement_age:
+        applied["정년연령 근거"] = (
+            f"{result.retirement_age}세 — 직군 '{result.job_group}' 규칙"
+        )
+    off = [label for label, on in (
+        ("중도퇴직률", member.apply_withdrawal),
+        ("사망률", member.apply_mortality),
+        ("승급률", member.apply_promotion),
+        ("Base-up", member.apply_base_up),
+    ) if not on]
+    if off:
+        applied["미반영 가정"] = (
+            "·".join(off) + " — [기본가정] 적용 여부 칸이 '미반영' 입니다. "
+            "중도퇴직률 미반영은 정년까지 전원 근무한다고 보는 설정입니다"
+        )
     if result.extra_payment:
         applied["명부 추가지급 기본급"] = (
             f"{result.extra_payment:,.0f}원 — 산출에 더해지지 않았습니다. "

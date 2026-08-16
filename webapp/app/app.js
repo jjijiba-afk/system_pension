@@ -2162,7 +2162,8 @@ function drawMemberChart() {
   const m = d.profile;
   $("dash-who").textContent = `${m.사번} ${m.성명} · ${m.연령}세 ${m.성별} · ${m.직군}`
     + ` · 근속 ${m.근속}년 · 정년 ${m.정년}세 · 월평균임금 ${won(m.월평균임금)}원`
-    + ` · 지급률규정 ${m.지급률규정}`;
+    + ` · 지급률규정 ${m.지급률규정}`
+    + (m.가정메모 ? ` · ${m.가정메모}` : "");
   drawDashChips();
   drawDashReadout(s);
   drawDashTrace(s);

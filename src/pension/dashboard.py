@@ -76,6 +76,25 @@ def _member_block(run: Any, employee_id: str) -> dict[str, Any]:
          if abs(m.service_years(run.config.base_date) - picked.past_service) < 0.01),
         same[0],
     )
+    # 정년·적용 여부의 출처 — "임원인데 왜 이렇게 길게 투영되나" 는 늘 여기서
+    # 갈리므로, 어느 칸이 그렇게 시켰는지 한 줄로 같이 내보낸다.
+    notes = []
+    index = getattr(member, "job_group_index", None)
+    rule = (run.config.job_group_rules[index]
+            if index is not None and index < len(run.config.job_group_rules)
+            else None)
+    if member.declared_nra:
+        notes.append(f"정년 {picked.retirement_age}세 = 명부의 개인별 정년 칸")
+    elif (rule is not None and rule.executive_nra
+          and picked.retirement_age == rule.executive_nra):
+        notes.append(f"정년 {picked.retirement_age}세 = [임원 정년연령] 칸")
+    for label, on in (
+        ("중도퇴직률", member.apply_withdrawal),
+        ("사망률", member.apply_mortality),
+    ):
+        if not on:
+            notes.append(f"{label} 미반영 (기본가정 설정)")
+
     return {
         "profile": {
             "사번": picked.employee_id, "성명": picked.name,
@@ -84,6 +103,7 @@ def _member_block(run: Any, employee_id: str) -> dict[str, Any]:
             "정년": picked.retirement_age, "투영연수": picked.projection_years,
             "월평균임금": picked.monthly_wage, "추계액": picked.accrued_benefit,
             "지급률규정": picked.benefit_rule or picked.job_group,
+            "가정메모": " · ".join(notes),
         },
         "scenarios": _scenarios(member, run.config, run.assumptions),
     }
