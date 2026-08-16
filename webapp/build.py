@@ -364,6 +364,15 @@ _PRINT_PAGE = """<!doctype html>
     border:1px solid var(--navy); background:var(--navy); color:#fff;
     cursor:pointer; }}
   .bar button.ghost {{ background:#fff; color:var(--navy); margin-left:6px; }}
+  /* 화면에서는 몸통이 옆으로 밀리지 않아야 한다. 수식 블록과 넓은 표가
+     화면보다 넓으면 페이지 전체가 따라 움직여 글이 잘려 보였다 — 각자
+     자기 상자 안에서만 구르게 한다. 인쇄에는 걸지 않는다. */
+  @media screen {{
+    html, body {{ overflow-x:hidden; }}
+    pre {{ white-space:pre-wrap; word-break:break-word; }}
+    table {{ display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }}
+    code {{ overflow-wrap:anywhere; }}
+  }}
   @media print {{
     @page {{ size:A4 portrait; margin:15mm 14mm; }}
     body {{ max-width:none; padding:0; font-size:10pt; }}
