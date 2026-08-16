@@ -2,7 +2,7 @@
 
 시험 자료가 시험 대상보다 먼저 틀리면 곤란하다. 세 사례가 **의도한 성격대로**
 나오는지를 여기서 못박는다 — 표준은 오류 없이 돌고, 복합제도는 특수 경로를
-실제로 지나가고, 자료불량은 검증이 잡아낼 거리를 실제로 담고 있어야 한다.
+실제로 지나가고, 특이케이스는 문제지가 기초자료에 그대로 실려야 한다.
 """
 
 from __future__ import annotations
@@ -96,40 +96,57 @@ class TestComplexCase:
         assert len(reasons) >= 4, "정년·사망·전출 등이 섞여 있어야 한다"
 
 
-class TestDirtyCase:
-    def test_stops_without_force(self, pack, tmp_path) -> None:
-        with pytest.raises(PensionDataError) as caught:
-            _run(pack, "자료불량", tmp_path)
-        errors = [i for i in caught.value.issues if i.severity is Severity.ERROR]
-        assert len(errors) > 30
+class TestSpecialsCase:
+    """특이케이스 명부 — 명부는 깨끗하고, 특이사항 표가 문제지다.
 
-    def test_catches_the_planted_problems(self, pack, tmp_path) -> None:
-        """심어 둔 문제를 검증이 실제로 잡는지 — 종류별로 확인한다."""
-        run = _run(pack, "자료불량", tmp_path, force=True)
-        found = {issue.code for issue in run.issues.errors}
-        for code in (
-            "JAE_DUP_ID",            # 사번 중복
-            "JAE_PLAN_MISSING",      # 제도구분 누락
-            "JAE_WAGE_MISSING",      # 임금 0
-            "JAE_WAGE_BELOW_CHECK",  # 체크금액 미만
-            "JAE_BIRTH_AFTER_HIRE",  # 생년월일·입사일 역전
-            "JAE_HIRE_AFTER_BASE",   # 입사일이 기준일보다 늦음
-            "JAE_JOB_GROUP_UNKNOWN", # 규정에 없는 직군
-        ):
-            assert code in found, f"{code} 를 잡아내지 못했다"
+    자료불량 명부를 대신한다. 클리닝은 실습하는 사람이 알아서 하므로 명부에
+    사례별 장치를 심지 않는다 — 단체가 쓰듯 기본 항목만 적고, 사례 목록을
+    [기초자료] 특이사항과 안내문에 싣는다.
+    """
 
-    def test_still_produces_a_valuation_when_forced(self, pack, tmp_path) -> None:
-        """강행하면 읽을 수 있는 사람만으로 끝까지 돌아야 한다."""
-        run = _run(pack, "자료불량", tmp_path, force=True)
-        assert 0 < run.valuation.headcount < 290
-        assert run.valuation.dbo > 0
-        assert run.valuation.exclusion_summary(), "읽지 못한 사람은 제외 사유가 남아야 한다"
+    def test_the_roster_itself_is_clean(self, pack, tmp_path) -> None:
+        """문제지는 특이사항이지 자료 오류가 아니다 — 강행 없이 돌아야 한다."""
+        run = _run(pack, "특이케이스", tmp_path)
+        assert run.issues.errors == []
+        assert run.valuation.headcount > 0
 
-    def test_mixed_date_formats_are_still_parsed(self, pack, tmp_path) -> None:
-        """서식이 뒤섞여도 상당수는 읽혀야 한다. 전부 실패하면 파서 문제다."""
-        run = _run(pack, "자료불량", tmp_path, force=True)
-        parsed = sum(1 for m in run.roster.active if m.birth_date)
-        assert parsed > 250
+    def test_every_note_lands_on_the_basics_sheet(self, pack) -> None:
+        import openpyxl
+
+        from pension.rostergen import SPECIAL_NOTES
+
+        roster, _ = pack["특이케이스"]
+        book = openpyxl.load_workbook(roster)
+        ws = book["기초자료"]
+        text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
+                          if c.value)
+        for title, detail in SPECIAL_NOTES:
+            assert title in text, f"{title} 이 기초자료에 없다"
+            assert detail[:20] in text, f"{title} 의 내용이 잘렸다"
+        book.close()
+
+    def test_the_report_repeats_the_question_sheet(self, pack) -> None:
+        from pension.rostergen import SPECIAL_NOTES
+
+        roster, _ = pack["특이케이스"]
+        written = (roster.parent / "시험명부3_특이케이스_특이사항.txt").read_text(
+            encoding="utf-8")
+        for title, _detail in SPECIAL_NOTES:
+            assert title in written
+
+    def test_no_case_gadgets_are_planted_in_the_roster(self, pack) -> None:
+        """명부는 단체가 적는 기본 항목만. 사례 장치(구간분할·누진 열)가 심겨
+        있으면 '깨끗한 명부 + 문제지' 라는 약속이 깨진다."""
+        import openpyxl
+
+        from pension.rostertemplate import HEADER_ROW
+
+        roster, _ = pack["특이케이스"]
+        ws = openpyxl.load_workbook(roster)["재직자명부"]
+        heads = {str(c.value) for c in ws[HEADER_ROW] if c.value}
+        for gadget in ("누진적용 근속연수", "누진적용 율", "지급률 기산일",
+                       "연봉제 전환 추계일"):
+            assert gadget not in heads, f"'{gadget}' 열이 심겨 있다"
 
 
 class TestGeneralSheet:
@@ -224,18 +241,41 @@ def test_same_seed_gives_the_same_file(tmp_path) -> None:
     assert rows(first) != rows(third)
 
 
+@pytest.fixture(scope="module")
+def practice(tmp_path_factory):
+    """practice 플래그로 만든 연습 명부.
+
+    시험명부 3종에서는 빠졌지만(특이케이스 명부는 문제지만 싣는다), 규정을
+    읽어야 풀리는 사례를 심는 장치 자체는 플래그로 계속 만들 수 있어야 한다.
+    """
+    from pension.rostergen import CaseSpec, write_case_assumptions, write_case_roster
+
+    spec = CaseSpec(
+        key="연습", title="연습명부", summary="practice 장치 시험용.",
+        active=150, retired=20,
+        groups=(("정규직", 0.75), ("계약직", 0.13), ("임원", 0.12)),
+        flags={"practice": True, "dc_share": 0.06, "settlement_share": 0.05,
+               "longterm_share": 0.35, "multiple_share": 0.03, "leave_share": 0.04},
+    )
+    directory = tmp_path_factory.mktemp("연습")
+    report = directory / "연습명부_특이사항.txt"
+    roster = write_case_roster(spec, directory / "연습명부.xlsx", report_path=report)
+    assumptions = write_case_assumptions(spec, directory / "연습명부_기초율.xlsx")
+    return {"연습": (roster, assumptions), "_report": report}
+
+
 class TestPracticeCases:
-    """자료불량 명부에 심어 둔 '규정을 읽어야 풀리는' 사례들.
+    """practice 플래그가 심는 '규정을 읽어야 풀리는' 사례들.
 
     자료 오류와 성격이 다르다. 검증이 잡아 주는 것이 아니라, 담당자가 비고를
     읽고 산출에 반영해야 하는 것들이라 **실제로 산출 경로를 지나가는지** 를
     본다. 안내문이 짚어 준 사번이 명부에 없으면 시험 자료가 거짓말을 한다.
     """
 
-    def _actives(self, pack):
+    def _actives(self, practice):
         import openpyxl
 
-        roster, _ = pack["자료불량"]
+        roster, _ = practice["연습"]
         wb = openpyxl.load_workbook(roster, data_only=True)
         ws = wb["재직자명부"]
         head = {c.value: c.column for c in ws[HEADER_ROW] if c.value}
@@ -247,16 +287,15 @@ class TestPracticeCases:
         wb.close()
         return rows, head
 
-    def test_every_case_is_named_in_the_report(self, pack) -> None:
+    def test_every_case_is_named_in_the_report(self, practice) -> None:
         """안내문이 사례마다 사번을 짚어 주고, 그 사번이 명부에 있어야 한다."""
         import re
 
         from pension.rostergen import PRACTICE_CASES
 
-        roster, _ = pack["자료불량"]
-        report = (roster.parent / "시험명부3_자료불량_특이사항.txt").read_text(
-            encoding="utf-8")
-        rows, _ = self._actives(pack)
+        roster, _ = practice["연습"]
+        report = practice["_report"].read_text(encoding="utf-8")
+        rows, _ = self._actives(practice)
         ids = {str(r["사번"]) for r in rows}
 
         for title, _detail in PRACTICE_CASES:
@@ -266,20 +305,20 @@ class TestPracticeCases:
         # 재직자 사번은 실제로 명부에 있어야 한다(T… 는 퇴직자명부).
         assert {c for c in cited if c.startswith("A")} <= ids
 
-    def test_extra_columns_are_written_and_read(self, pack, tmp_path) -> None:
+    def test_extra_columns_are_written_and_read(self, practice, tmp_path) -> None:
         """누진·지급구간 열은 고정 서식 밖이라 머리글로 찾아 읽는 경로를 탄다."""
-        rows, head = self._actives(pack)
+        rows, head = self._actives(practice)
         for label in ("지급률기산일", "지급률종료일", "누진적용근속연수", "누진적용율"):
             assert label in head, f"'{label}' 열이 만들어지지 않았다"
 
-        run = _run(pack, "자료불량", tmp_path, force=True)
+        run = _run(practice, "연습", tmp_path, force=True)
         progressive = [m for m in run.valuation.members if m.progressive_service]
         assert progressive, "누진 보전이 산출까지 닿지 않았다"
         assert progressive[0].progressive_rate > 1.0
 
-    def test_period_split_is_not_a_duplicate_error(self, pack, tmp_path) -> None:
+    def test_period_split_is_not_a_duplicate_error(self, practice, tmp_path) -> None:
         """세법한도 동결은 같은 사번 두 줄이지만 오류가 아니라 기간 분할이다."""
-        run = _run(pack, "자료불량", tmp_path, force=True)
+        run = _run(practice, "연습", tmp_path, force=True)
         by_id: dict[str, int] = {}
         for m in run.valuation.members:
             by_id[m.employee_id] = by_id.get(m.employee_id, 0) + 1
@@ -292,16 +331,16 @@ class TestPracticeCases:
         }
         assert not (set(split) & flagged), "기간 분할을 사번 중복 오류로 잡았다"
 
-    def test_the_dc_leaver_appears_on_both_sheets(self, pack, tmp_path) -> None:
+    def test_the_dc_leaver_appears_on_both_sheets(self, practice, tmp_path) -> None:
         """DC 전환 후 퇴직자는 재직·퇴직 양쪽에 같은 사번으로 있다."""
-        run = _run(pack, "자료불량", tmp_path, force=True)
+        run = _run(practice, "연습", tmp_path, force=True)
         active_ids = {m.employee_id for m in run.roster.active}
         retired_ids = {m.employee_id for m in run.roster.retired}
         assert active_ids & retired_ids, "양쪽에 걸친 사번이 없다"
 
-    def test_practice_cases_reach_the_valuation(self, pack, tmp_path) -> None:
+    def test_practice_cases_reach_the_valuation(self, practice, tmp_path) -> None:
         """휴직차감·추가지급·개별배수가 실제 산출 결과에 나타나야 한다."""
-        run = _run(pack, "자료불량", tmp_path, force=True)
+        run = _run(practice, "연습", tmp_path, force=True)
         members = run.valuation.members
         assert any(m.extra_payment for m in members), "추가지급 기본급이 안 잡혔다"
         assert any(m.rounding_unit >= 0 for m in members)

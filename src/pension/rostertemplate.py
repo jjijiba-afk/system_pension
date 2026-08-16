@@ -375,7 +375,10 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
         cell = ws.cell(HEADER_ROW, index, label)
         cell.font = Font(name=FACE, size=9, bold=True, color=ink)
         cell.fill = PatternFill("solid", fgColor=fill)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        # 자동 줄바꿈은 끈다. 고정된 머리글 행에서 줄바꿈 켜진 칸이 엑셀
+        # 제한된 보기에서 글자를 안 그리는 일이 있었다 — 끄니 잘 보인다.
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=False)
         cell.border = BORDER
         ws.column_dimensions[get_column_letter(index)].width = max(11, min(18, len(label) + 5))
 
@@ -420,7 +423,7 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
         for column in range(1, len(columns) + 1):
             ws.cell(first_row + offset, column).border = BORDER
 
-    ws.row_dimensions[HEADER_ROW].height = 34
+    ws.row_dimensions[HEADER_ROW].height = 22
     ws.freeze_panes = ws.cell(FIRST_DATA_ROW, 1)
     return ws
 
@@ -722,6 +725,16 @@ def _rules(ws, row: int, *, filled: bool = False,
         written = (specials or {}).get(label, "") if specials is not None else ""
         _write(ws, row, 2, written, span=3, filled=True)
         _note(ws, row, 4, sample)
+        ws.row_dimensions[row].height = 22
+        row += 1
+    # 고정 구분에 없는 특이사항은 이어서 적는다. 특이케이스 명부의 문제지가
+    # 여기로 실린다 — 회사가 제 구분을 만들어 보내도 같은 길로 들어온다.
+    known = {label for label, _sample in SPECIAL_ROWS}
+    for label, written in (specials or {}).items():
+        if label in known:
+            continue
+        _write(ws, row, 1, label, bold=True)
+        _write(ws, row, 2, written, span=6, filled=True)
         ws.row_dimensions[row].height = 22
         row += 1
     return row + 1

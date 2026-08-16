@@ -684,15 +684,18 @@ class TestGenerator:
         assert len(result["files"]) == 9        # 사례 3종 × (명부·기초율·안내문)
         assert len(result["cases"]) == 3
 
-        dirty = next(c for c in result["cases"] if c["force"])
-        assert "일부러 심어 둔 자료 오류" in dirty["report"]
-        clean = next(c for c in result["cases"] if not c["force"])
+        # 자료불량 사례는 만들지 않는다 — 세 사례 모두 강행 없이 돌아간다.
+        assert not any(c["force"] for c in result["cases"])
+        special = next(c for c in result["cases"] if c["key"] == "특이케이스")
+        assert "문제지" in special["report"]
+        assert "사례 01" in special["report"]
+        clean = next(c for c in result["cases"] if c["key"] == "표준")
         assert "산출 특이사항" in clean["report"]
         assert Path(clean["roster"]).exists() and Path(clean["assumptions"]).exists()
 
     def test_generated_case_runs_end_to_end(self, tmp_path) -> None:
         made = call("gen_cases", work=str(tmp_path), seed=42)
-        case = next(c for c in made["cases"] if not c["force"])
+        case = next(c for c in made["cases"] if c["key"] == "표준")
         report = call("run", roster=case["roster"], assumptions=case["assumptions"],
                       work=str(tmp_path), sensitivity=False, longterm=True)
         assert report["run"] is True

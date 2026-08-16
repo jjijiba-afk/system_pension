@@ -123,7 +123,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     samples.add_argument(
         "--cases", action="store_true",
-        help="난수로 만든 시험용 명부 3종(표준·복합제도·자료불량)과 짝 기초율도 함께",
+        help="난수로 만든 시험용 명부 3종(표준·복합제도·특이케이스)과 짝 기초율도 함께",
     )
     samples.add_argument(
         "--seed", type=int, default=20251231,
