@@ -189,7 +189,12 @@ figure.fig svg {{ display: block; }}
 figure.fig figcaption {{ color: #5B6478; font-size: 8.5pt; margin-top: 3px; }}
 dl dt {{ font-weight: bold; margin-top: 10px; }}
 dl dd {{ margin: 2px 0 8px 12px; color: #333; }}
-@media screen {{ body {{ max-width: 800px; margin: 0 auto; padding: 24px; }} }}
+/* 미리보기(iframe)에서 페이지가 옆으로 흔들리지 않게 — 몸통은 제자리에 두고,
+   몸통보다 넓은 표는 그 표 안에서만 가로로 구른다. 인쇄에는 걸지 않는다. */
+@media screen {{
+  body {{ max-width: 800px; margin: 0 auto; padding: 24px; overflow-x: hidden; }}
+  table.t {{ display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+}}
 </style>
 </head>
 <body>
