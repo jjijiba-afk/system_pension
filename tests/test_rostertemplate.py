@@ -280,6 +280,46 @@ class TestTheSheetReadsBackWhole:
         assets = self._info(tmp_path).assets
         assert sum(assets.breakdown.values()) == pytest.approx(assets.closing)
 
+    def test_every_roster_column_reaches_the_engine(self, tmp_path) -> None:
+        """양식의 열이 산출로 이어지는지 — 회사가 적어 준 칸이 버려지면 안 된다.
+
+        머리글을 낱말로 알아보는 구조라, 양식의 이름과 리더의 별칭이 조금만
+        어긋나도 그 칸은 조용히 무시된다. 오류도 나지 않고 값만 빠진다.
+        """
+        from pension.layout import (
+            ACTIVE_HEADER_ALIASES,
+            RETIRED_HEADER_ALIASES,
+            normalize_header,
+        )
+        from pension.rostertemplate import write_roster_template
+
+        book = openpyxl.load_workbook(write_roster_template(tmp_path / "양식.xlsx"))
+        for name, aliases in (("재직자명부", ACTIVE_HEADER_ALIASES),
+                              ("퇴직자명부", RETIRED_HEADER_ALIASES),
+                              ("추가명부", ACTIVE_HEADER_ALIASES)):
+            known = {normalize_header(alias)
+                     for names in aliases.values() for alias in names}
+            sheet = book[name]
+            unknown = [
+                str(sheet.cell(HEADER_ROW, col).value)
+                for col in range(1, sheet.max_column + 1)
+                if sheet.cell(HEADER_ROW, col).value
+                and normalize_header(str(sheet.cell(HEADER_ROW, col).value)) not in known
+            ]
+            # 순번은 줄 번호일 뿐 산출에 쓰지 않는다. 그 밖에는 남으면 안 된다.
+            assert unknown == ["순번"], f"{name} 에서 못 읽는 열: {unknown}"
+
+    def test_the_extra_sheet_examples_are_read(self, tmp_path) -> None:
+        """추가명부 예시 줄이 실제로 사건으로 읽혀야 한다."""
+        from pension.config import read_config
+        from pension.readers import read_extra_roster
+        from pension.rostertemplate import write_roster_template
+
+        book = openpyxl.load_workbook(write_roster_template(tmp_path / "양식.xlsx"))
+        rows = read_extra_roster(book, read_config(book), lambda *_a: None)
+        assert len(rows) == 3
+        assert all(row.event_date for row in rows)
+
     def test_the_basics_block_is_read(self, tmp_path) -> None:
         from pension.config import read_config
         from pension.rostertemplate import write_roster_template
