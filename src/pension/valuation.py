@@ -894,9 +894,29 @@ def value_member(
     result.dbo = dbo
     result.service_cost = service_cost
     result.expected_benefit_pv = benefit_pv
-    result.interest_cost = dbo * assumptions.discount.level_rate
+    result.interest_cost = interest_on(dbo, assumptions.discount.level_rate, result)
     result.duration = (weighted_time / dbo) if dbo else 0.0
     return result
+
+
+def _paid_within_a_year(result: MemberValuation) -> float:
+    """차기 1년 안에 나갈 것으로 본 퇴직급여. 할인 전 금액이다."""
+    return sum(amount for timing, amount in result.benefit_flows.items()
+               if 0.0 < timing <= 1.0)
+
+
+def interest_on(dbo: float, rate: float, result: MemberValuation) -> float:
+    """차기 이자원가.
+
+    채무 전액에 1년치 이자를 붙이면 과대계상된다. 기중에 나갈 사람의 몫은
+    그 시점부터 회사 손을 떠나므로, 남은 기간만큼만 이자가 붙기 때문이다
+    (문단 123 — 기간 중 지급으로 인한 변동을 반영한다).
+
+    나가는 시점은 연중앙으로 보므로 **반년치** 를 뺀다. 참고 산출 시스템도
+    같은 식이다. 반년이 아니라 실제 시점별로 잡을 수도 있지만, 탈퇴 자체가
+    연중앙 가정이라 그보다 정밀하게 잡을 근거가 없다.
+    """
+    return (dbo - _paid_within_a_year(result) / 2.0) * rate
 
 
 def value_roster(
@@ -929,5 +949,6 @@ def value_roster(
     if assumptions.discount.flat is None:
         rate = result.single_discount_rate()
         for member_result in result.members:
-            member_result.interest_cost = member_result.dbo * rate
+            member_result.interest_cost = interest_on(
+                member_result.dbo, rate, member_result)
     return result

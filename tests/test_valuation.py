@@ -910,3 +910,36 @@ class TestTheRosterExtraPaymentColumn:
 
         assert not CauseBenefit(roster_extra_multiple=1.0).is_empty()
         assert CauseBenefit().is_empty()
+
+
+class TestInterestOnBenefitsPaidDuringTheYear:
+    """차기 이자원가는 채무 전액에 붙지 않는다.
+
+    기중에 나갈 사람의 몫은 그 시점부터 회사 손을 떠난다. 전액에 1년치를
+    붙이면 그만큼 과대계상된다(문단 123 — 기간 중 지급으로 인한 변동을
+    반영한다). 나가는 시점을 연중앙으로 보므로 반년치를 뺀다.
+    """
+
+    def test_it_subtracts_half_a_year_on_what_goes_out(
+        self, config: CalculationConfig
+    ) -> None:
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        result = value_member(
+            member, config, make_assumptions(discount=0.05, withdrawal=0.10))
+
+        paid = sum(a for t, a in result.benefit_flows.items() if 0 < t <= 1)
+        assert paid > 0, "1년 안에 나갈 것으로 본 금액이 있어야 이 시험이 뜻이 있다"
+        assert result.interest_cost == pytest.approx(
+            (result.dbo - paid / 2.0) * 0.05, rel=1e-9)
+        # 전액에 붙이던 예전 값보다 반드시 작다.
+        assert result.interest_cost < result.dbo * 0.05
+
+    def test_with_no_one_leaving_it_is_the_plain_product(
+        self, config: CalculationConfig
+    ) -> None:
+        """1년 안에 나갈 사람이 없으면 차감할 것도 없다."""
+        member = make_member(age=50, past_service=10.0, wage=1_000_000, nra=60)
+        result = value_member(member, config, make_assumptions(discount=0.05))
+        paid = sum(a for t, a in result.benefit_flows.items() if 0 < t <= 1)
+        assert paid == 0.0
+        assert result.interest_cost == pytest.approx(result.dbo * 0.05, rel=1e-9)
