@@ -654,11 +654,16 @@ def state_to_sheets(state: dict[str, Any]) -> tuple[
         ])
     sheets[PAYOUT_SHEET] = (list(PAYOUT_HEADERS), rows_out)
 
+    # 칸을 **하나씩 손으로 세어 옮기지 않는다.** 예전에는 그렇게 적어 두었는데,
+    # 열을 하나 더한 뒤 이 줄만 고치는 것을 잊어 화면에 넣은 값이 저장에서
+    # 조용히 사라졌다 — 사람은 분명히 적었는데 산출은 빈 칸으로 읽었다.
+    # 숫자로 읽을 칸만 자리로 지정하고 나머지는 그대로 흘려보낸다.
+    numeric = {4, 5, 7}          # 가산액(원) · 근속 하한(년) · 명부 추가지급 배수
     sheets[EXIT_CAUSE_SHEET] = (
         list(EXIT_CAUSE_HEADERS),
         [
-            [row[0], row[1], row[2], row[3],
-             _parse_cell(row[4]), _parse_cell(row[5]), row[6]]
+            [_parse_cell(value) if index in numeric else value
+             for index, value in enumerate(row)]
             for row in _cause_rows(state)
         ],
     )

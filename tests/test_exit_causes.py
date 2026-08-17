@@ -618,3 +618,41 @@ class TestDecrementsAreDependentRates:
         trace: list[dict] = []
         value_member(member, config, assumptions, trace=trace)
         assert sum(r["exit_probability"] for r in trace) == pytest.approx(1.0)
+
+
+class TestEveryColumnSurvivesSaving:
+    """화면에 적은 칸이 **하나도 빠짐없이** 파일로 나가는지.
+
+    예전에는 저장할 때 칸을 손으로 세어 옮겼다(``row[0], row[1], … row[6]``).
+    열을 하나 더한 뒤 그 줄만 고치는 것을 잊자, 화면에 적은 [명부 추가지급
+    배수] 가 저장에서 조용히 사라졌다 — 사람은 분명히 1 을 넣었는데 산출은
+    빈 칸으로 읽었고, 화면은 "산출에 더해지지 않았습니다" 라고 계속 말했다.
+    시키는 대로 했는데 아무 일도 안 일어나는, 가장 나쁜 종류의 침묵이다.
+    """
+
+    def test_the_last_column_reaches_the_engine(self, tmp_path) -> None:
+        from pension import assumption_form as form
+        from pension.assumptions import CAUSE_DEATH, load_assumptions
+
+        state = form.example_state(["정규직"])
+        state["exit_causes"] = [
+            form._pad_cause(["정규직", "사망", "", "", "", "", "", "1"])]
+        path = form.write_state(state, tmp_path / "가정.xlsx")
+
+        entry = load_assumptions(path).exit_causes.get("정규직", CAUSE_DEATH)
+        assert entry.roster_extra_multiple == 1.0
+
+    def test_no_column_is_dropped_whatever_the_shape(self, tmp_path) -> None:
+        """마지막 칸만 보지 않는다. **모든** 칸을 채워 넣고 되읽는다."""
+        from pension import assumption_form as form
+        from pension.assumptions import EXIT_CAUSE_SHEET
+        from openpyxl import load_workbook
+
+        wrote = ["정규직", "사망", "1배수", "가산규정", "50000000", "1", "즉시", "0.5"]
+        state = form.example_state(["정규직", "1배수", "가산규정"])
+        state["exit_causes"] = [form._pad_cause(wrote)]
+        path = form.write_state(state, tmp_path / "가정.xlsx")
+
+        ws = load_workbook(path)[EXIT_CAUSE_SHEET]
+        saved = [ws.cell(2, c).value for c in range(1, len(form.EXIT_CAUSE_HEADERS) + 1)]
+        assert [str(v) if v is not None else "" for v in saved] == wrote, saved
