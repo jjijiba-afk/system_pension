@@ -11,6 +11,7 @@ import datetime as dt
 import pytest
 
 from pension.assumptions import (
+    CAUSE_DEATH,
     Assumptions,
     BenefitScale,
     DiscountCurve,
@@ -815,3 +816,84 @@ class TestTraceCarriesTheMultiple:
                                                        rel=1e-6)
         assert voluntary[-1]["multiple"] == pytest.approx(
             voluntary[-1]["service"], rel=1e-6)
+
+
+class TestTheRosterExtraPaymentColumn:
+    """명부의 [추가지급 기본급] 을 규정이 불러 쓰는 길.
+
+    사망 위로금·유족 일시금은 **사람마다 금액이 다르다.** [퇴직사유] 표의
+    가산액은 전원에게 같은 금액이라 그런 규정을 담을 수 없어서, 명부에 사람별로
+    적어 온 칸을 배수로 불러 쓴다.
+
+    자동으로 얹지 않는 이유는 회사마다 그 칸의 뜻이 다르기 때문이다 — 위로금인
+    곳, 한도인 곳, 누적 지급배수인 곳. 뒤의 두 경우에 자동으로 더하면 채무가
+    통째로 틀리고, 아무도 그것을 눈치채지 못한다.
+    """
+
+    def _member(self, extra: float):
+        member = make_member(age=45, past_service=10.0, wage=5_000_000, nra=60)
+        member.extra_pay_base_wage = extra
+        return member
+
+    def _assumptions(self, entry=None):
+        from pension.assumptions import CauseBenefits
+
+        assumptions = make_assumptions(discount=0.05, mortality=0.01)
+        if entry is not None:
+            assumptions.exit_causes = CauseBenefits(rules={("정규직", CAUSE_DEATH): entry})
+        return assumptions
+
+    def test_the_column_alone_changes_nothing(self, config: CalculationConfig) -> None:
+        """규정이 부르지 않으면 적혀 있어도 채무에 손대지 않는다."""
+        bare = value_member(self._member(0.0), config, self._assumptions())
+        filled = value_member(self._member(50_000_000), config, self._assumptions())
+        assert filled.dbo == pytest.approx(bare.dbo)
+        # 그래도 적혀 온 값은 결과에 남아야 한다 — 규정에 옮겨 적었는지
+        # 대조할 자리가 없으면 빠뜨린 것을 알 방법이 없다.
+        assert filled.extra_payment == 50_000_000
+
+    def test_a_multiple_of_one_adds_exactly_what_the_roster_says(
+        self, config: CalculationConfig
+    ) -> None:
+        from pension.assumptions import CauseBenefit
+
+        bare = value_member(self._member(50_000_000), config, self._assumptions())
+        used = value_member(
+            self._member(50_000_000), config,
+            self._assumptions(CauseBenefit(roster_extra_multiple=1.0)))
+        assert used.dbo > bare.dbo
+        # 늘어난 몫은 전부 사망 사유에 붙는다 — 사망 줄에만 걸었으므로.
+        gain = used.dbo - bare.dbo
+        death = (used.by_cause[CAUSE_DEATH]["dbo"] - bare.by_cause[CAUSE_DEATH]["dbo"])
+        assert death == pytest.approx(gain)
+
+    def test_half_the_multiple_adds_half(self, config: CalculationConfig) -> None:
+        from pension.assumptions import CauseBenefit
+
+        bare = value_member(self._member(50_000_000), config, self._assumptions())
+        whole = value_member(
+            self._member(50_000_000), config,
+            self._assumptions(CauseBenefit(roster_extra_multiple=1.0)))
+        half = value_member(
+            self._member(50_000_000), config,
+            self._assumptions(CauseBenefit(roster_extra_multiple=0.5)))
+        assert (half.dbo - bare.dbo) == pytest.approx((whole.dbo - bare.dbo) / 2)
+
+    def test_an_empty_column_adds_nothing_even_with_the_rule_on(
+        self, config: CalculationConfig
+    ) -> None:
+        """규정을 걸어 두어도 그 사람의 명부 칸이 비면 얹을 것이 없다."""
+        from pension.assumptions import CauseBenefit
+
+        bare = value_member(self._member(0.0), config, self._assumptions())
+        used = value_member(
+            self._member(0.0), config,
+            self._assumptions(CauseBenefit(roster_extra_multiple=1.0)))
+        assert used.dbo == pytest.approx(bare.dbo)
+
+    def test_the_rule_is_not_empty_when_only_the_multiple_is_set(self) -> None:
+        """배수만 적은 줄도 규정이다. 빈 줄로 보면 통째로 버려진다."""
+        from pension.assumptions import CauseBenefit
+
+        assert not CauseBenefit(roster_extra_multiple=1.0).is_empty()
+        assert CauseBenefit().is_empty()

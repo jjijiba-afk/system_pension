@@ -927,11 +927,14 @@ function buildCauseTab(page) {
     "(예: 정년퇴직에만 다른 배수를 걸 때)\n" +
     "가산 규정        기본 급여에 더할 배수를 내는 규정 " +
     "(예: 사망 시 근속 구간마다 개월분을 더할 때)\n" +
-    "가산액(원)       정액 가산. 근속과 무관하게 얹는 금액\n" +
+    "가산액(원)       정액 가산. 전원에게 같은 금액을 얹을 때\n" +
     "근속 하한(년)     '사망 시 1년 미만도 1년으로 계산' 처럼 짧은 근속을 끌어올릴 때\n" +
     "가산 귀속        즉시=근속이 늘어도 안 느는 급여라 지금 전액 귀속, " +
     "근속비례=근속에 따라 쌓음\n" +
-    "                비우면 사망은 '즉시', 나머지는 '근속비례' 입니다.";
+    "                비우면 사망은 '즉시', 나머지는 '근속비례' 입니다.\n" +
+    "명부 추가지급 배수  명부의 [추가지급 기본급] 칸에 곱해 얹습니다. " +
+    "사람마다 금액이 다른 위로금은 이쪽입니다 —\n" +
+    "                1 이면 적힌 금액 그대로, 0.5 면 절반. 비우면 명부 칸을 쓰지 않습니다.";
   const table = el("table", { class: "grid" });
   causeBody = el("tbody");
   table.append(causeBody);
@@ -955,9 +958,13 @@ function causeRow(values) {
   const amount = el("input", { type: "text", value: values[4] || "" });
   const floor = el("input", { type: "text", value: values[5] || "" });
   const basis = makeSelect(["", ...META.attributions], values[6] || "");
-  const tr = el("tr", {}, ...[rule, cause, alt, extraRule, amount, floor, basis]
-    .map((w) => el("td", {}, w)));
-  tr.widgets = { rule, cause, alt, extraRule, amount, floor, basis };
+  // 명부의 [추가지급 기본급] 에 곱할 배수. 사람마다 다른 위로금은 정액
+  // 가산액 칸으로 담을 수 없다 — 그 금액은 명부에 사람별로 적혀 온다.
+  const roster = el("input", { type: "text", value: values[7] || "" });
+  const tr = el("tr", {},
+    ...[rule, cause, alt, extraRule, amount, floor, basis, roster]
+      .map((w) => el("td", {}, w)));
+  tr.widgets = { rule, cause, alt, extraRule, amount, floor, basis, roster };
   return tr;
 }
 
@@ -976,7 +983,8 @@ function causeValues() {
   for (const tr of [...causeBody.children].slice(1)) {
     const w = tr.widgets;
     const row = [w.rule.value, w.cause.value, w.alt.value, w.extraRule.value,
-                 w.amount.value.trim(), w.floor.value.trim(), w.basis.value];
+                 w.amount.value.trim(), w.floor.value.trim(), w.basis.value,
+                 w.roster.value.trim()];
     // 규정과 사유만 고르고 값을 안 넣은 줄은 규정이 아니다.
     if (row[0] && row.slice(2).some(Boolean)) result.push(row);
   }

@@ -725,11 +725,11 @@ def _assumption_sheet(wb, run: PensionRun) -> None:
         section("퇴직사유별 지급 차등")
         table(
             ["지급률 규정", "퇴직사유", "대체 지급률 규정", "가산 규정",
-             "가산액(원)", "근속 하한(년)", "가산 귀속"],
+             "가산액(원)", "근속 하한(년)", "가산 귀속", "명부 추가지급 배수"],
             [
                 [rule, cause, entry.benefit_rule, entry.extra_rule,
                  entry.extra_amount or "", entry.min_service or "",
-                 entry.attribution_basis(cause)]
+                 entry.attribution_basis(cause), entry.roster_extra_multiple or ""]
                 for (rule, cause), entry in sorted(a.exit_causes.rules.items())
             ],
         )

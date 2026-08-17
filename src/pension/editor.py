@@ -1175,9 +1175,9 @@ class _ExitCauseTab(ttk.Frame):
 
         groups = ["", *self.columns]
         for index in range(1, self.ROWS + 1):
-            saved = previous[index - 1] if index <= len(previous) else [""] * 7
+            saved = previous[index - 1] if index <= len(previous) else [""] * len(EXIT_CAUSE_HEADERS)
             row = {key: tk.StringVar(value=saved[position]) for position, key in enumerate(
-                ("rule", "cause", "alt", "extra", "amount", "floor", "basis")
+                ("rule", "cause", "alt", "extra", "amount", "floor", "basis", "roster")
             )}
             combos = (
                 ("rule", groups, 12), ("cause", ["", *EXIT_CAUSES], 8),
@@ -1195,6 +1195,10 @@ class _ExitCauseTab(ttk.Frame):
                 self._body, textvariable=row["basis"], values=["", *ATTRIBUTIONS],
                 state="readonly", width=10,
             ).grid(row=index, column=6, padx=3, pady=1)
+            # 명부 [추가지급 기본급] 에 곱할 배수. 사람마다 다른 위로금은
+            # 정액 가산액 칸으로 담을 수 없어 이 칸으로 건다.
+            ttk.Entry(self._body, textvariable=row["roster"], width=14,
+                      justify="right").grid(row=index, column=7, padx=3, pady=1)
             self._rows.append(row)
 
     def get_values(self) -> list[list[str]]:
@@ -1203,14 +1207,14 @@ class _ExitCauseTab(ttk.Frame):
         for row in self._rows:
             values = [
                 row[key].get().strip()
-                for key in ("rule", "cause", "alt", "extra", "amount", "floor", "basis")
+                for key in ("rule", "cause", "alt", "extra", "amount", "floor", "basis", "roster")
             ]
             if values[0] and any(values[2:]):
                 result.append(values)
         return result
 
     def set_values(self, rows: list[list[str]]) -> None:
-        keys = ("rule", "cause", "alt", "extra", "amount", "floor", "basis")
+        keys = ("rule", "cause", "alt", "extra", "amount", "floor", "basis", "roster")
         for row in self._rows:
             for key in keys:
                 row[key].set("")

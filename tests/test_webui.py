@@ -176,8 +176,8 @@ class TestAssumptionForm:
 
         back = form.read_state(form.write_state(state, tmp_path / "기초율.xlsx"))
         assert back["exit_causes"] == [
-            ["생산직", "사망", "", "", "50000000", "1", ""],
-            ["임원", "정년", "생산직", "", "", "", "근속비례"],
+            form._pad_cause(["생산직", "사망", "", "", "50000000", "1"]),
+            form._pad_cause(["임원", "정년", "생산직", "", "", "", "근속비례"]),
         ]
 
     def test_a_row_with_only_a_cause_is_dropped(self, tmp_path) -> None:
@@ -369,7 +369,8 @@ class TestApi:
         assert "AA0" in meta["grades"]
         assert meta["exit_causes"] == ["중도", "사망", "정년"]
         assert meta["attributions"] == ["근속비례", "즉시"]
-        assert len(meta["exit_cause_headers"]) == 7
+        assert meta["exit_cause_headers"][:2] == ["지급률 규정", "퇴직사유"]
+        assert "명부 추가지급 배수" in meta["exit_cause_headers"]
         assert meta["longterm_timings"] == ["근속도달", "퇴직시", "정년시"]
         panels = {s["sheet"]: s["column_panel"] for s in meta["sheets"]}
         assert panels["지급률"] == "benefit"

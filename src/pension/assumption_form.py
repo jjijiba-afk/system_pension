@@ -106,7 +106,7 @@ PAYOUT_HEADERS: Final[tuple[str, ...]] = (
 #: 퇴직사유 탭의 열. 자유 입력이 아니라 정해진 자리에 넣게 한다.
 EXIT_CAUSE_HEADERS: Final[tuple[str, ...]] = (
     "지급률 규정", "퇴직사유", "대체 지급률 규정", "가산 규정",
-    "가산액(원)", "근속 하한(년)", "가산 귀속",
+    "가산액(원)", "근속 하한(년)", "가산 귀속", "명부 추가지급 배수",
 )
 
 #: 직군별 가정 적용 여부 선택지.
@@ -388,7 +388,7 @@ def split_benefit_by_cause(state: dict[str, Any], rule: object) -> dict[str, Any
         column = cause_column(name, cause)
         found = next((r for r in rows if r[0] == name and r[1] == cause), None)
         if found is None:
-            rows.append([name, cause, column, "", "", "", ""])
+            rows.append(_pad_cause([name, cause, column]))
         else:
             found[2] = column
     state["exit_causes"] = rows

@@ -100,10 +100,26 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
             "중도퇴직률 미반영은 정년까지 전원 근무한다고 보는 설정입니다"
         )
     if result.extra_payment:
-        applied["명부 추가지급 기본급"] = (
-            f"{result.extra_payment:,.0f}원 — 산출에 더해지지 않았습니다. "
-            "얹으려면 [퇴직사유] 표의 가산액에 적으세요"
-        )
+        # 규정이 이 칸을 쓰고 있는지 **확인하고** 말한다. 예전에는 칸이 차
+        # 있기만 하면 "더해지지 않았습니다" 라고 했는데, 시키는 대로 규정에
+        # 적어 넣은 뒤에도 같은 문구가 그대로 떠서 아직 안 걸린 줄 알게 됐다.
+        rule_name = result.benefit_rule or result.job_group
+        used = [cause for cause in (CAUSE_NORMAL, CAUSE_VOLUNTARY, CAUSE_DEATH)
+                if assumptions.exit_causes.get(rule_name, cause).roster_extra_multiple]
+        if used:
+            share = assumptions.exit_causes.get(rule_name, used[0]).roster_extra_multiple
+            applied["명부 추가지급 기본급"] = (
+                f"{result.extra_payment:,.0f}원 × {share:g} — "
+                f"{'·'.join(used)} 퇴직 시 급여에 더해집니다 "
+                "([퇴직사유] 표의 명부 추가지급 배수)"
+            )
+        else:
+            applied["명부 추가지급 기본급"] = (
+                f"{result.extra_payment:,.0f}원 — 산출에 더해지지 않았습니다. "
+                "얹으려면 [퇴직사유] 표에서 이 규정·사유 줄의 "
+                "[명부 추가지급 배수] 에 1 을 적으세요 "
+                "(전원 같은 금액이면 [가산액(원)] 쪽입니다)"
+            )
     if result.db_ratio != 1.0:
         applied["DB 비중 (혼합형)"] = (
             f"{result.db_ratio:.2f} — 급여의 이만큼만 채무로 잡습니다"

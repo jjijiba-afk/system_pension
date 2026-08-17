@@ -501,7 +501,10 @@ class TestSplitBenefitColumn:
         state["exit_causes"] = [["정규직", "사망", "", "", "50000000", "", ""]]
         state = form.split_benefit_by_cause(state, "정규직")
         merged = form.merge_benefit_causes(state, "정규직")
-        assert merged["exit_causes"] == [["정규직", "사망", "", "", "50000000", "", ""]]
+        # 칸 수는 서식이 정한다. 여기 숫자로 박아 두면 열이 하나 늘 때마다
+        # 시험이 깨지고, 고치다 보면 무엇을 지키려던 시험인지 흐려진다.
+        assert merged["exit_causes"] == [
+            form._pad_cause(["정규직", "사망", "", "", "50000000"])]
 
     def test_splitting_twice_is_refused(self) -> None:
         from pension import assumption_form as form

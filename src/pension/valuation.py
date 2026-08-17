@@ -526,8 +526,9 @@ def value_member(
     # 곳도 있다. 자동으로 더하거나 곱하면 뒤의 두 경우에서 채무가 통째로 틀린다.
     #
     # 대신 **지급률 규정이 읽어 쓴다.** 수식 방식에서 `추가급`·`배수` 로 꺼내
-    # 쓰거나, [퇴직사유] 표의 가산 규정·가산액으로 건다. 무엇을 어떻게 얹을지는
-    # 규정이 정하는 일이지 명부 칸이 정할 일이 아니다.
+    # 쓰거나, [퇴직사유] 표의 [명부 추가지급 배수] 에 1 을 적어 "그 칸을 그대로
+    # 쓰겠다" 고 말한다. 무엇을 어떻게 얹을지는 규정이 정하는 일이지 명부 칸이
+    # 정할 일이 아니다.
     extra_payment = max(0.0, member.extra_pay_base_wage)
     result.extra_payment = extra_payment
 
@@ -596,6 +597,12 @@ def value_member(
         extra = cause.extra_amount
         if cause.extra_rule:
             extra += multiple_at(service, age, cause.extra_rule) * wage
+        # 사람마다 다른 위로금은 명부에 사람별로 적혀 온다. 규정이 [명부
+        # 추가지급 배수] 로 "그 칸을 쓰겠다" 고 말했을 때에만 얹는다 — 회사마다
+        # 그 칸의 뜻이 달라(위로금 / 한도 / 누적 배수) 자동으로 더하면 뒤의
+        # 두 경우에서 채무가 통째로 틀린다.
+        if cause.roster_extra_multiple:
+            extra += cause.roster_extra_multiple * extra_payment
         return base * db_share, extra * db_share
 
     def benefit_at(
