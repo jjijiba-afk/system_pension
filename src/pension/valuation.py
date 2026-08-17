@@ -621,7 +621,8 @@ def value_member(
         return round_amount(base + extra, rounding_unit, rounding_mode)
 
     def attribution_at(
-        total_service: float, age: float, cause: CauseBenefit = _NO_CAUSE
+        total_service: float, age: float, cause: CauseBenefit = _NO_CAUSE,
+        basis: float | None = None,
     ) -> tuple[float, float]:
         """(기준일까지 귀속비율, 당기 1년치 귀속비율).
 
@@ -634,18 +635,26 @@ def value_member(
         그래서 근속이 아니라 **급여식이 내는 배수** 로 잰다. 배수가 근속에
         비례하는 법정 퇴직금에서는 두 방식이 정확히 같은 값을 낸다.
         임금은 분자·분모에 똑같이 곱해지므로 배수만 보면 된다.
+
+        :param basis: 귀속의 **분모** 로 쓸 근속. 비우면 ``total_service``.
+            중도·사망은 연중에 나가지만 귀속은 **그 해 초** 근속으로 잰다 —
+            그 해에 아직 쌓지 않은 반년을 분모에 넣으면 이미 쌓인 몫이
+            그만큼 묽어져 채무가 과소계상된다.
         """
         if total_service <= 0:
+            return 0.0, 0.0
+        denominator = total_service if basis is None else basis
+        if denominator <= 0:
             return 0.0, 0.0
 
         # 직군 규칙이 '근속비례' 를 고르면 급여식 대신 근속비로 귀속한다.
         # 참고 산출 시스템의 근속기간할당(B/D × D0)과 같은 몫이다. 배수가
         # 근속에 비례하는 법정 퇴직금에서는 급여식과 같은 값을 낸다.
         if allocation == "근속비례":
-            return min(1.0, past_service / total_service), 1.0 / total_service
+            return min(1.0, past_service / denominator), 1.0 / denominator
 
         total_multiple = multiple_at(
-            max(total_service, cause.min_service), age, cause.benefit_rule
+            max(denominator, cause.min_service), age, cause.benefit_rule
         )
         if total_multiple <= 0:
             # 배수가 0 이거나 음수인 규정(가감 규정 등)은 근속비로 되돌린다.
@@ -656,7 +665,7 @@ def value_member(
         )
         # 당기 1년치는 '한 해 더 일했을 때 배수가 얼마나 느는가'.
         next_year = multiple_at(
-            max(min(past_service + 1.0, total_service), cause.min_service),
+            max(min(past_service + 1.0, denominator), cause.min_service),
             age, cause.benefit_rule,
         )
 
@@ -665,7 +674,8 @@ def value_member(
         return attributed, unit
 
     def weigh(
-        cause_name: str, total_service: float, exit_age: float, wage: float
+        cause_name: str, total_service: float, exit_age: float, wage: float,
+        basis: float | None = None,
     ) -> tuple[float, float]:
         """``(귀속된 급여, 당기 1년치 급여)``. 확률·할인 전 금액이다.
 
@@ -684,7 +694,7 @@ def value_member(
         paid = round_amount(raw, rounding_unit, rounding_mode)
         scale = paid / raw
 
-        share, unit_share = attribution_at(total_service, exit_age, cause)
+        share, unit_share = attribution_at(total_service, exit_age, cause, basis)
         attributed = base * share
         unit = base * unit_share
 
@@ -761,6 +771,10 @@ def value_member(
                 increase += assumptions.salary.promotion.rate(
                     salary_rule, age=age_t, service=service_t
                 )
+        # 그 해 **초** 의 임금을 따로 들고 간다. 연중에 나가는 사람의 급여는
+        # 이 임금으로 잰다 — 그 해 인상분은 끝까지 일한 사람이 받는 것이지,
+        # 반년 만에 나간 사람이 미리 받아 가는 것이 아니다.
+        opening_wage = wage
         wage *= 1.0 + increase
 
         withdrawal = (
@@ -813,9 +827,22 @@ def value_member(
             total_service = service_at(timing)
             exit_age = member.age + timing
             discount = assumptions.discount.discount_factor(timing)
-            attributed, unit = weigh(cause_name, total_service, exit_age, wage)
+            # 연중에 나가는 사유(중도·사망)는 **그 해 초** 를 기준으로 잰다.
+            #
+            # 임금 — 그 해 인상분은 끝까지 일한 사람의 몫이다.
+            # 귀속 분모 — 그 해에 아직 쌓지 않은 반년을 분모에 넣으면 이미
+            #   쌓인 몫이 그만큼 묽어져 채무가 과소계상된다.
+            #
+            # 급여를 찾는 근속은 그대로 연중앙이다. 실제로 그때 나가므로
+            # 배수는 그 시점 근속으로 찾는 것이 맞다.
+            if cause_name == CAUSE_NORMAL:
+                pay_wage, basis = wage, total_service
+            else:
+                pay_wage, basis = opening_wage, service_at(t - 1.0)
+            attributed, unit = weigh(
+                cause_name, total_service, exit_age, pay_wage, basis)
             cause_spec = causes.get(rule, cause_name)
-            benefit = benefit_at(total_service, exit_age, wage, cause_spec)
+            benefit = benefit_at(total_service, exit_age, pay_wage, cause_spec)
 
             part_dbo = attributed * exit_probability * discount
             part_cost = unit * exit_probability * discount

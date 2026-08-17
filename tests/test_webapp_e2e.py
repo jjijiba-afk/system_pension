@@ -886,10 +886,12 @@ def test_the_version_name_is_visible_and_matches_the_release(page) -> None:
     release = json.loads((DIST / "release.json").read_text(encoding="utf-8"))
     shown = page.inner_text("#app-version").strip()
     assert shown == str(release["version"]), f"버전명이 어긋난다: {shown}"
-    assert release["notes"], "업데이트 내역이 비어 있다"
     # 소수점 아래 **두 자리.** 한 자리면 1.9 다음이 1.10 이 되는데, 글자로는
     # 1.10 이 1.9 보다 앞서 보여 어느 쪽이 최신인지 말로 확인할 때 어긋난다.
-    assert re.fullmatch(r"\d+\.\d{2}", shown), f"버전은 1.06 꼴이어야 한다: {shown}"
+    assert re.fullmatch(r"\d+\.\d{2}", shown), f"버전은 1.10 꼴이어야 한다: {shown}"
+    # 내역은 비어 있어도 된다 — 큰 판을 올릴 때만 적는다. 다만 자료형은
+    # 지켜야 화면이 목록을 그리다 넘어지지 않는다.
+    assert isinstance(release.get("notes", []), list)
 
 
 def test_the_update_notice_shows_what_changed_before_it_reloads(page) -> None:

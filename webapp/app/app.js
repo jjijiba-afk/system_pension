@@ -3706,10 +3706,11 @@ function showUpdate() {
     ? `현재 버전 ${VERSION} → 새 버전 ${release.version}` +
       (release.released ? ` (${release.released})` : "")
     : `현재 버전 ${VERSION} — 새 판이 준비되어 있습니다`;
-  $("update-notes").replaceChildren(
-    ...(release.notes && release.notes.length
-      ? release.notes
-      : ["업데이트 내역이 함께 오지 않았습니다"]).map((line) => el("li", {}, line)));
+  // 내역이 없으면 목록 자리를 통째로 비운다. "내역이 없습니다" 같은 문장을
+  // 대신 채워 넣으면, 알릴 것이 없다는 사실보다 그 문장이 더 눈에 남는다.
+  const notes = (release.notes || []).filter((line) => String(line).trim());
+  $("update-notes").replaceChildren(...notes.map((line) => el("li", {}, line)));
+  $("update-notes").hidden = notes.length === 0;
   $("update-dialog").showModal();
 }
 

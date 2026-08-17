@@ -255,15 +255,28 @@ class TestDecrements:
         ).dbo
         assert with_withdrawal < without
 
-    def test_attributed_benefit_is_invariant_to_exit_timing(
+    def test_mid_year_exits_carry_half_a_year_of_extra_benefit(
         self, config: CalculationConfig
     ) -> None:
-        """할인율 0 이면 탈퇴율과 무관하게 DBO = 과거근속 × 임금 이어야 한다."""
+        """연중 탈퇴자의 귀속급여가 추계액보다 **반년치만큼** 크다.
+
+        할인·임금상승을 끄면 언뜻 ``DBO = 과거근속 × 임금`` 이 나와야 할 것
+        같다. 실제로 예전에는 그랬다 — 급여도 귀속 분모도 같은 연중앙 근속으로
+        쟀기 때문이다.
+
+        지금은 급여는 연중앙 근속으로 찾고 귀속 분모는 **그 해 초** 근속으로
+        잰다(참고 산출 시스템과 같은 방식). 두 기준이 반년 어긋나 있어, 연중에
+        나가는 사람은 그 반년치만큼 더 귀속된다. 의도한 차이이므로 크기를
+        **못 박아 둔다** — 모르는 사이에 더 벌어지면 여기서 걸린다.
+        """
         member = make_member(age=40, past_service=10.0, wage=1_000_000, nra=60)
         result = value_member(
             member, config, make_assumptions(discount=0.0, withdrawal=0.10)
         )
-        assert result.dbo == pytest.approx(result.past_service * 1_000_000, rel=1e-9)
+        accrued = result.past_service * 1_000_000
+        assert result.dbo > accrued
+        # 반년치 = 임금 × 0.5. 그보다 커지면 반년을 넘게 얹고 있다는 뜻이다.
+        assert result.dbo - accrued < 1_000_000 * 0.5
 
     def test_exit_probabilities_sum_to_one(self, config: CalculationConfig) -> None:
         """탈퇴확률 합이 1 이어야 급여가 새거나 이중계상되지 않는다.
