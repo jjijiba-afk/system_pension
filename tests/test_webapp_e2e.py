@@ -905,6 +905,37 @@ def test_the_update_notice_shows_what_changed_before_it_reloads(page) -> None:
     page.wait_for_selector("#update-dialog[open]", state="detached", timeout=10_000)
 
 
+def test_another_windows_update_does_not_wipe_this_ones_work(page) -> None:
+    """다른 창에서 업데이트해도 이 창은 새로고침되지 않아야 한다.
+
+    창을 두 개 열어 두고 한쪽에서 [업데이트] 를 누르면, 서비스워커가 자리를
+    넘겨받으면서 **모든 창** 에 그 사실이 통보된다. 예전에는 그 통보를 받는
+    즉시 새로고침했는데, 그러면 옆 창에서 몇 분째 돌던 산출이 말없이 사라진다.
+    [나중에] 를 눌러 둔 창도 똑같이 당했다.
+
+    지금은 상단 버튼만 뜨고, 그 창에서 직접 누를 때까지 화면은 그대로다.
+    """
+    # 화면 하나를 여러 시험이 나눠 쓰므로, 앞 시험이 띄워 둔 알림을 먼저 내린다.
+    page.evaluate("""() => {
+      document.getElementById("update-open").hidden = true;
+      window.__stillHere = true;
+    }""")
+    assert page.locator("#update-open").is_hidden()
+
+    # 다른 창이 업데이트를 마친 셈 친다 — 일꾼이 자리를 넘겨받았다는 통보다.
+    page.evaluate(
+        "() => navigator.serviceWorker.dispatchEvent(new Event('controllerchange'))")
+    page.wait_for_timeout(1_000)
+
+    # 새로고침됐다면 이 표시가 사라진다.
+    assert page.evaluate("window.__stillHere === true"), "옆 창이 멋대로 새로고침됐다"
+    # 알림을 띄우는 쪽은 `announceUpdate` 가 맡는다. 그 자리가 실제로 화면을
+    # 건드릴 수 있는지는 여기서 같이 본다 — 없는 함수를 부르면 통보를 받고도
+    # 아무 일이 없다.
+    page.evaluate("() => announceUpdate()")
+    assert page.locator("#update-open").is_visible()
+
+
 def test_dashboard_tab_follows_each_run(page, tmp_path) -> None:
     """분석 탭 — 산출할 때마다 그 회차로 다시 그려져야 한다."""
     from pension.samples import write_sample_pack

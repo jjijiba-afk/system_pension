@@ -55,6 +55,14 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     // 처음 설치되는 순간에도 이 사건이 온다. 그때는 새로 고칠 옛 화면이 없다.
     if (!hadController || reloading) return;
+    // 여기서 무턱대고 새로고침하면 안 된다. 창을 두 개 열어 두고 한쪽에서
+    // [업데이트] 를 누르면 **다른 창까지 함께 새로고침되어**, 그 창에서 돌던
+    // 산출이 말없이 사라진다. [나중에] 를 눌러 둔 창도 마찬가지다.
+    // 이 창에서 직접 누른 경우(`updating`)에만 넘어간다.
+    if (!updating) {
+      announceUpdate();
+      return;
+    }
     reloading = true;
     location.reload();
   });
@@ -3661,7 +3669,11 @@ async function checkForUpdate() {
 
 /** 새 판이 있다고 상단에 알린다. 무엇이 바뀌는지는 눌렀을 때 보여 준다. */
 function announceUpdate() {
-  $("update-open").hidden = false;
+  // 서비스워커 사건은 화면이 다 그려지기 전에도 온다. 그때는 알릴 자리가
+  // 아직 없으므로 조용히 넘긴다 — 부팅 끝에 한 번 더 확인한다.
+  const button = document.getElementById("update-open");
+  if (!button) return;
+  button.hidden = false;
   // 서비스워커가 먼저 알아챈 경우다. 바뀐 내용을 아직 모르니 한 번 더 묻는다.
   if (!pendingRelease) checkForUpdate();
 }
