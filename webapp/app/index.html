@@ -27,6 +27,7 @@
     <button class="small" type="button" id="client-rename">이름 바꾸기</button>
     <button class="small" type="button" id="client-remove">삭제</button>
   </div>
+  <button class="small primary" type="button" id="update-open" hidden>업데이트 있음</button>
   <button type="button" id="help-open" title="사용설명서" aria-label="사용설명서">?</button>
 </header>
 
@@ -558,6 +559,13 @@
   </div>
   <button class="small primary" type="button" data-doc="계리방법론">열기</button>
 </div>
+<div class="lib-line">
+  <div style="flex:1;min-width:180px">
+    <b>DBO 점검표</b>
+    <div class="hint">산출 결과를 직접 검증하는 순서. 한 사람짜리 명부로 손계산과 맞대어 보는 목록입니다</div>
+  </div>
+  <button class="small primary" type="button" data-doc="DBO 점검표">열기</button>
+</div>
 </div></details>
 
 <details class="section" id="sec-lib-preset"><summary>가정세트 (지급률·지급규정 포함 산출가정 한 벌)<span class="count"></span></summary>
@@ -657,6 +665,21 @@
   <button class="big secondary" onclick="this.closest('dialog').close()">닫기</button>
 </dialog>
 
+<dialog id="update-dialog" style="width:92vw;max-width:560px">
+  <h1 style="font-size:1.05rem">업데이트</h1>
+  <p class="hint" id="update-versions"></p>
+  <div class="notice">
+    <b>업데이트 내역</b>
+    <ul id="update-notes" style="margin:6px 0 0 18px"></ul>
+  </div>
+  <p class="warn-box">업데이트하시겠습니까? <b>현재 산출이 초기화됩니다.</b>
+  저장 후 업데이트를 권장합니다.</p>
+  <div class="toolbar">
+    <button class="small primary" type="button" id="update-go">업데이트</button>
+    <button class="small" type="button" id="update-later">나중에</button>
+  </div>
+</dialog>
+
 <dialog id="lock-dialog">
   <h1 style="font-size:1.05rem">안내</h1>
   <p>현재 개발중인 메뉴로 추후 오픈 예정입니다.</p>
@@ -700,7 +723,8 @@
 앱으로 설치되고, 한 번 연 뒤에는 오프라인에서도 동작합니다.<br>
 <!-- 새로 올린 빌드가 실제로 떠 있는지 눈으로 확인하는 자리. 오프라인 캐시가
      남아 옛 화면이 도는 것을 이 값으로 가려낸다. -->
-빌드 <code id="build-stamp">__BUILD__</code></p>
+버전 <b id="app-version">__VERSION__</b>
+<span class="hint">(빌드 <code id="build-stamp">__BUILD__</code>)</span></p>
 
 <dialog id="run-dialog">
   <h1 style="font-size:1.05rem" id="run-dialog-title"></h1>

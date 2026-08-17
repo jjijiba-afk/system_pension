@@ -101,10 +101,13 @@ class TestValidationOnCleanData:
         assert first.severance_nra == 60
         assert first.longterm_nra == 60
 
-    def test_member_past_normal_retirement_age_gets_the_add_on(self, roster_path: Path) -> None:
+    def test_the_group_rule_decides_for_everyone(self, roster_path: Path) -> None:
+        """정년은 임직원 구분과 무관하게 직군 표에 적은 그대로 쓴다."""
         _, roster, _ = read_all(roster_path)
         executive = next(m for m in roster.active if m.employee_id == "A003")
         assert executive.age == 57
+        # 임원 줄에 적힌 정년 65 를 그대로 쓴다 — 임직원 구분이 아니라
+        # **그 직군 줄** 이 정년을 정한다.
         assert executive.severance_nra == 65
 
 

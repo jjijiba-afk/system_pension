@@ -178,13 +178,11 @@ def normal_retirement_age(
     if contract_years > 0:
         return age + max(1, int(math.ceil(contract_years)))
 
+    # 정년은 **직군 표에 적은 그대로** 쓴다. 임직원 구분으로 값을 바꾸지
+    # 않는다 — 임원 정년이 다르면 직군 표에 임원 줄을 만들어 그 줄에 적는다.
+    # 한 줄만 보면 그 사람의 정년을 알 수 있어야 한다.
     nra = rule.severance_nra
     add_age = rule.over_nra_add_age
-    if is_executive:
-        if rule.executive_nra:
-            nra = rule.executive_nra
-        if rule.executive_over_nra_add_age:
-            add_age = rule.executive_over_nra_add_age
 
     if declared_nra > 0:
         nra = declared_nra

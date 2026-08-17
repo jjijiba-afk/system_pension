@@ -649,9 +649,15 @@ def _basics(ws, row: int, *, values: dict | None = None,
     row = _heads(ws, row, (
         (1, "명부 직군"), (2, "산출 직군"), (3, "정년연령"),
         (4, "장기급여 정년"), (5, "정년초과 가산연수"), (6, "적는 법")))
-    table = groups or [(group, group, 60, 60, 2) for group in ("정규직", "계약직", "임원")]
+    table = groups or [
+        ("정규직", "정규직", 60, 60, 2),
+        ("계약직", "계약직", 60, 60, 2),
+        # 임원 정년은 회사마다 다르다. 60 을 미리 적어 두면 그 값이 사실인 것처럼
+        # 굳어 버리므로 **비워 둔다** — 비우면 정년이 없다는 뜻이 된다.
+        ("임원", "임원", None, None, 2),
+    ]
     hints = ["명부의 직군 칸에 적힌 그대로", "이 이름으로 묶어 산출합니다",
-             "임원 정년이 없으면 60 으로 두고 가산연수를 늘리세요"]
+             "정년이 없으면 비워 두십시오 — 현재 연령에 가산연수를 더해 봅니다"]
     for offset, line in enumerate(table):
         for index, value in enumerate(line, start=1):
             _write(ws, row, index, value, filled=filled,

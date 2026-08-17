@@ -327,6 +327,7 @@ def _write_help(target: Path) -> None:
 _DOCS: Final = (
     ("사용설명서.md", "웹앱-사용설명서.md"),
     ("계리방법론.md", "계리방법론.md"),
+    ("DBO 점검표.md", "DBO-점검표.md"),
 )
 
 
@@ -434,6 +435,35 @@ def _copy_docs(target: Path) -> None:
 
 
 
+#: 사람이 읽는 버전명과 업데이트 내역. 빌드 해시는 열여섯 자리 난수처럼 보여서
+#: "내 것이 최신인가" 를 눈으로 가릴 수가 없다.
+RELEASE = Path(__file__).resolve().parent / "release.json"
+
+
+def _release() -> dict:
+    """``release.json`` 을 읽는다. 없으면 버전을 붙이지 않는다."""
+    if not RELEASE.exists():
+        return {}
+    data = json.loads(RELEASE.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("release.json 은 객체여야 합니다")
+    return data
+
+
+def _write_release(target: Path) -> None:
+    """배포본에 그대로 싣는다.
+
+    화면이 **이 파일 하나만** 다시 받아 새 판이 있는지 가린다. 앱 전체(14MB)를
+    받아 보지 않고도 알 수 있어야, 산출 중에도 부담 없이 확인할 수 있다.
+    """
+    data = _release()
+    if not data:
+        return
+    target.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"  버전 {data.get('version', '(없음)')}")
+
+
 def _write_cname(target: Path) -> None:
     """맞춤 도메인을 배포본에 넣는다.
 
@@ -479,6 +509,20 @@ def build() -> Path:
 
     for name in ("index.html", "app.css", "app.js", "manifest.webmanifest"):
         shutil.copy2(APP / name, DIST / name)
+    _write_release(DIST / "release.json")
+
+    # 화면과 앱에 **사람이 읽는 버전명** 을 심는다. 캐시 이름에 들어가는 빌드
+    # 해시(`sw.js` 의 __VERSION__)와는 다른 값이다 — 해시는 판이 갈렸는지를
+    # 기계가 가리는 값이고, 이쪽은 사람이 "내 것이 몇 번인가" 를 읽는 값이다.
+    #
+    # 해시를 내기 **전** 에 끼워 넣는다. 버전을 올리면 해시도 따라 갈려야
+    # 새 서비스워커가 설치되고, 그래야 업데이트 버튼이 실제로 뜬다.
+    version = str(_release().get("version", "")) or "(개발)"
+    for name in ("index.html", "app.js"):
+        path = DIST / name
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("__VERSION__", version),
+            encoding="utf-8")
     _write_help(DIST / "help.html")
     _copy_docs(DIST)
     _write_cname(DIST / "CNAME")

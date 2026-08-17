@@ -260,7 +260,7 @@ def load_inputs(
         # 없는 통합문서가 있는데, 예전에는 read_config 가 먼저 터져서 화면에
         # 넣어 둔 날짜가 쓰이지도 못했다.
         config = read_config(wb, base_date=base_date)
-        general = _read_general_sheet(wb)
+        general, general_error = _read_general_sheet(wb)
         if base_date is None and general is not None and general.period_end:
             # 자료요청서 2번 '대상 회계기간' 기말이 곧 산출기준일이다.
             config = replace(config, base_date=general.period_end)
@@ -270,6 +270,8 @@ def load_inputs(
             # 직군 배정이 명부를 읽는 도중에 일어나므로 읽기 전에 바꿔 끼워야 한다.
             config = replace(config, job_group_rules=payout_rules, inferred=False)
         log = IssueLog()
+        if general_error is not None:
+            log.warning(*general_error)
         _check_uncalculated(roster_path, log)
         _check_general_sheet(general, log)
         roster = read_roster(wb, config, log)
@@ -311,18 +313,31 @@ def _check_uncalculated(path: Path, log: IssueLog) -> None:
 
 
 def _read_general_sheet(wb):
-    """``일반사항`` 을 읽는다. 없거나 깨졌으면 ``None``.
+    """``[기초자료]``·``[예치금]`` 을 읽는다 — ``(읽은 것, 남길 경고)``.
 
-    일반사항이 없는 명부(업로드용으로 변환한 것 등)도 많으므로, 못 읽는다고
+    이 시트가 없는 명부(업로드용으로 변환한 것 등)도 많으므로, 못 읽는다고
     산출을 막지는 않는다.
+
+    다만 **시트는 있는데 읽다 실패한 경우** 는 말해 준다. 조용히 넘기면
+    자산 금액과 직군 규칙이 통째로 빠진 채 산출이 끝나고, 화면에는 아무
+    표시도 없어 담당자가 알 길이 없다 — 증감표의 자산이 0 이 되는데도
+    숫자는 그럴듯하게 나온다.
     """
-    from .general_info import read_general_info
+    from .general_info import GENERAL_SHEET_ALIASES, read_general_info
+    from .workbook import find_sheet
 
     try:
-        info = read_general_info(wb)
-    except Exception:
-        return None
-    return info
+        return read_general_info(wb), None
+    except Exception as error:
+        if find_sheet(wb, *GENERAL_SHEET_ALIASES) is None:
+            return None, None          # 시트가 없는 명부는 원래 흔하다
+        return None, (
+            "GEN_SHEET_UNREADABLE",
+            f"[기초자료]·[예치금] 시트를 읽지 못했습니다 ({error}). "
+            "그 시트의 값(사외적립자산·직군 규칙 등)은 이번 산출에 "
+            "들어가지 않았습니다 — 시트 서식을 확인하거나, 그 값들을 "
+            "화면에서 직접 넣으십시오",
+        )
 
 
 def _check_general_sheet(general, log: IssueLog) -> None:

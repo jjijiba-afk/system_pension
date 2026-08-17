@@ -41,7 +41,11 @@ async function warmUp() {
 }
 
 //: 주소에 빌드 값이 붙지 않는 파일들. 이것만 네트워크를 먼저 본다.
-const SHELL = ["index.html", "app.js", "app.css", "manifest.webmanifest"];
+//:
+//: ``release.json`` 이 여기 있어야 한다. 새 판이 나왔는지를 이 파일 하나로
+//: 판별하는데, 캐시 우선으로 주면 옛 판이 자기 자신을 최신이라고 말하게 된다.
+const SHELL = ["index.html", "app.js", "app.css", "manifest.webmanifest",
+               "release.json"];
 
 function isShell(request) {
   if (request.mode === "navigate") return true;
@@ -84,6 +88,14 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "warm") {
     event.waitUntil(warmUp());
+  }
+  // 사람이 [업데이트] 창에서 확인을 눌렀을 때에만 자리를 넘겨받는다.
+  //
+  // `skipWaiting()` 을 설치 때 부르지 않는 이유가 여기 있다 — 산출이 도는
+  // 중에 엔진(휠)만 새 판으로 바뀌면 화면과 엇갈린다. 이 신호는 "지금 산출을
+  // 버려도 좋다" 는 사람의 대답이라, 그 순간에만 안전하다.
+  if (event.data && event.data.type === "take-over") {
+    self.skipWaiting();
   }
 });
 

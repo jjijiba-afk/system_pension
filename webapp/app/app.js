@@ -42,24 +42,15 @@ if ("serviceWorker" in navigator) {
         if (!fresh) return;
         fresh.addEventListener("statechange", () => {
           if (fresh.state === "installed" && navigator.serviceWorker.controller) {
-            showUpdateBar();
+            // 새 판이 받아져 **기다리고 있다.** 여기서 바로 갈아 끼우지는
+            // 않는다 — 산출 중일 수 있다. 상단 버튼만 띄워, 무엇이 바뀌는지
+            // 보고 사람이 누를 때 넘어가게 한다.
+            announceUpdate();
           }
         });
       });
     })
     .catch(() => {});
-
-  function showUpdateBar() {
-    if (document.getElementById("update-bar")) return;
-    const bar = document.createElement("div");
-    bar.id = "update-bar";
-    bar.innerHTML = "새 판이 준비됐습니다. " +
-      "<button type=\"button\" id=\"update-now\">지금 새로고침</button>";
-    document.body.prepend(bar);
-    document.getElementById("update-now").addEventListener("click", () => {
-      location.reload();
-    });
-  }
 
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     // 처음 설치되는 순간에도 이 사건이 온다. 그때는 새로 고칠 옛 화면이 없다.
@@ -229,6 +220,9 @@ from pension.webui import api
     navigator.serviceWorker?.controller?.postMessage({ type: "warm" });
     // 화면이 다 뜬 뒤에 묻는다. 이것 때문에 부팅이 늦어질 이유가 없다.
     askForPersistentStorage();
+    // 새 판이 올라와 있는지도 이때 확인한다. 있으면 상단 버튼만 뜬다 —
+    // 무엇이 바뀌는지 보고 사람이 누를 때까지 지금 화면은 그대로다.
+    checkForUpdate();
   } catch (error) {
     // 어느 단계에서, 무엇이 났는지 그대로 적는다. 기기가 손에 없어도 이
     // 한 줄이면 원인을 좁힐 수 있다.
@@ -3643,6 +3637,72 @@ function findInHelp(needle) {
   if (first) first.scrollIntoView({ block: "center" });
 }
 
+// ── 업데이트 ────────────────────────────────────────────────────
+// 새 판은 **사람이 눌러야** 들어온다. 산출 도중에 화면과 엔진이 바뀌면 안 되기
+// 때문이다. 그래서 여기서는 (1) 새 판이 있는지 조용히 확인하고, (2) 무엇이
+// 바뀌는지 보여 주고, (3) 눌렀을 때만 갈아 끼운다.
+
+const VERSION = "__VERSION__";      // 빌드가 심는 버전명
+let pendingRelease = null;          // 서버에 올라와 있는 새 판의 정보
+
+async function checkForUpdate() {
+  try {
+    // 캐시를 건너뛰고 서버에 직접 묻는다 — 옛 판을 물고 있으면 알 수가 없다.
+    const response = await fetch("release.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const release = await response.json();
+    if (!release.version || release.version === VERSION) return;
+    pendingRelease = release;
+    $("update-open").hidden = false;
+  } catch (error) {
+    /* 인터넷이 없으면 확인할 방법도 없다 — 조용히 넘어간다 */
+  }
+}
+
+/** 새 판이 있다고 상단에 알린다. 무엇이 바뀌는지는 눌렀을 때 보여 준다. */
+function announceUpdate() {
+  $("update-open").hidden = false;
+  // 서비스워커가 먼저 알아챈 경우다. 바뀐 내용을 아직 모르니 한 번 더 묻는다.
+  if (!pendingRelease) checkForUpdate();
+}
+
+function showUpdate() {
+  const release = pendingRelease || {};
+  $("update-versions").textContent = release.version
+    ? `현재 버전 ${VERSION} → 새 버전 ${release.version}` +
+      (release.released ? ` (${release.released})` : "")
+    : `현재 버전 ${VERSION} — 새 판이 준비되어 있습니다`;
+  $("update-notes").replaceChildren(
+    ...(release.notes && release.notes.length
+      ? release.notes
+      : ["업데이트 내역이 함께 오지 않았습니다"]).map((line) => el("li", {}, line)));
+  $("update-dialog").showModal();
+}
+
+async function applyUpdate() {
+  $("update-dialog").close();
+  status("업데이트를 적용하는 중…");
+  updating = true;                  // 떠나기 경고를 건너뛴다 — 이미 물어봤다
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    // 기다리고 있는 새 일꾼이 있으면 이 순간에만 자리를 넘겨받게 한다.
+    if (registration?.waiting) {
+      registration.waiting.postMessage({ type: "take-over" });
+      await new Promise((done) => {
+        navigator.serviceWorker.addEventListener("controllerchange", done, { once: true });
+        setTimeout(done, 3000);     // 안 바뀌어도 새로고침은 한다
+      });
+    }
+  } catch (error) {
+    /* 일꾼이 없어도 새로고침만으로 새 화면을 받는다 */
+  }
+  location.reload();
+}
+
+$("update-open").addEventListener("click", showUpdate);
+$("update-go").addEventListener("click", applyUpdate);
+$("update-later").addEventListener("click", () => $("update-dialog").close());
+
 // ── 첫 인사 ──────────────────────────────────────────────────
 // 자료실에 양식·시험명부·금리표가 들어 있다는 것은 눌러 보기 전에는 모른다.
 // 엔진을 기다리지 않고 바로 띄운다 — 뜨는 데 20초가 걸리면 그 사이에 사람은
@@ -3679,7 +3739,10 @@ try {
 // 새로고침·탭 닫기 경고 — 산출 결과와 만들어 둔 시험 명부는 메모리에만
 // 있어, 떠나면 사라진다. 저장 안 된 작업이 있을 때만 묻는다 (앱 업데이트도
 // 새로고침 때 적용되므로, 이 물음이 곧 "업데이트 전 마지막 확인" 이 된다).
+let updating = false;               // 업데이트를 눌러 스스로 새로고침하는 중
+
 window.addEventListener("beforeunload", (event) => {
+  if (updating) return;             // 이미 창에서 물어보고 확인받았다
   if (!lastRun && !generated && !features) return;
   event.preventDefault();
   event.returnValue = "";      // 브라우저 표준 문구가 뜬다

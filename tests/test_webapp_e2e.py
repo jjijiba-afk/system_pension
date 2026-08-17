@@ -864,6 +864,47 @@ def test_build_stamp_is_visible_and_matches_the_cache(page) -> None:
     assert f'"pension-{stamp}"' in (DIST / "sw.js").read_text(encoding="utf-8")
 
 
+def test_the_version_name_is_visible_and_matches_the_release(page) -> None:
+    """화면의 버전명 = ``release.json`` 의 버전.
+
+    빌드 값은 열두 자리 해시라 "내 것이 최신인가" 를 눈으로 가릴 수가 없다.
+    사람이 읽고 서로 맞대어 볼 수 있는 이름이 따로 있어야 한다.
+    """
+    import json
+
+    release = json.loads((DIST / "release.json").read_text(encoding="utf-8"))
+    shown = page.inner_text("#app-version").strip()
+    assert shown == str(release["version"]), f"버전명이 어긋난다: {shown}"
+    assert release["notes"], "업데이트 내역이 비어 있다"
+
+
+def test_the_update_notice_shows_what_changed_before_it_reloads(page) -> None:
+    """[업데이트] — 무엇이 바뀌는지 먼저 보여 주고, 산출이 지워진다고 알린다.
+
+    새 판은 사람이 눌러야 들어온다. 누르기 전에 (1) 어느 버전으로 가는지,
+    (2) 무엇이 바뀌는지, (3) 지금 산출이 초기화된다는 사실을 봐야 한다 —
+    산출이 몇 분씩 걸리므로 모르고 눌러 날리면 그 시간을 다시 쓴다.
+    """
+    # 새 판이 올라와 있는 셈 친다 — 서버를 건드리지 않고 화면만 그 상태로 만든다.
+    page.evaluate("""() => {
+      pendingRelease = {version: "9.9", released: "2099-01-01",
+                        notes: ["임원 정년연령 수정 반영"]};
+      document.getElementById("update-open").hidden = false;
+    }""")
+    page.click("#update-open")
+    page.wait_for_selector("#update-dialog[open]", timeout=10_000)
+
+    body = page.inner_text("#update-dialog")
+    assert "9.9" in body, body
+    assert "임원 정년연령 수정 반영" in body, body
+    # 대외비·내부 코드가 새어 나가면 안 된다 — 받는 사람은 회사 담당자다.
+    assert "sw.js" not in body and "commit" not in body.lower(), body
+    assert "초기화" in body and "저장" in body, body
+
+    page.click("#update-later")
+    page.wait_for_selector("#update-dialog[open]", state="detached", timeout=10_000)
+
+
 def test_dashboard_tab_follows_each_run(page, tmp_path) -> None:
     """분석 탭 — 산출할 때마다 그 회차로 다시 그려져야 한다."""
     from pension.samples import write_sample_pack
@@ -1539,7 +1580,15 @@ def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
         # 주석에는 그 낱말이 나오므로 주석을 걷어내고 **실제 호출** 만 본다.
         code = re.sub(r"/\*.*?\*/", "", worker, flags=re.S)
         code = re.sub(r"//.*", "", code)
-        assert "skipWaiting(" not in code
+        # 넘겨받기는 **사람이 [업데이트] 를 눌렀을 때만** 일어나야 한다. 그래서
+        # 호출은 한 군데뿐이고, 그 자리는 'take-over' 신호를 받은 안쪽이다.
+        assert code.count("skipWaiting(") == 1, "넘겨받기를 여러 곳에서 부른다"
+        where = code.index("skipWaiting(")
+        assert "take-over" in code[max(0, where - 300):where], (
+            "사람이 누르지 않았는데 자리를 넘겨받는다")
+        # 설치·활성화 쪽에서 부르면 산출 중에 판이 갈린다. 호출은 화면이 보낸
+        # 신호를 받는 자리(message) 안쪽에만 있어야 한다.
+        assert where > code.index('addEventListener("message"')
         # claim 은 반대로 **있어야** 한다 — 첫 방문이 통제되지 않으면 그 방문에서
         # 받은 런타임·휠이 캐시에 담기지 않아 오프라인에서 엔진이 없다.
         assert "clients.claim(" in code
@@ -1573,15 +1622,22 @@ def test_every_template_downloads_from_the_library(page, tmp_path) -> None:
 
 
 def test_the_manuals_download_from_the_library(page, tmp_path) -> None:
-    """사용설명서·계리방법론을 화면에서 받을 수 있어야 한다.
+    """자료실의 문서를 화면에서 받을 수 있어야 한다.
 
     받는 사람에게 그대로 보낼 파일이다. 화면에서 읽는 것(물음표)과 **같은
     원본** 이라, 한쪽만 고쳐져 갈라지는 일이 없다.
+
+    이름을 여기 다시 적지 않고 화면에 놓인 것을 **전부** 받아 본다 — 문서를
+    하나 더할 때 시험을 고치는 것을 잊으면, 그 문서만 조용히 빠진다.
     """
     page.click("#tab-lib")
     open_section(page, "#lib-docs")
 
-    for name in ("사용설명서", "계리방법론"):
+    names = page.eval_on_selector_all(
+        "#lib-docs button[data-doc]", "list => list.map((b) => b.dataset.doc)")
+    assert len(names) >= 2, names
+
+    for name in names:
         # 화면에서 먼저 읽고(보고서와 같은 창), 그 창에서 원본을 받는다.
         page.click(f'#lib-docs button[data-doc="{name}"]')
         page.wait_for_selector("#print-dialog[open]", timeout=60_000)

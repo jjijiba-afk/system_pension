@@ -46,36 +46,36 @@ def _member(rule: JobGroupRule, **kw) -> ActiveMember:
     return member
 
 
-class TestExecutiveRetirementAge:
-    """임원은 정년이 따로 없거나 다른 경우가 많다.
+class TestRetirementAgeIsTheSameForEveryone:
+    """정년은 **직군 표에 적은 그대로** 쓴다.
 
-    실제 명부에서 임원의 직군이 '정규직' 으로 적혀 있어, 직군만으로는 임원을
-    분리할 수 없었다. 그래서 직군 규칙 안에 임원 값을 따로 둔다.
+    임직원 구분으로 값을 바꾸지 않는다 — 임원 정년이 다르면 직군 표에 임원
+    줄을 만들어 그 줄에 적는다. 한 줄만 보면 그 사람의 정년을 알 수 있어야
+    하고, 화면에 안 보이는 규칙이 숫자를 바꾸면 안 된다.
     """
 
-    def test_executive_uses_its_own_nra(self) -> None:
-        rule = _rule(severance_nra=60, executive_nra=39, executive_over_nra_add_age=2)
-        # 55세 임원: 임원 정년 39세를 이미 넘겼으므로 현재 연령 + 2
-        assert normal_retirement_age(55, rule, is_executive=True) == 57
-        # 같은 나이의 직원은 정년 60세
-        assert normal_retirement_age(55, rule, is_executive=False) == 60
-
-    def test_executive_falls_back_to_staff_values(self) -> None:
+    def test_executive_and_staff_get_the_same_age(self) -> None:
         rule = _rule(severance_nra=60, over_nra_add_age=2)
-        assert normal_retirement_age(50, rule, is_executive=True) == 60
+        for age, expected in ((50, 60), (63, 65)):
+            assert normal_retirement_age(age, rule, is_executive=True) == expected
+            assert normal_retirement_age(age, rule, is_executive=False) == expected
 
-    def test_no_executive_retirement_age_means_default_plus_add(self) -> None:
-        """규정에 '없음' 이면 기본 정년 60세 + 가산 2세로 처리한다."""
-        rule = _rule(executive_nra=60, executive_over_nra_add_age=2)
-        assert normal_retirement_age(58, rule, is_executive=True) == 60
-        assert normal_retirement_age(62, rule, is_executive=True) == 64
+    def test_a_blank_age_means_no_retirement_age(self) -> None:
+        """비운 칸은 0 세다 — 이미 넘긴 셈이라 현재 연령에 가산연수를 더한다."""
+        rule = _rule(severance_nra=0, over_nra_add_age=2)
+        assert normal_retirement_age(45, rule) == 47
+        assert normal_retirement_age(63, rule, is_executive=True) == 65
+
+    def test_the_add_on_is_used_as_written(self) -> None:
+        assert normal_retirement_age(63, _rule(severance_nra=60, over_nra_add_age=1)) == 64
+        assert normal_retirement_age(63, _rule(severance_nra=60, over_nra_add_age=3)) == 66
 
     def test_wage_peak_still_wins_when_ahead(self) -> None:
-        rule = _rule(executive_nra=60, executive_over_nra_add_age=2)
-        assert normal_retirement_age(50, rule, wage_peak_age=58, is_executive=True) == 58
+        rule = _rule(severance_nra=60, over_nra_add_age=2)
+        assert normal_retirement_age(50, rule, wage_peak_age=58) == 58
 
-    def test_validation_applies_executive_rule(self) -> None:
-        rule = _rule(executive_nra=39, executive_over_nra_add_age=2)
+    def test_validation_applies_the_group_rule(self) -> None:
+        rule = _rule(severance_nra=39, over_nra_add_age=2)
         config = CalculationConfig(base_date=BASE, job_group_rules=[rule])
         member = _member(rule, employee_type=EmployeeType.EXECUTIVE)
         validate_active([member], config, IssueLog())

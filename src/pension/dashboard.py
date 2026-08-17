@@ -83,9 +83,12 @@ def _member_block(run: Any, employee_id: str) -> dict[str, Any]:
     rule = (run.config.job_group_rules[index]
             if index is not None and index < len(run.config.job_group_rules)
             else None)
+    from .normalize import EmployeeType
+
     if member.declared_nra:
         notes.append(f"정년 {picked.retirement_age}세 = 명부의 개인별 정년 칸")
-    elif (rule is not None and rule.executive_nra
+    elif (member.employee_type is EmployeeType.EXECUTIVE
+          and rule is not None and rule.executive_nra
           and picked.retirement_age == rule.executive_nra):
         notes.append(f"정년 {picked.retirement_age}세 = [임원 정년연령] 칸")
     for label, on in (

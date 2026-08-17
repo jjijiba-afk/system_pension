@@ -23,6 +23,16 @@ sys.path.insert(0, str(ROOT / "webapp"))
 build = pytest.importorskip("build", reason="webapp/build.py 가 있어야 한다")
 
 
+def _shipped_docs() -> list[str]:
+    """배포본에 실리는 문서 이름들.
+
+    목록을 시험에 다시 적으면 문서를 하나 더할 때마다 두 곳을 고쳐야 하고,
+    한쪽을 잊으면 **시험은 통과하는데 그 문서만 화면에 안 뜬다.** 빌드가 쓰는
+    목록을 그대로 본다.
+    """
+    return [Path(name).stem for name, _origin in build._DOCS]
+
+
 class TestStripping:
     """주석·독스트링만 걷어내고 계산은 한 글자도 건드리지 않는다."""
 
@@ -213,7 +223,7 @@ class TestPackagingLeavesNoTrail:
         copied = "".join(
             line for line in flow.splitlines() if "Copy-Item" in line or "docs/" in line)
         assert "docs/*.md" not in copied
-        for name in ("사용설명서", "계리방법론", "지급률규정-작성법"):
+        for name in ("사용설명서", "계리방법론", "지급률규정-작성법", "DBO-점검표"):
             assert f"docs/{name}.md" in copied
 
 
@@ -626,7 +636,7 @@ class TestPrintablePages:
     @pytest.mark.skipif(not (ROOT / "webapp/dist/index.html").exists(),
                         reason="webapp/build.py 를 먼저 실행")
     def test_every_document_has_one(self) -> None:
-        for name in ("사용설명서", "계리방법론"):
+        for name in _shipped_docs():
             page = ROOT / f"webapp/dist/{name}.html"
             assert page.exists(), name
             html = page.read_text(encoding="utf-8")
@@ -644,7 +654,7 @@ class TestPrintablePages:
         """
         page = (ROOT / "webapp/dist/index.html").read_text(encoding="utf-8")
         script = (ROOT / "webapp/dist/app.js").read_text(encoding="utf-8")
-        for name in ("사용설명서", "계리방법론"):
+        for name in _shipped_docs():
             assert f'data-doc="{name}"' in page, name
         assert "showDoc" in script
         # 열린 창에서 인쇄(PDF)와 원본 내려받기가 모두 가능해야 한다.

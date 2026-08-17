@@ -70,12 +70,17 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
     rule = (config.job_group_rules[index]
             if index is not None and index < len(config.job_group_rules)
             else None)
+    from .normalize import EmployeeType
+
+    is_executive = member.employee_type is EmployeeType.EXECUTIVE
     if member.declared_nra:
         applied["정년연령 근거"] = (
             f"{result.retirement_age}세 — 명부의 개인별 정년 칸 (직군 규정보다 우선)"
         )
-    elif (rule is not None and rule.executive_nra
+    elif (is_executive and rule is not None and rule.executive_nra
           and result.retirement_age == rule.executive_nra):
+        # 임원 칸은 **임원에게만** 쓰인다. 직원의 정년이 우연히 같은 숫자라고
+        # 임원 칸이 근거인 것처럼 적으면, 설정을 엉뚱한 곳에서 찾게 된다.
         applied["정년연령 근거"] = (
             f"{result.retirement_age}세 — [기본가정] 임원 정년연령 칸"
         )

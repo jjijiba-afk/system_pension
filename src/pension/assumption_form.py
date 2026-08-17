@@ -232,7 +232,7 @@ _NOTE_PREFIXES: Final = ("·", "*", "※", "#")
 def default_payout() -> dict[str, Any]:
     """지급규정 한 직군의 기본값. 두 화면의 초기 표시가 같아야 한다."""
     return {
-        "excluded": False, "min_service": "1", "nra": "60", "executive_nra": "60",
+        "excluded": False, "min_service": "1", "nra": "60", "executive_nra": "",
         "add_age": "2", "basis": SERVICE_DAILY, "fraction": FRACTION_KEEP,
         "unit": "없음", "base_up": "반영", "promotion": "반영",
         "withdrawal": "반영", "mortality": "반영", "allocation": "급여식",
@@ -852,7 +852,7 @@ def read_state(path: str | Path, *, size: object = "") -> dict[str, Any]:
                     "nra": _cell_text(ws.cell(row, 3).value) or "60",
                     "add_age": _cell_text(ws.cell(row, 5).value) or "2",
                     "min_service": _cell_text(ws.cell(row, 14).value) or "0",
-                    "executive_nra": _cell_text(ws.cell(row, 15).value) or "60",
+                    "executive_nra": _cell_text(ws.cell(row, 15).value),
                     "excluded": text(ws.cell(row, 17).value).upper() in ("Y", "제외"),
                     "basis": text(ws.cell(row, 18).value) or SERVICE_DAILY,
                     "fraction": text(ws.cell(row, 19).value) or FRACTION_KEEP,
