@@ -2666,10 +2666,24 @@ $("report-lt").addEventListener("click", () => showValuationReport("longterm"));
 // 엔진의 같은 코드가 돌므로 여기 나온 채무 합은 전체 산출의 그 사람 몫과 같다.
 
 
+/** 표에 넣을 값의 표기. 큰 수는 세 자리마다 끊는다.
+ *
+ * `5000000` 과 `50000000` 은 눈으로 구분되지 않는데, 0 하나 차이가 그 사람의
+ * 채무를 열 배로 만든다. 대조하는 사람이 가장 먼저 보는 것이 자릿수다.
+ *
+ * 1,000 미만은 그대로 둔다 — 근속(10.0055년)·연령·정년·배수·비율이 모두
+ * 이 아래인데, 끊어 주면 얻는 것 없이 소수점만 잘린다.
+ */
+function grouped(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value;
+  if (Math.abs(value) < 1000) return value;
+  return Math.round(value).toLocaleString("ko-KR");
+}
+
 function kvTable(pairs) {
   return el("div", { class: "scroll-x" }, el("table", { class: "data" },
     ...pairs.map(([k, v]) => el("tr", {}, el("td", {}, String(k)),
-                                 el("td", { class: "num" }, String(v))))));
+                                 el("td", { class: "num" }, String(grouped(v)))))));
 }
 
 function traceTable(trace) {

@@ -461,3 +461,41 @@ class TestTheRosterCrossCheck:
                 + paid["계열사 전출"][0] + paid["사업처분·분할"][0]
                 ) == roster_sum("퇴직급여 총지급액")
         assert paid["퇴직위로금 (명예퇴직금 등)"][0] == roster_sum("퇴직위로금 등")
+
+
+class TestAmountsAreGrouped:
+    """금액은 세 자리마다 끊어 보여야 한다.
+
+    ``5000000`` 과 ``50000000`` 은 눈으로 구분되지 않는다. 0 하나가 더 붙은
+    임금은 그 사람의 채무를 열 배로 만드는데, 대조하는 사람이 가장 먼저 보는
+    것이 자릿수다. 여기서 막지 못하면 뒤에서는 못 잡는다.
+    """
+
+    def test_every_money_column_of_the_form_is_grouped(self, blank) -> None:
+        for sheet in ("재직자명부", "퇴직자명부", "추가명부"):
+            ws = blank[sheet]
+            head = {str(c.value).strip(): c.column for c in ws[HEADER_ROW] if c.value}
+            for label in tpl.MONEY_COLUMNS & set(head):
+                cell = ws.cell(FIRST_DATA_ROW, head[label])
+                assert "#,##" in cell.number_format, f"{sheet}의 [{label}]"
+
+    def test_the_rows_a_company_will_fill_in_are_ready_too(self, blank) -> None:
+        """예시 아래 빈 줄에도 서식이 걸려 있어야 한다.
+
+        없으면 회사가 이어 적는 순간부터 콤마가 사라져, 위아래 줄의 자릿수가
+        달라 보인다 — 그 상태로 검토하면 눈이 먼저 속는다.
+        """
+        ws = blank["재직자명부"]
+        head = {str(c.value).strip(): c.column for c in ws[HEADER_ROW] if c.value}
+        column = head["30일 평균임금"]
+        for row in range(FIRST_DATA_ROW + 2, FIRST_DATA_ROW + 5):
+            assert "#,##" in ws.cell(row, column).number_format, f"{row}행"
+
+    def test_no_money_column_was_left_out(self) -> None:
+        """금액 목록에 적은 이름이 실제 열 이름과 맞는지.
+
+        이름이 틀리면 조용히 아무 데도 안 걸린다 — 서식은 없어도 파일은
+        멀쩡히 열리므로, 눈으로 보기 전에는 빠진 줄을 모른다.
+        """
+        labels = {label for _b, label, *_r in tpl.ACTIVE + tpl.RETIRED + tpl.EXTRA}
+        assert tpl.MONEY_COLUMNS <= labels, tpl.MONEY_COLUMNS - labels

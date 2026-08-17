@@ -532,20 +532,40 @@ def _issues_sheet(wb, run: PensionRun) -> None:
     ws.auto_filter.ref = f"A1:I{max(2, len(rows) + 1)}"
 
 
-def _upload_sheet(wb, title: str, headers: tuple[str, ...], rows: list[list[Any]]) -> None:
-    ws = wb.create_sheet(title)
-    if title == "재직자명부":
-        # 생년월일·입사일자·중간정산일 / 전입일 / 추가지급 기준일
-        date_cols = {7, 8, 9, 20, 33}
-        # 평균임금·명퇴임금·추계액·일기본급 / 중간정산금액 / 장기급여·전입액 / 추가지급 기본급
-        money_cols = {10, 11, 12, 13, 17, 21, 22, 34}
-    else:
-        # 생년월일·입사일·퇴사일·사외자산 지급일 / 총지급 ~ 전출지급
-        date_cols = {7, 8, 9, 10}
-        money_cols = {13, 14, 15, 16, 17, 18}
+#: 명부 시트에서 날짜로 보일 열.
+_UPLOAD_DATES: frozenset = frozenset({
+    "생년월일", "입사일자", "중간정산일", "전입일", "추가지급 기준일",
+    "퇴사일", "사외자산 지급일",
+})
 
-    formats = dict.fromkeys(date_cols, _DATE)
-    formats.update(dict.fromkeys(money_cols, _MONEY))
+#: 명부 시트에서 세 자리로 끊어 보일 열. ``5000000`` 과 ``50000000`` 은 눈으로
+#: 구분되지 않는데, 0 하나 차이가 그 사람의 채무를 열 배로 만든다.
+_UPLOAD_MONEY: frozenset = frozenset({
+    "30일 평균임금", "명예퇴직 기준임금", "추계액", "1일 통상임금",
+    "중간정산 지급금액", "장기급여 기지급액", "전입 인수액", "추가지급 기본급",
+    "퇴직급여 총지급액", "사외자산 지급액", "국민연금 전환금",
+    "장기급여 지급액", "퇴직위로금 등", "전출 지급액",
+})
+
+
+def _upload_sheet(wb, title: str, headers: tuple[str, ...], rows: list[list[Any]]) -> None:
+    """산출이 읽은 형태로 정리한 명부 한 장.
+
+    서식은 **머리글 이름으로** 고른다. 예전에는 열 번호를 적어 두었는데, 열이
+    하나 끼어드는 순간 그 오른쪽 서식이 통째로 한 칸씩 밀린다. 실제로 밀려
+    있었다 — [임금피크 연령] 57 이 날짜로, [DB비율] 0.99 가 정수로 찍히고,
+    [전입일] 은 날짜 대신 숫자로 나왔다. 정작 금액인 [중간정산 지급금액]·
+    [전입 인수액] 은 서식 없이 붙어 자릿수를 셀 수 없었다.
+
+    이름으로 고르면 열이 어디로 옮겨 가도 따라간다.
+    """
+    ws = wb.create_sheet(title)
+    formats = {}
+    for index, head in enumerate(headers, start=1):
+        if head in _UPLOAD_DATES:
+            formats[index] = _DATE
+        elif head in _UPLOAD_MONEY:
+            formats[index] = _MONEY
     _write_table(ws, headers, rows or [[""] * len(headers)], formats=formats)
 
 

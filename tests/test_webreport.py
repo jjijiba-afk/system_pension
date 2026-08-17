@@ -173,3 +173,36 @@ class TestPlanAssetDisclosure:
             {"국공채": True},
         )
         assert "공시가격 유무 미기재" in page
+
+
+class TestTheRosterSheetFormatsByName:
+    """결과 엑셀의 명부 시트 — 서식을 **머리글 이름으로** 고르는지.
+
+    예전에는 열 번호로 적어 두었다. 열이 하나 끼어들면 그 오른쪽 서식이 통째로
+    한 칸씩 밀리는데, 실제로 밀려 있었다 — [임금피크 연령] 57 이 날짜로,
+    [DB비율] 0.99 가 정수로 찍히고, 정작 금액인 [중간정산 지급금액]·
+    [전입 인수액] 에는 콤마가 없었다. 파일은 멀쩡히 열리므로 눈으로 보기
+    전에는 아무도 모른다.
+    """
+
+    def test_every_named_column_exists(self) -> None:
+        from pension.report import _UPLOAD_DATES, _UPLOAD_MONEY
+        from pension.upload import ACTIVE_UPLOAD_HEADERS, RETIRED_UPLOAD_HEADERS
+
+        heads = set(ACTIVE_UPLOAD_HEADERS) | set(RETIRED_UPLOAD_HEADERS)
+        unknown = (_UPLOAD_DATES | _UPLOAD_MONEY) - heads
+        assert unknown == set(), f"명부에 없는 열 이름: {unknown}"
+
+    def test_ages_and_ratios_are_not_dressed_as_dates_or_money(self) -> None:
+        """연령·비율에 날짜·금액 서식이 걸리면 값이 딴것처럼 보인다."""
+        from pension.report import _UPLOAD_DATES, _UPLOAD_MONEY
+
+        for label in ("임금피크 연령", "DB비율", "만 연령", "정년연령",
+                      "휴직차감일수", "잔여계약기간"):
+            assert label not in _UPLOAD_DATES, label
+            assert label not in _UPLOAD_MONEY, label
+
+    def test_dates_are_not_listed_as_money(self) -> None:
+        from pension.report import _UPLOAD_DATES, _UPLOAD_MONEY
+
+        assert _UPLOAD_DATES.isdisjoint(_UPLOAD_MONEY)

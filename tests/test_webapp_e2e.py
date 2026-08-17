@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import http.server
+import re
 import threading
 from pathlib import Path
 
@@ -838,6 +839,15 @@ def test_member_lookup_and_reports(page, tmp_path) -> None:
     body = doc.inner_text()
     assert "연차별 계산 근거" in body
     assert "확정급여채무 (DBO)" in body
+    # 금액은 세 자리마다 끊겨야 한다. 5000000 과 50000000 은 눈으로 구분되지
+    # 않는데, 0 하나 차이가 그 사람의 채무를 열 배로 만든다.
+    wage = re.search(r"30일 평균임금\s*([\d,]+)", body)
+    assert wage, body[:400]
+    assert "," in wage.group(1), f"임금에 콤마가 없다: {wage.group(1)}"
+    # 근속은 반대로 **끊지 않는다.** 소수점 아래가 잘리면 중간정산·휴직이
+    # 반영됐는지 볼 수 없다.
+    service = re.search(r"기준일 근속\s*([\d.]+)", body)
+    assert service and "." in service.group(1), body[:400]
     page.click("#print-dialog .toolbar button:last-child")
     page.wait_for_selector("#print-dialog[open]", state="detached", timeout=10_000)
 

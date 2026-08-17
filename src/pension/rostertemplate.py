@@ -272,6 +272,27 @@ EXAMPLE_RULES: tuple[str, ...] = ("규정A", "임원규정")
 THIN = Side(style="thin", color="B8C0D0")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
+#: 금액 칸에 거는 표시 서식. 값은 건드리지 않고 **보이는 모양만** 바꾼다 —
+#: 셀 안에는 그대로 숫자가 들어 있으므로 우리가 읽을 때도, 회사가 계산식을
+#: 걸 때도 달라지는 것이 없다.
+MONEY_FORMAT: str = "#,##0"
+
+#: 금액을 적는 열. 세 자리마다 끊어 주지 않으면 자릿수를 눈으로 셀 수 없다 —
+#: ``5000000`` 과 ``50000000`` 은 한 번에 구분되지 않고, 0 하나가 더 붙은
+#: 임금은 그 사람의 채무를 열 배로 만든다. 대조하는 사람이 가장 먼저 보는
+#: 것이 자릿수라, 여기서 막지 못하면 뒤에서는 못 잡는다.
+MONEY_COLUMNS: frozenset = frozenset({
+    # 재직자명부
+    "30일 평균임금", "추계액", "차년도 추계액", "중간정산 지급금액",
+    "명예퇴직 기준임금", "전입 인수액", "추가지급 기본급",
+    "1일 통상임금", "장기급여 기지급액",
+    # 퇴직자명부
+    "퇴직급여 총지급액", "사외자산 지급액", "국민연금 전환금",
+    "퇴직위로금 등", "전출 지급액", "장기급여 지급액",
+    # 추가명부
+    "지급액",
+})
+
 #: 퇴직사유 코드 → 말. 기존 명부는 숫자로 오므로 제안 서식에서는 말로 보여 준다.
 REASON_WORD = {
     "1": "중도", "2": "사망", "3": "DC전환",
@@ -302,6 +323,12 @@ SECOND_RETIRED = {
 #: 우리 양식에 없는, 회사가 원래 두고 있던 열. 파트를 정할 수 없으므로 따로 센다.
 EXTRA_BLOCK = "회사 열"
 EXTRA_PART = "회사 열"
+
+
+def _as_money(cell, label: str) -> None:
+    """금액 열이면 세 자리 끊어 보이게 한다. 아니면 아무것도 하지 않는다."""
+    if label in MONEY_COLUMNS:
+        cell.number_format = MONEY_FORMAT
 
 
 def _look(block: str) -> tuple[str, str, str]:
@@ -387,6 +414,7 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
             sample_cell.font = Font(name=FACE, size=9, color="9C6500")
             sample_cell.fill = PatternFill("solid", fgColor="FFF2CC")
             sample_cell.border = BORDER
+            _as_money(sample_cell, label)
 
     if rows is None and examples is not None:
         where = {label: index for index, (_b, label, *_r) in enumerate(columns, start=1)}
@@ -397,6 +425,7 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
                 cell.font = Font(name=FACE, size=9, color="9C6500")
                 cell.fill = PatternFill("solid", fgColor="FFF2CC")
                 cell.border = BORDER
+                _as_money(cell, columns[column - 1][1])
     elif rows is None:
         for index, (block, label, _mean, _sample, _blank) in enumerate(columns, start=1):
             value = (second or {}).get(label)
@@ -404,6 +433,7 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
             cell.font = Font(name=FACE, size=9, color="9C6500")
             cell.fill = PatternFill("solid", fgColor="FFF2CC")
             cell.border = BORDER
+            _as_money(cell, label)
     else:
         where = {label: index for index, (_b, label, *_r) in enumerate(columns, start=1)}
         body = Font(name=FACE, size=9)
@@ -413,15 +443,23 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
                 index = where.get(label)
                 if index is None or value == "":
                     continue
-                ws.cell(row, index, value).font = body
+                cell = ws.cell(row, index, value)
+                cell.font = body
+                _as_money(cell, label)
 
     # 이어 적을 빈 줄을 미리 그어 둔다. 선이 예시 줄에서 끊기면 그 아래가
     # 표 밖처럼 보여, 사람이 늘어날 때 어디에 적어야 할지 되묻게 된다.
+    #
+    # 금액 서식도 그 빈 줄에 미리 걸어 둔다. 없으면 회사가 이어 적는 순간부터
+    # 콤마가 사라져, 위 줄은 5,000,000 인데 아래 줄은 5000000 으로 보인다 —
+    # 그 상태로 검토하면 자릿수를 눈이 먼저 속는다.
     written = (len(rows) if rows is not None
                else (len(examples) if examples is not None else 2))
     for offset in range(written, written + 4):
-        for column in range(1, len(columns) + 1):
-            ws.cell(first_row + offset, column).border = BORDER
+        for column, (_block, label, *_rest) in enumerate(columns, start=1):
+            cell = ws.cell(first_row + offset, column)
+            cell.border = BORDER
+            _as_money(cell, label)
 
     ws.row_dimensions[HEADER_ROW].height = 22
     ws.freeze_panes = ws.cell(FIRST_DATA_ROW, 1)
@@ -507,6 +545,7 @@ def _guide(wb) -> None:
             ws.cell(row, 3, label).font = Font(name=FACE, size=9, bold=block == "필수")
             ws.cell(row, 4, meaning).font = Font(name=FACE, size=9)
             ws.cell(row, 5, sample).font = Font(name=FACE, size=9, color="9C6500")
+            _as_money(ws.cell(row, 5), label)
             ws.cell(row, 6, blank).font = Font(name=FACE, size=9, color="5B6478")
             for column in range(1, 7):
                 ws.cell(row, column).border = BORDER
@@ -654,9 +693,12 @@ def _basics(ws, row: int, *, values: dict | None = None,
     ]
     if filled:
         rows = [(label, values.get(label, value), hint) for label, value, hint in rows]
+    # 인원과 금액은 세 자리로 끊는다. 여기 적는 값은 날짜·등급과 섞여 있어
+    # 열 단위로 걸 수가 없으므로 항목 이름으로 가른다.
+    grouped = {"상시근로자 수", "평균임금 하한 점검액"}
     for label, value, hint in rows:
         _write(ws, row, 1, label, bold=True)
-        _write(ws, row, 2, value, filled=filled)
+        _write(ws, row, 2, value, filled=filled, money=label in grouped)
         _note(ws, row, 3, hint)
         row += 1
 
