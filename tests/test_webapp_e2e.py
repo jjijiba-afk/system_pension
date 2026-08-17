@@ -1320,6 +1320,53 @@ def test_no_phone_width_pushes_the_screen_sideways(browser, app_url) -> None:
         context.close()
 
 
+def test_sideways_scrolling_stops_inside_the_box_it_started_in(
+    browser, app_url
+) -> None:
+    """옆으로 구르는 상자는 그 힘을 바깥으로 넘기지 않아야 한다.
+
+    문서가 화면보다 넓지 않아도 화면이 밀릴 수 있다. 탭 줄·넓은 표처럼 스스로
+    옆으로 구르는 상자 안에서 끝까지 민 뒤 계속 밀면, 브라우저가 남은 힘을
+    부모에게 넘긴다(스크롤 연쇄). 넘겨받을 곳이 문서뿐이라 화면이 통째로
+    밀리고 오른쪽에 검은 여백이 드러난다 — 아이폰에서 그렇게 보였다.
+
+    문서 폭만 재는 시험으로는 이걸 못 잡는다. 폭은 멀쩡했다. 그래서 **구르는
+    상자마다** 연쇄를 끊어 두었는지를 직접 본다.
+    """
+    context = browser.new_context(
+        viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    page = context.new_page()
+    page.goto(app_url)
+    dismiss_intro(page)
+    page.wait_for_selector("#run:not([disabled])", timeout=180_000)
+
+    leaky = []
+    for tab in ("tab-calc", "tab-edit", "tab-dash", "tab-report",
+                "tab-member", "tab-runs", "tab-lib"):
+        page.click(f"#{tab}")
+        # 접힌 부분 안에도 표가 있다. 펴 놓아야 폭과 성질이 잡힌다.
+        page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
+        page.wait_for_timeout(300)
+        leaky += page.evaluate("""(tab) => {
+          const out = [];
+          for (const el of document.querySelectorAll("*")) {
+            const style = getComputedStyle(el);
+            const scrolls = style.overflowX === "auto" || style.overflowX === "scroll";
+            if (!scrolls) continue;
+            if (el.scrollWidth <= el.clientWidth) continue;   // 실제로 구르는 것만
+            const chain = style.overscrollBehaviorX;
+            if (chain !== "contain" && chain !== "none") {
+              out.push(`${tab}: ${el.tagName.toLowerCase()}#${el.id}.${el.className} → ${chain}`);
+            }
+          }
+          return out;
+        }""", tab)
+
+    page.close()
+    context.close()
+    assert leaky == [], "옆으로 구르는 힘이 화면 전체로 새어 나간다: " + "; ".join(leaky)
+
+
 def test_the_home_screen_icon_fits_android(page) -> None:
     """안드로이드 홈 화면 아이콘이 흰 판에 얹히거나 잘리지 않아야 한다.
 

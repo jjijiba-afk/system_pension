@@ -16,8 +16,9 @@
      입력칸과 표에만 쓴다 — 그 대비가 '여기를 채우세요' 를 만든다. */
   --face: #E9EDF4; --face-line: #B9BCC4;
   /* 고르지 않은 탭. 푸른 기 없는 무채색 회색이라 남색 머리글·흰 활성 탭과
-     부딪히지 않는다. 너무 짙으면 화면이 무거워져 두 단계 밝힌 값을 쓴다. */
-  --tab-off: #E2E2E2; }
+     부딪히지 않는다. 짙으면 화면이 무거워지므로 옅게 잡되, 흰 활성 탭과는
+     끝까지 구분돼야 한다 — 더 밝히면 어느 탭을 보고 있는지 사라진다. */
+  --tab-off: #EDEDED; }
 * { box-sizing: border-box; }
 html { background: var(--desk); }
 
@@ -26,6 +27,21 @@ html { background: var(--desk); }
    밀려 검은 여백이 드러난다. clip 은 hidden 과 달리 스크롤 컨테이너를 만들지
    않아 sticky 요소도 그대로 산다(구형 브라우저는 hidden 으로 물러난다). */
 html, body { overflow-x: hidden; overflow-x: clip; overscroll-behavior-x: none; }
+
+/* 옆으로 구르는 상자들 — **자기 선에서 끊는다.**
+   위의 잠금만으로는 부족하다. 탭 줄·넓은 표·그림처럼 스스로 옆으로 구르는
+   상자 안에서 끝까지 민 뒤 계속 밀면, 브라우저가 그 힘을 바깥으로 넘긴다
+   (스크롤 연쇄). 넘겨받을 곳이 문서뿐이라 화면이 통째로 밀리고 오른쪽에
+   검은 여백이 드러난다 — 아이폰에서 실제로 그랬다.
+   `contain` 은 그 넘김을 막는다. 상자 안에서는 그대로 구르고, 끝에 닿으면
+   거기서 멈춘다.
+   창(dialog)은 세로까지 막는다. 창 안에서 굴리다 끝에 닿으면 뒤쪽 화면이
+   따라 움직여, 창을 닫고 보니 엉뚱한 데를 보고 있게 된다. */
+nav.tabs, nav.subtabs, .scroll-x, .chart-scroll,
+table.data, table.grid, #help-body pre, #help-body table {
+  overscroll-behavior-x: contain;
+}
+dialog { overscroll-behavior: contain; }
 
 /* 화면 글자 크기 — 모두 **배율** 로 건다. px 로 못박으면 브라우저에서 글자를
    키워 둔 사람의 설정이 통째로 무시된다. 아래 크기는 전부 rem 이라 이 한
