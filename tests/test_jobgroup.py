@@ -304,3 +304,61 @@ class TestPipelineUsesPayoutSheet:
         # Input 시트가 없으니 명부에서 직군을 끌어낸 잠정 설정이다.
         assert config.inferred
         assert {m.job_group for m in roster.active} == {"과장"}
+
+
+class TestABlankRetirementAgeStillMakesARule:
+    """정년을 **비운** 직군 줄도 규칙으로 읽혀야 한다.
+
+    양식은 "정년이 없으면 비워 두십시오 — 현재 연령에 가산연수를 더해 봅니다"
+    라고 안내한다. 그런데 읽는 쪽이 '정년이 숫자인 줄만 규칙' 으로 갈라 놓아,
+    시킨 대로 비우면 그 직군이 통째로 사라졌다. 소속 인원 전원이 '등록되지
+    않은 직군' 오류로 떨어져 산출이 멈췄다 — 안내대로 했는데 멈추는 자리다.
+    """
+
+    def _rules(self, tmp_path, rows):
+        import openpyxl
+
+        from pension.config import PAYOUT_SHEET, read_payout_rules
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = PAYOUT_SHEET
+        ws.append([f"열{c}" for c in range(1, 29)])
+        for row in rows:
+            ws.append(row)
+        path = tmp_path / "기초율.xlsx"
+        wb.save(path)
+        return read_payout_rules(openpyxl.load_workbook(path, data_only=True))
+
+    def test_it_is_read_and_means_no_retirement_age(self, tmp_path) -> None:
+        rules = self._rules(tmp_path, [
+            ["정규직", "정규직", 60, 60, 2],
+            ["임원", "임원", None, None, 2],      # 정년을 비운 줄
+        ])
+        assert [r.source_name for r in rules] == ["정규직", "임원"]
+        assert rules[1].severance_nra == 0        # 0 = 정년 없음
+        assert rules[1].over_nra_add_age == 2
+
+    def test_that_group_then_retires_at_age_plus_the_added_years(
+        self, tmp_path
+    ) -> None:
+        """정년이 없으면 지금 나이에 가산연수를 더한 해에 나간다."""
+        from pension.actuarial import normal_retirement_age
+
+        rules = self._rules(tmp_path, [["임원", "임원", None, None, 2]])
+        assert normal_retirement_age(45, rules[0]) == 47
+        assert normal_retirement_age(63, rules[0]) == 65
+
+    def test_a_note_line_is_still_skipped(self, tmp_path) -> None:
+        """이름 칸만 채운 안내문은 여전히 규칙이 아니다.
+
+        정년 칸만 보고 가르던 것을 그만두었으므로, 안내문이 직군 이름으로
+        새어 들어가지 않는지 다시 확인한다.
+        """
+        rules = self._rules(tmp_path, [
+            ["정규직", "정규직", 60, 60, 2],
+            ["명부의 Input 시트보다 우선합니다"],
+            ["· 직군이 더 있으면 줄을 늘리십시오"],
+            ["정년연령", "이 칸에 글자를 적으면 안내문으로 봅니다", "없음", "", 2],
+        ])
+        assert [r.source_name for r in rules] == ["정규직"]

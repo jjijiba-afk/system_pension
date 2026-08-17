@@ -313,9 +313,20 @@ def read_payout_rules(workbook) -> list[JobGroupRule]:
         source_name = text(ws.cell(row, 1).value)
         if not source_name or source_name.startswith(("·", "*", "※", "#")):
             continue
-        # 정년연령 칸이 숫자가 아니면 규칙 행이 아니다. 안내문은 한 칸만 채운다.
-        if not isinstance(ws.cell(row, 3).value, (int, float)):
-            continue
+        # 규칙 행인지 안내문인지는 **두 번째 칸부터 무언가 적혀 있는가** 로
+        # 가른다. 안내문은 첫 칸 하나만 채우기 때문이다.
+        #
+        # 예전에는 '정년연령이 숫자인가' 로 갈랐는데, 그러면 **정년을 비운 줄이
+        # 통째로 사라졌다.** 양식은 "정년이 없으면 비워 두십시오" 라고 안내해
+        # 놓고, 그대로 비우면 그 직군이 없는 것이 되어 소속 인원 전원이
+        # '등록되지 않은 직군' 오류로 떨어졌다 — 시킨 대로 했는데 산출이
+        # 멈추는 자리였다.
+        nra_cell = ws.cell(row, 3).value
+        if nra_cell not in (None, "") and not isinstance(nra_cell, (int, float)):
+            continue                      # 정년 칸에 글자가 있으면 안내문이다
+        if not any(text(ws.cell(row, column).value)
+                   for column in range(2, ws.max_column + 1)):
+            continue                      # 이름만 덩그러니 있는 줄
         rules.append(
             JobGroupRule(
                 source_name=source_name,
