@@ -88,7 +88,7 @@ class TestTheExtraPaymentNotice:
     사람이 되돌린다.
     """
 
-    def _note(self, roster_path, assumptions_path, *, multiple=None):
+    def _note(self, roster_path, assumptions_path, *, multiple=None, amount=None):
         from pension.assumptions import CAUSE_DEATH, CauseBenefit, CauseBenefits
         from pension.memberdetail import _active_block
 
@@ -96,10 +96,12 @@ class TestTheExtraPaymentNotice:
             roster_path, assumptions_path)
         member = next(m for m in roster.active if m.employee_id == "A001")
         member.extra_pay_base_wage = 50_000_000
-        if multiple is not None:
+        if multiple is not None or amount is not None:
             rule = member.rules.severance_benefit or member.job_group
             assumptions.exit_causes = CauseBenefits(rules={
-                (rule, CAUSE_DEATH): CauseBenefit(roster_extra_multiple=multiple)})
+                (rule, CAUSE_DEATH): CauseBenefit(
+                    roster_extra_multiple=multiple or 0.0,
+                    extra_amount=amount or 0.0)})
         block = _active_block(member, config, assumptions)
         return block["applied"]["명부 추가지급 기본급"]
 
@@ -125,3 +127,17 @@ class TestTheExtraPaymentNotice:
         """절반만 얹는 규정이면 그 사실이 보여야 한다."""
         note = self._note(roster_path, assumptions_path, multiple=0.5)
         assert "0.5" in note, note
+
+    def test_it_points_at_the_flat_amount_when_that_is_what_is_used(
+        self, roster_path, assumptions_path
+    ) -> None:
+        """같은 금액을 [가산액(원)] 으로 넣었으면 **얹히고 있다** 고 말해야 한다.
+
+        명부 칸 자체는 안 쓰이는 것이 맞지만, 그 사실만 앞세워 "산출에 더해지지
+        않았습니다" 라고 하면 이미 반영된 사람도 다시 손대게 된다. 실제로
+        사망 채무가 5천만원만큼 올라가 있는데 화면은 안 들어갔다고 말했다.
+        """
+        note = self._note(roster_path, assumptions_path, amount=50_000_000)
+        assert "더해지지 않았습니다" not in note, note
+        assert "얹히고 있습니다" in note, note
+        assert "가산액" in note and "사망" in note, note

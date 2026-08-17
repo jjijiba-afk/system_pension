@@ -100,18 +100,35 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
             "중도퇴직률 미반영은 정년까지 전원 근무한다고 보는 설정입니다"
         )
     if result.extra_payment:
-        # 규정이 이 칸을 쓰고 있는지 **확인하고** 말한다. 예전에는 칸이 차
-        # 있기만 하면 "더해지지 않았습니다" 라고 했는데, 시키는 대로 규정에
-        # 적어 넣은 뒤에도 같은 문구가 그대로 떠서 아직 안 걸린 줄 알게 됐다.
+        # 이 칸을 두고 **지금 무엇이 얹히고 있는지** 를 말한다.
+        #
+        # 두 번 틀렸던 자리다. 처음에는 칸이 차 있기만 하면 "더해지지
+        # 않았습니다" 라고 해서, 시키는 대로 규정에 적은 뒤에도 같은 문구가
+        # 그대로 떴다. 고친 뒤에도 [명부 추가지급 배수] 만 보느라, 같은 금액을
+        # [가산액(원)] 으로 넣어 **실제로 얹히고 있는데도** 안 얹힌다고 말했다.
+        # 안내가 틀리면 맞는 설정을 사람이 되돌린다.
         rule_name = result.benefit_rule or result.job_group
-        used = [cause for cause in (CAUSE_NORMAL, CAUSE_VOLUNTARY, CAUSE_DEATH)
-                if assumptions.exit_causes.get(rule_name, cause).roster_extra_multiple]
-        if used:
-            share = assumptions.exit_causes.get(rule_name, used[0]).roster_extra_multiple
+        causes_of = {cause: assumptions.exit_causes.get(rule_name, cause)
+                     for cause in (CAUSE_NORMAL, CAUSE_VOLUNTARY, CAUSE_DEATH)}
+        from_roster = [c for c, e in causes_of.items() if e.roster_extra_multiple]
+        flat = [c for c, e in causes_of.items() if e.extra_amount or e.extra_rule]
+        if from_roster:
+            share = causes_of[from_roster[0]].roster_extra_multiple
             applied["명부 추가지급 기본급"] = (
                 f"{result.extra_payment:,.0f}원 × {share:g} — "
-                f"{'·'.join(used)} 퇴직 시 급여에 더해집니다 "
+                f"{'·'.join(from_roster)} 퇴직 시 급여에 더해집니다 "
                 "([퇴직사유] 표의 명부 추가지급 배수)"
+            )
+        elif flat:
+            # 명부 칸 자체는 안 쓰이지만, 같은 자리에 정액 가산이 걸려 있다.
+            # 얹히고 있다는 사실을 먼저 말해야 사람이 또 손대지 않는다.
+            amount = causes_of[flat[0]].extra_amount
+            what = (f"[가산액(원)] {amount:,.0f}원" if amount else "[가산 규정]")
+            applied["명부 추가지급 기본급"] = (
+                f"{result.extra_payment:,.0f}원 — 이 칸은 산출에 쓰이지 않습니다. "
+                f"대신 {'·'.join(flat)} 퇴직 시 [퇴직사유] 표의 {what} 이(가) "
+                "얹히고 있습니다. 사람마다 금액이 다르면 [명부 추가지급 배수] "
+                "쪽으로 옮기십시오"
             )
         else:
             applied["명부 추가지급 기본급"] = (
