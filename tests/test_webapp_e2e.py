@@ -871,11 +871,15 @@ def test_the_version_name_is_visible_and_matches_the_release(page) -> None:
     사람이 읽고 서로 맞대어 볼 수 있는 이름이 따로 있어야 한다.
     """
     import json
+    import re
 
     release = json.loads((DIST / "release.json").read_text(encoding="utf-8"))
     shown = page.inner_text("#app-version").strip()
     assert shown == str(release["version"]), f"버전명이 어긋난다: {shown}"
     assert release["notes"], "업데이트 내역이 비어 있다"
+    # 소수점 아래 **두 자리.** 한 자리면 1.9 다음이 1.10 이 되는데, 글자로는
+    # 1.10 이 1.9 보다 앞서 보여 어느 쪽이 최신인지 말로 확인할 때 어긋난다.
+    assert re.fullmatch(r"\d+\.\d{2}", shown), f"버전은 1.06 꼴이어야 한다: {shown}"
 
 
 def test_the_update_notice_shows_what_changed_before_it_reloads(page) -> None:

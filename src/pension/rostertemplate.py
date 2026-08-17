@@ -538,6 +538,23 @@ def _prepare(ws, title: str, note: str, *, ink: str = "1F3864") -> int:
     return 4
 
 
+def _wrapped_height(note: str) -> float:
+    """병합된 안내 칸의 줄 높이.
+
+    엑셀은 **병합된 칸의 높이를 자동으로 맞추지 않는다.** 자동 줄바꿈을 켜
+    두어도 줄 수만 늘 뿐 높이는 그대로라, 안내가 한 줄을 넘어가면 뒷부분이
+    보이지 않는다 — 파일을 여는 사람은 잘렸다는 사실조차 모른다. 그래서
+    글자 수로 줄 수를 세어 높이를 직접 잡는다.
+
+    한글은 엑셀 폭 단위로 영문 두 배를 차지하므로 그렇게 센다. 넉넉히 잡는
+    쪽으로 어림한다 — 남는 여백은 눈에 거슬리지 않지만 잘린 글자는 사고다.
+    """
+    span = sum(width for _column, width in INPUT_WIDTHS)
+    each = sum(2 if ord(letter) > 0x2000 else 1 for letter in note)
+    lines = max(1, -(-each // max(1, int(span * 0.95))))
+    return max(15.0, lines * 14.5)
+
+
 def _band(ws, row: int, title: str, colour: str, note: str = "") -> int:
     """블록 띠 한 줄. 명부의 블록 머리와 같은 모양이다."""
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
@@ -552,6 +569,7 @@ def _band(ws, row: int, title: str, colour: str, note: str = "") -> int:
         cell = ws.cell(row, 1, note)
         cell.font = Font(name=FACE, size=9, color="5B6478")
         cell.alignment = Alignment(vertical="top", wrap_text=True)
+        ws.row_dimensions[row].height = _wrapped_height(note)
         row += 1
     return row
 
@@ -643,9 +661,18 @@ def _basics(ws, row: int, *, values: dict | None = None,
         row += 1
 
     row += 1
+    # 열 설명은 **표 위 안내줄에 모아** 둔다. 예전에는 열마다 한 문장씩 떼어
+    # 첫째·둘째·셋째 줄의 [적는 법] 칸에 하나씩 넣었는데, 그러면 '정규직' 줄
+    # 옆에 "명부의 직군 칸에 적힌 그대로" 가 붙는다 — 그 줄에 대한 설명처럼
+    # 읽히지만 사실은 첫 열에 대한 설명이라, 읽는 사람이 매번 되짚어야 했다.
+    # 줄마다 다른 말이 나오는 것도 규칙이 있는 것처럼 보여 더 헷갈렸다.
     row = _band(ws, row, "② 직군 규칙", BAND_COLOURS[1],
                 "명부에 적은 직군을 산출에 쓸 묶음으로 배정합니다. "
-                "정년이 다르면 여기서 나눕니다. 직군이 더 있으면 줄을 늘려 기재하십시오.")
+                "[명부 직군] 은 명부의 직군 칸에 적힌 그대로, [산출 직군] 은 "
+                "그 이름으로 묶어 산출합니다. 정년이 다르면 여기서 나눕니다 — "
+                "[정년연령] 을 비우면 정년이 없다는 뜻이므로 현재 연령에 "
+                "[정년초과 가산연수] 를 더합니다. 아래 직군 이름은 예시이며, "
+                "생산직·관리직 등 회사에 있는 직군으로 줄을 늘려 기재하십시오.")
     row = _heads(ws, row, (
         (1, "명부 직군"), (2, "산출 직군"), (3, "정년연령"),
         (4, "장기급여 정년"), (5, "정년초과 가산연수"), (6, "적는 법")))
@@ -656,13 +683,13 @@ def _basics(ws, row: int, *, values: dict | None = None,
         # 굳어 버리므로 **비워 둔다** — 비우면 정년이 없다는 뜻이 된다.
         ("임원", "임원", None, None, 2),
     ]
-    hints = ["명부의 직군 칸에 적힌 그대로", "이 이름으로 묶어 산출합니다",
-             "정년이 없으면 비워 두십시오 — 현재 연령에 가산연수를 더해 봅니다"]
-    for offset, line in enumerate(table):
+    for line in table:
         for index, value in enumerate(line, start=1):
             _write(ws, row, index, value, filled=filled,
                    centre=index >= 3, money=index >= 3)
-        _note(ws, row, 6, hints[offset] if offset < len(hints) else "")
+        # [적는 법] 은 회사가 필요하면 적는 빈 칸이다. 테두리만 둘러 표 안임을
+        # 보이고 내용은 넣지 않는다.
+        _note(ws, row, 6, "")
         row += 1
     # 이어 적을 빈 줄. 표가 어디까지인지 보이지 않으면 어디에 쓸지 모른다.
     for _ in range(3):
