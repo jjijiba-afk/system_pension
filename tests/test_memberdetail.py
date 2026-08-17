@@ -103,7 +103,8 @@ class TestTheExtraPaymentNotice:
                     roster_extra_multiple=multiple or 0.0,
                     extra_amount=amount or 0.0)})
         block = _active_block(member, config, assumptions)
-        return block["applied"]["명부 추가지급 기본급"]
+        applied = block["applied"]
+        return applied.get("명부 추가지급 기본급") or applied["퇴직사유 가산"]
 
     def test_it_says_so_when_the_rule_does_not_use_the_column(
         self, roster_path, assumptions_path
@@ -139,5 +140,7 @@ class TestTheExtraPaymentNotice:
         """
         note = self._note(roster_path, assumptions_path, amount=50_000_000)
         assert "더해지지 않았습니다" not in note, note
-        assert "얹히고 있습니다" in note, note
-        assert "가산액" in note and "사망" in note, note
+        assert "더해집니다" in note and "사망" in note, note
+        # 사족은 붙이지 않는다 — 얹히고 있다는 사실이 뒤로 밀리면 안 읽힌다.
+        assert "쓰이지 않습니다" not in note, note
+        assert len(note) < 60, f"길다({len(note)}자): {note}"

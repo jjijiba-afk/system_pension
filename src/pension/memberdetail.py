@@ -120,15 +120,15 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
                 "([퇴직사유] 표의 명부 추가지급 배수)"
             )
         elif flat:
-            # 명부 칸 자체는 안 쓰이지만, 같은 자리에 정액 가산이 걸려 있다.
-            # 얹히고 있다는 사실을 먼저 말해야 사람이 또 손대지 않는다.
+            # 가산이 이미 걸려 있으면 **그것만 말한다.** 명부 칸이 안 쓰인다는
+            # 사족을 앞에 붙이면, 얹히고 있다는 사실이 그 뒤로 밀려 안 얹힌
+            # 것처럼 읽힌다. 칸 이름도 실제로 얹히는 쪽으로 단다 — 금액이
+            # 서로 다를 때 엉뚱한 숫자가 그 이름 옆에 붙지 않게.
             amount = causes_of[flat[0]].extra_amount
-            what = (f"[가산액(원)] {amount:,.0f}원" if amount else "[가산 규정]")
-            applied["명부 추가지급 기본급"] = (
-                f"{result.extra_payment:,.0f}원 — 이 칸은 산출에 쓰이지 않습니다. "
-                f"대신 {'·'.join(flat)} 퇴직 시 [퇴직사유] 표의 {what} 이(가) "
-                "얹히고 있습니다. 사람마다 금액이 다르면 [명부 추가지급 배수] "
-                "쪽으로 옮기십시오"
+            applied["퇴직사유 가산"] = (
+                f"{amount:,.0f}원 — {'·'.join(flat)} 퇴직 시 급여에 더해집니다"
+                if amount else
+                f"{'·'.join(flat)} 퇴직 시 [가산 규정] 의 배수만큼 더해집니다"
             )
         else:
             applied["명부 추가지급 기본급"] = (
