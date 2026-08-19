@@ -3711,10 +3711,29 @@ function showUpdate() {
   const notes = (release.notes || []).filter((line) => String(line).trim());
   $("update-notes").replaceChildren(...notes.map((line) => el("li", {}, line)));
   $("update-notes").hidden = notes.length === 0;
+  $("update-msg").textContent = "";
+  $("update-pass").value = "";
   $("update-dialog").showModal();
 }
 
 async function applyUpdate() {
+  // 새 판으로 넘어가면 **떠 있던 산출이 사라진다.** 옆에서 지나가다 누르는
+  // 일이 없도록 관리자 비밀번호를 한 번 받는다. 강사용 잠금과 같은 열쇠이며,
+  // 대조는 엔진이 해시로만 한다.
+  const key = $("update-pass").value.trim();
+  if (!key) {
+    $("update-msg").textContent = "관리자 비밀번호를 입력하십시오.";
+    return;
+  }
+  try {
+    py("gen_unlock", { password: key });
+  } catch (error) {
+    const message = error.message || String(error);
+    $("update-msg").textContent = message.includes("비밀번호")
+      ? message
+      : "확인하지 못했습니다 — 잠시 뒤 다시 시도하십시오. (" + message + ")";
+    return;
+  }
   $("update-dialog").close();
   status("업데이트를 적용하는 중…");
   updating = true;                  // 떠나기 경고를 건너뛴다 — 이미 물어봤다
@@ -3737,6 +3756,9 @@ async function applyUpdate() {
 $("update-open").addEventListener("click", showUpdate);
 $("update-go").addEventListener("click", applyUpdate);
 $("update-later").addEventListener("click", () => $("update-dialog").close());
+$("update-pass").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); $("update-go").click(); }
+});
 
 // ── 첫 인사 ──────────────────────────────────────────────────
 // 자료실에 양식·시험명부·금리표가 들어 있다는 것은 눌러 보기 전에는 모른다.

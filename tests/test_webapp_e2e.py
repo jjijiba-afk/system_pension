@@ -917,6 +917,18 @@ def test_the_update_notice_shows_what_changed_before_it_reloads(page) -> None:
     assert "sw.js" not in body and "commit" not in body.lower(), body
     assert "초기화" in body and "저장" in body, body
 
+    # 비밀번호 없이 누르면 넘어가지 않는다. 산출이 통째로 지워지는 단추라,
+    # 옆에서 지나가다 눌러 몇 분치 작업을 날리는 일이 없어야 한다.
+    page.click("#update-go")
+    assert page.locator("#update-dialog").evaluate("d => d.open"), "그냥 넘어갔다"
+    assert "비밀번호" in page.inner_text("#update-msg")
+
+    # 틀린 비밀번호도 막힌다.
+    page.fill("#update-pass", "아무거나")
+    page.click("#update-go")
+    assert page.locator("#update-dialog").evaluate("d => d.open"), "틀렸는데 넘어갔다"
+    assert page.inner_text("#update-msg").strip()
+
     page.click("#update-later")
     page.wait_for_selector("#update-dialog[open]", state="detached", timeout=10_000)
 
