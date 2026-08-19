@@ -277,6 +277,7 @@ def load_inputs(
         roster = read_roster(wb, config, log)
         roster.extra = read_extra_roster(wb, config, log)
         _check_roster_against_movement(roster, general, log)
+        _check_national_pension_against_roster(roster, general, log)
     finally:
         wb.close()
 
@@ -360,6 +361,20 @@ def _check_general_sheet(general, log: IssueLog) -> None:
                 sheet="예치금",
                 value=round(difference),
             )
+    assets = general.assets
+    if assets.has_national_pension():
+        # 이 돈은 더 들어오지 않고 줄기만 한다 — 전환금을 가진 사람이 나가면
+        # 그만큼 빠진다. 기초에서 지급액을 빼면 기말이 나와야 한다.
+        difference = assets.national_pension_difference
+        if round(difference) != 0:
+            log.warning(
+                "GEN_PENSION_NOT_BALANCED",
+                "국민연금전환금 잔액이 맞지 않습니다 "
+                f"(기초−지급−기말 = {difference:,.0f}원). "
+                "전환금은 들어오는 일 없이 지급으로만 줄어듭니다",
+                sheet="예치금",
+                value=round(difference),
+            )
     obligation = general.obligation
     if obligation.has_ends():
         difference = obligation.difference
@@ -379,6 +394,28 @@ def _check_general_sheet(general, log: IssueLog) -> None:
 #: 단수 처리나 원 단위 반올림으로 몇 만 원이 남는 것은 흔하다. 사람 하나가
 #: 통째로 빠지면 보통 백만 원 단위로 벌어지므로, 그 사이에 문턱을 둔다.
 _ROSTER_GAP_LIMIT: Final = 1_000_000
+
+
+def _check_national_pension_against_roster(roster, general, log: IssueLog) -> None:
+    """전환금 지급액과 퇴직자명부의 전환금 열 합계를 맞댄다.
+
+    잔액이 스스로 맞아도 지급액 자체가 다른 자료에서 옮겨 온 것일 수 있다.
+    퇴직자명부와 맞대야 같은 사건을 두 곳에서 같은 금액으로 적었는지 드러난다.
+    """
+    if general is None or not general.assets.national_pension_paid:
+        return
+    total = sum(m.national_pension_payment for m in roster.retired)
+    gap = general.assets.national_pension_paid - total
+    if abs(gap) <= _ROSTER_GAP_LIMIT:
+        return
+    log.warning(
+        "GEN_PENSION_ROSTER_GAP",
+        f"[예치금] 의 국민연금전환금 지급액"
+        f"({general.assets.national_pension_paid:,.0f}원)과 퇴직자명부 "
+        f"전환금 열 합계({total:,.0f}원)가 {gap:,.0f}원 다릅니다",
+        sheet="예치금",
+        value=round(gap),
+    )
 
 
 def _check_roster_against_movement(roster, general, log: IssueLog) -> None:

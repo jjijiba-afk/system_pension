@@ -190,7 +190,10 @@ CASES: Final[tuple[CaseSpec, ...]] = (
             "· 각 특이사항마다 ① 더 받을 자료 ② 시스템 설정(직군·규정·퇴직사유·",
             "  기간분할·추가명부 등) ③ 산출 반영 방법을 적어 보세요.",
         ),
-        flags={"specials_only": True, "longterm_share": 0.4},
+        # 국민연금전환금은 예전에 넘겨 둔 몫이라 옛 사람만 갖고 있다 —
+        # 특이케이스 명부에 두어 잔액 증감 검산이 실제로 도는지 본다.
+        flags={"specials_only": True, "longterm_share": 0.4,
+               "national_pension": True},
     ),
 )
 
@@ -489,6 +492,10 @@ def _make_retired(
         row["fund_payment_date"] = (
             exit_date + _dt.timedelta(days=rng.randint(1, 30))
         ).isoformat()
+    # 국민연금전환금은 예전에 국민연금으로 넘겨 둔 몫이라 옛날 사람만 갖고
+    # 있다. 나갈 때 그만큼 함께 빠지므로 잔액이 줄기만 한다.
+    if flags.get("national_pension") and total > 0 and rng.random() < 0.3:
+        row["national_pension_payment"] = int(total * 0.03 / 1_000) * 1_000
     if reason == "5":   # 계열사 전출
         row["transfer_out_payment"] = total
     if reason == "4" and rng.random() < 0.4:
@@ -980,9 +987,14 @@ def _asset_numbers(
     actual_return = round(opening * rng.uniform(0.02, 0.04), -3)
     management_fee = round(opening * 0.0009, -3)
     custody_fee = round(opening * 0.0013, -3)
-    national_pension = (
+    # 전환금은 들어오는 일 없이 지급으로만 줄어든다. 기말을 정하고 그 해에
+    # 나간 만큼을 더해 기초를 만든다 — 그래야 표가 스스로 맞는다.
+    pension_paid = sum(
+        float(row.get("national_pension_payment") or 0) for row in retirees)
+    pension_closing = (
         round(opening * 0.01, -3) if spec.flags.get("national_pension") else 0.0
     )
+    national_pension = pension_closing
     closing = (
         opening + contributions + actual_return
         - fund_paid - management_fee - custody_fee
@@ -1017,13 +1029,14 @@ def _asset_numbers(
             "계열사 전출": round(paid["transfer_out"]),
             "사업처분·분할": round(paid["disposal"]),
         },
-        "opening": (round(opening - national_pension), round(national_pension)),
+        "opening": (round(opening - national_pension),
+                    round(pension_closing + pension_paid)),
         "asset": {
             "부담금 납입액": (round(contributions), 0),
             "이자수익": (round(actual_return), 0),
             "계열사 전입": (0, 0),
             "합병 인수액": (0, 0),
-            "퇴직급여 지급액": (round(fund_paid), 0),
+            "퇴직급여 지급액": (round(fund_paid), round(pension_paid)),
             "중간정산금": (0, 0),
             "DC전환 지급액": (0, 0),
             "계열사 전출": (0, 0),

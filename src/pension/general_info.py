@@ -162,7 +162,17 @@ class AssetMovement:
     custody_fee: float = 0.0
     """자산관리수수료."""
     national_pension: float = 0.0
-    """국민연금전환금 기말 잔액. 별도 열로 관리된다."""
+    """국민연금전환금 **기말** 잔액. 별도 열로 관리된다."""
+    national_pension_opening: float = 0.0
+    """국민연금전환금 기초 잔액.
+
+    기말만 받으면 그 값이 맞는지 볼 길이 없다. 이 돈은 더 들어오지 않고
+    **줄기만 한다** — 전환금을 가진 사람이 나가면 그만큼 빠진다. 기초에서
+    지급액을 빼면 기말이 나와야 하고, 그 지급액은 퇴직자명부의 전환금 열
+    합계와 같아야 한다. 세 값이 서로를 잡아 준다.
+    """
+    national_pension_paid: float = 0.0
+    """당기 중 지급된 국민연금전환금."""
     unpaid_benefits: float = 0.0
     """기준일 현재 미지급 퇴직급여. 이미 퇴직했는데 결산일까지 못 준 금액."""
     asset_ceiling: float | None = None
@@ -182,6 +192,16 @@ class AssetMovement:
 
     def is_empty(self) -> bool:
         return not (self.opening or self.closing or self.contributions)
+
+    @property
+    def national_pension_difference(self) -> float:
+        """전환금 기초 − 지급 − 기말. 0 이 아니면 그 표가 맞지 않는다."""
+        return (self.national_pension_opening - self.national_pension_paid
+                - self.national_pension)
+
+    def has_national_pension(self) -> bool:
+        """전환금 잔액을 굴려 볼 수 있는지. 기초가 없으면 검산이 성립하지 않는다."""
+        return bool(self.national_pension_opening)
 
     @property
     def total_paid(self) -> float:
@@ -555,6 +575,9 @@ def _read_assets(ws) -> AssetMovement:
 
     if header:
         result.opening = _asset_amount(ws, header + 1, cols)
+        if cols.pension:
+            result.national_pension_opening = _number(
+                ws.cell(header + 1, cols.pension).value)
     if verify:
         result.closing = _asset_amount(ws, verify - 1, cols)
         if cols.pension:
@@ -573,6 +596,12 @@ def _read_assets(ws) -> AssetMovement:
                     if field_name in _MAGNITUDE_FIELDS:
                         amount = abs(amount)
                     setattr(result, field_name, amount)
+                # 전환금은 **별도 열** 이라 합계에 섞으면 안 된다. 이 돈은
+                # 퇴직급여 지급 줄에서만 빠지므로 그 줄에서 따로 집는다.
+                if (field_name == "benefits_paid" and cols.pension
+                        and not result.national_pension_paid):
+                    result.national_pension_paid = abs(
+                        _number(ws.cell(row, cols.pension).value))
                 break
 
     detail = _find_row(ws, "예치금 구성", "사외적립자산 세부내역")

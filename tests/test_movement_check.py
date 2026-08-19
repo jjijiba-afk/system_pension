@@ -14,7 +14,7 @@ from __future__ import annotations
 import openpyxl
 import pytest
 
-from pension.general_info import ObligationMovement
+from pension.general_info import AssetMovement, ObligationMovement
 
 
 class TestTheTableBalancesItself:
@@ -85,3 +85,61 @@ class TestAMissingPersonIsCaught:
         run = self.run(roster_path, assumptions, tmp_path)
         assert any(i.code == "GEN_ROSTER_TOTAL_GAP" for i in run.issues.warnings), \
             "사람이 빠졌는데 아무 말이 없다 — 사람별 대조로는 못 잡는 자리다"
+
+
+class TestTheNationalPensionRollsForward:
+    """국민연금전환금은 **줄기만 한다.**
+
+    예전에 국민연금으로 넘겨 둔 몫이라 새로 들어오는 일이 없고, 전환금을 가진
+    사람이 나갈 때만 함께 빠진다. 기말 잔액 하나만 받으면 그 값이 맞는지 볼
+    길이 없지만, 기초와 지급액을 함께 받으면 세 값이 서로를 잡아 준다.
+    """
+
+    def test_a_balanced_balance_has_no_difference(self) -> None:
+        movement = AssetMovement(
+            national_pension_opening=16_000_000,
+            national_pension_paid=9_000_000,
+            national_pension=7_000_000,
+        )
+        assert movement.national_pension_difference == 0
+        assert movement.has_national_pension()
+
+    def test_a_wrong_closing_shows_up(self) -> None:
+        """기말만 고쳐 적으면 그만큼 어긋난다."""
+        movement = AssetMovement(
+            national_pension_opening=16_000_000,
+            national_pension_paid=9_000_000,
+            national_pension=5_000_000,
+        )
+        assert movement.national_pension_difference == 2_000_000
+
+    def test_without_an_opening_there_is_nothing_to_roll(self) -> None:
+        """기초가 없으면 굴릴 수가 없다 — 조용히 넘어간다."""
+        assert not AssetMovement(national_pension=7_000_000).has_national_pension()
+
+    def test_the_generated_pack_rolls_forward_and_matches_the_roster(
+        self, tmp_path
+    ) -> None:
+        """생성기가 만든 특이케이스 명부가 실제로 앞뒤가 맞는지.
+
+        시험이 스스로 만든 숫자만 보면, 정작 시트를 읽는 길이 끊겨 있어도
+        통과한다. 읽기·검산·명부 대조를 한 번에 태워 본다.
+        """
+        from pension.pipeline import load_inputs
+        from pension.rostergen import CASES, write_case_pack
+
+        folder = tmp_path / "사례"
+        folder.mkdir()
+        write_case_pack(folder, specials=True)
+        spec = CASES[-1]
+        _config, roster, _assumptions, log, general = load_inputs(
+            folder / f"{spec.title}.xlsx", folder / f"{spec.title}_기초율.xlsx")
+
+        assets = general.assets
+        assert assets.has_national_pension(), "전환금이 든 명부가 아니다"
+        assert assets.national_pension_difference == 0
+        assert assets.national_pension_paid == pytest.approx(
+            sum(m.national_pension_payment for m in roster.retired))
+        codes = {issue.code for issue in log.warnings}
+        assert "GEN_PENSION_NOT_BALANCED" not in codes
+        assert "GEN_PENSION_ROSTER_GAP" not in codes
