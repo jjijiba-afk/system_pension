@@ -1719,10 +1719,18 @@ def test_a_new_build_arrives_only_when_someone_approves_it(browser, tmp_path) ->
         page.goto(url)
         page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
         # 첫 방문은 일꾼이 자리를 넘겨받기 전이다 — 한 번 더 열어야 통제된다.
-        page.reload()
-        page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
-        page.wait_for_function(
-            "() => navigator.serviceWorker.controller !== null", timeout=30_000)
+        # 설치가 늦으면 그 한 번으로도 모자라므로, 통제될 때까지 다시 연다.
+        for attempt in range(3):
+            page.reload()
+            page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
+            try:
+                page.wait_for_function(
+                    "() => navigator.serviceWorker.controller !== null",
+                    timeout=20_000)
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
         before = page.inner_text("#build-stamp").strip()
 
         # 새 판을 올린 셈 친다 — 화면 파일이 바뀌고 캐시 이름이 갈린다.

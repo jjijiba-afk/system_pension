@@ -427,6 +427,31 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog,
         member.daily_base_pay = _number(get("daily_base_pay"))
         member.leave_days = abs(_number(get("leave_days")))
         member.remaining_contract_years = abs(_number(get("remaining_contract_years")))
+        member.contract_end_date = _read_date(
+            get("contract_end_date"), config, log,
+            col=_col_of(cols, "contract_end_date"),
+            code="JAE_CONTRACT_END_DATE", required=False, **kw,
+        )
+        if member.contract_end_date is not None:
+            # 날짜가 오면 그것으로 다시 잰다. 적어 온 연수는 기준일이 바뀌면
+            # 틀리고 반올림도 섞여 들어오므로, 둘이 다르면 날짜가 옳다.
+            #
+            # 이미 지난 날짜는 0 이 아니라 **그대로 두고** 검증이 짚는다. 여기서
+            # 0 으로 만들면 잔여계약이 없는 사람과 구별되지 않아, 계약이 끝난
+            # 사람이 정년까지 근무하는 것으로 조용히 되돌아간다.
+            remaining = max(0.0, (member.contract_end_date - config.base_date).days / 365.25)
+            declared = member.remaining_contract_years
+            member.remaining_contract_years = remaining
+            if declared > 0 and abs(declared - remaining) > 0.5:
+                # 둘 다 왔는데 반년 넘게 어긋난다. 날짜를 쓰지만, 어느 쪽이
+                # 낡았는지는 회사만 안다 — 조용히 고르고 넘어가지 않는다.
+                log.info(
+                    "JAE_CONTRACT_MISMATCH",
+                    f"잔여계약기간 {declared:g}년과 계약종료일이 어긋납니다"
+                    f"(종료일 기준 {remaining:.1f}년). **날짜를 기준으로** 계산했습니다",
+                    column=_col_of(cols, "contract_end_date"),
+                    value=member.contract_end_date, **kw,
+                )
         # DB비율은 `0.99` 로도 `99` 로도 온다. 1 을 넘으면 백분율로 본다 —
         # DB 비중이 1 배를 넘는 제도는 없다. 비어 있으면 전액 DB 다.
         ratio = _number(get("db_ratio"))

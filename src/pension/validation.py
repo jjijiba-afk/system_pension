@@ -479,6 +479,20 @@ def validate_active(
                 value=member.remaining_contract_years, **kw,
             )
 
+        if member.contract_end_date is not None:
+            if member.contract_end_date <= config.base_date:
+                # 기준일에 이미 끝난 계약이다. 재직자명부에 남아 있다면 갱신
+                # 했거나 퇴직자명부로 갔어야 한다. 그대로 두면 남은 근무기간이
+                # 0 이라 채무가 통째로 사라지므로, 반드시 사람이 봐야 한다.
+                log.warning(
+                    "JAE_CONTRACT_ENDED",
+                    f"계약종료일 {member.contract_end_date:%Y-%m-%d} 이 산출기준일보다 "
+                    "이릅니다. 계약을 갱신했으면 새 종료일로, 이미 나갔으면 "
+                    "[퇴직자명부] 로 옮겨 주십시오",
+                    column=_col(sheet, "contract_end_date"),
+                    value=member.contract_end_date, **kw,
+                )
+
         _check_progressive_split(member, config, sheet, log, kw)
 
         # ── 정년연령 확정 ──────────────────────────────────────────
