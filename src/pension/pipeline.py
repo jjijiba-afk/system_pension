@@ -276,6 +276,7 @@ def load_inputs(
         _check_general_sheet(general, log)
         roster = read_roster(wb, config, log)
         roster.extra = read_extra_roster(wb, config, log)
+        _check_roster_against_movement(roster, general, log)
     finally:
         wb.close()
 
@@ -346,18 +347,64 @@ def _check_general_sheet(general, log: IssueLog) -> None:
     서식에 '검증' 줄이 있는데도 맞지 않은 채로 오는 파일이 있다. 그 표를
     말없이 쓰면 재측정손익이 차이만큼 틀어지므로, 여기서 짚어 둔다.
     """
-    if general is None or general.assets.is_empty():
+    if general is None:
         return
-    difference = general.assets.difference
-    if round(difference) != 0:
-        log.warning(
-            "GEN_ASSET_NOT_BALANCED",
-            "예치금 증감이 맞지 않습니다 "
-            f"(기초+유입−유출−기말 = {difference:,.0f}원). "
-            "회사가 보내온 표를 확인하세요",
-            sheet="예치금",
-            value=round(difference),
-        )
+    if not general.assets.is_empty():
+        difference = general.assets.difference
+        if round(difference) != 0:
+            log.warning(
+                "GEN_ASSET_NOT_BALANCED",
+                "예치금 증감이 맞지 않습니다 "
+                f"(기초+유입−유출−기말 = {difference:,.0f}원). "
+                "회사가 보내온 표를 확인하세요",
+                sheet="예치금",
+                value=round(difference),
+            )
+    obligation = general.obligation
+    if obligation.has_ends():
+        difference = obligation.difference
+        if round(difference) != 0:
+            log.warning(
+                "GEN_OBLIGATION_NOT_BALANCED",
+                "추계액 증감이 맞지 않습니다 "
+                f"(기초+증가+전입−지급−기말 = {difference:,.0f}원). "
+                "회사가 보내온 표를 확인하세요",
+                sheet="예치금",
+                value=round(difference),
+            )
+
+
+#: 명부 합계와 증감표 기말이 이만큼 넘게 벌어지면 사람이 빠진 것으로 본다.
+#:
+#: 단수 처리나 원 단위 반올림으로 몇 만 원이 남는 것은 흔하다. 사람 하나가
+#: 통째로 빠지면 보통 백만 원 단위로 벌어지므로, 그 사이에 문턱을 둔다.
+_ROSTER_GAP_LIMIT: Final = 1_000_000
+
+
+def _check_roster_against_movement(roster, general, log: IssueLog) -> None:
+    """증감표의 **기말 추계액** 과 명부 추계액 합계를 맞댄다.
+
+    이것이 명부 검산이다. 사람별 추계액만 맞대면 **아예 빠진 사람은 비교 대상이
+    없어 걸리지 않는다** — 명부에 없으니 짝지을 상대가 없고, 합계도 그만큼
+    작아진 채로 그럴듯하다. 회사가 기초에서 출발해 그 해에 드나든 것을 더하고
+    뺀 기말은 그 사람을 포함하고 있으므로, 두 값을 맞대면 그때 드러난다.
+    """
+    if general is None or not general.obligation.closing:
+        return
+    total = sum(m.accrued_benefit for m in roster.active)
+    if not total:
+        return                       # 추계액을 안 적어 온 명부다 — 다른 검증이 짚는다
+    gap = general.obligation.closing - total
+    if abs(gap) <= _ROSTER_GAP_LIMIT:
+        return
+    log.warning(
+        "GEN_ROSTER_TOTAL_GAP",
+        f"[예치금] 증감표의 기말 추계액({general.obligation.closing:,.0f}원)과 "
+        f"재직자명부 추계액 합계({total:,.0f}원)가 {gap:,.0f}원 다릅니다. "
+        "명부에서 사람이 빠졌거나, 증감표에 다른 기간의 금액이 섞였을 수 있습니다",
+        sheet="예치금",
+        value=round(gap),
+    )
 
 
 def _read_payout_rules(assumptions_path: str | Path) -> list:

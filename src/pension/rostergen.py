@@ -990,9 +990,25 @@ def _asset_numbers(
     longterm_paid = sum(float(row.get("longterm_payment") or 0) for row in retirees)
 
     cash = round(closing * 0.8, -3)
+    # 추계액 증감표. 기말은 **재직자명부 추계액의 합** 그 자체여야 한다 —
+    # 그래야 사람이 하나 빠졌을 때 두 줄이 어긋나 드러난다. 기초는 거기서
+    # 거꾸로 되짚어 만든다.
+    obligation_out = (paid["benefits_paid"] + settlement + paid["dc_converted"]
+                      + paid["other_paid"] + paid["transfer_out"] + paid["disposal"])
+    obligation_accrual = round(accrued * rng.uniform(0.06, 0.11), -3)
+    obligation_opening = round(
+        accrued + obligation_out - transfer_in - obligation_accrual)
+    # 이 생성기는 추계액을 흉내내지 않는다(회사가 계산해 오는 값이다). 그러면
+    # 기말을 만들 근거가 없으므로 두 칸을 비운다 — 0 을 적어 두면 검산이
+    # 통과한 것처럼 보이면서 아무것도 검사하지 않는다.
+    has_accrued = accrued > 0
+
     return {
+        "obligation_ends": ((obligation_opening, round(accrued)) if has_accrued
+                            else (0, 0)),
         "obligation": {
             "계열사 전입": round(transfer_in),
+            "당기 추계액 증가": round(obligation_accrual) if has_accrued else 0,
             "합병 인수액": 0,
             "퇴직급여 지급액": round(paid["benefits_paid"]),
             "중간정산금": round(settlement),

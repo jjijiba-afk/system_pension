@@ -923,6 +923,9 @@ def _longterm(ws, row: int, *, filled: bool = False, rows: list | None = None,
 MOVEMENT_ROWS = [
     ("(+)", "부담금 납입액",          False, True,  0,             1_500_000_000),
     ("(+)", "이자수익",              False, True,  0,             420_000_000),
+    # 추계액은 그 해에 **자라기도** 한다. 이 줄이 없으면 기초에서 지급액만 빼게
+    # 되어 기말과 절대 맞지 않고, 검산 자체가 성립하지 않는다.
+    ("(+)", "당기 추계액 증가",        True,  False, 24_000_000,    0),
     ("(+)", "합병 인수액",            True,  True,  0,             0),
     ("(+)", "계열사 전입",            True,  True,  0,             0),
     ("(-)", "퇴직급여 지급액",         True,  True,  165_000_000,   158_000_000),
@@ -941,6 +944,23 @@ OBLIGATION_ROWS = [(sign, name, ob) for sign, name, has_ob, _a, ob, _av in MOVEM
                    if has_ob]
 ASSET_ROWS = [(sign, name, av, 0) for sign, name, _o, has_asset, _ov, av in MOVEMENT_ROWS
               if has_asset]
+
+#: 추계액 증감표의 (기초, 기말). **이것이 명부 검산이다.**
+#:
+#: 사람별 추계액만 맞대면 명부에서 아예 빠진 사람은 비교 대상이 없어 걸리지
+#: 않는다. 기초에서 출발해 그 해에 드나든 것을 더하고 빼면 기말이 나와야 하고,
+#: 그 기말은 명부 추계액의 합과 같아야 한다 — 한 사람이 통째로 빠지면 이 두
+#: 줄이 그 사람의 추계액만큼 어긋난다.
+#:
+#: 예시 값은 **손으로 적지 않고 되짚어 만든다.** 기말은 작성 예시 두 사람의
+#: 추계액 합계 그 자체이고, 기초는 거기서 그 해 유출입을 거꾸로 되짚은 값이다.
+#: 숫자를 하나 박아 두면 예시 명부를 고칠 때마다 표가 조용히 어긋난다.
+_EXAMPLE_ACCRUED = 79_219_178 + SECOND_ACTIVE["추계액"]
+_EXAMPLE_MOVED = sum(
+    amount if sign == "(-)" else -amount
+    for sign, _name, has_ob, _a, amount, _av in MOVEMENT_ROWS if has_ob
+)
+OBLIGATION_ENDS = (_EXAMPLE_ACCRUED + _EXAMPLE_MOVED, _EXAMPLE_ACCRUED)
 
 ASSET_OPENING = (12_000_000_000, 300_000_000)
 #: 기말은 신탁 명세서의 숫자를 그대로 적는 자리다. 검증 줄이 0 이 되는 값.
@@ -1035,13 +1055,14 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
 
     opening = numbers.get("opening", ASSET_OPENING)
     closing = numbers.get("closing", ASSET_CLOSING)
+    obligation_ends = numbers.get("obligation_ends", OBLIGATION_ENDS)
 
     opening_row = row
     label(opening_row, "", "기초 잔액 (전기말)")
-    na(opening_row, 3)
+    money(opening_row, 3, obligation_ends[0])
     money(opening_row, 4, opening[0])
     money(opening_row, 5, opening[1])
-    _note(ws, opening_row, 6, "전기말 명세서의 잔액")
+    _note(ws, opening_row, 6, "전기말 명부의 추계액 합계 · 전기말 명세서의 잔액")
 
     row = opening_row + 1
     for sign, text_, has_ob, has_asset, ob_amount, asset_amount in MOVEMENT_ROWS:
@@ -1066,16 +1087,18 @@ def _assets(wb, *, filled: bool = False, numbers: dict | None = None) -> None:
 
     closing_row = row
     label(closing_row, "", "기말 잔액 (결산일)")
-    na(closing_row, 3)
+    money(closing_row, 3, obligation_ends[1])
     money(closing_row, 4, closing[0])
     money(closing_row, 5, closing[1])
-    _note(ws, closing_row, 6, "결산일 명세서의 잔액")
+    _note(ws, closing_row, 6, "결산일 명부의 추계액 합계 · 결산일 명세서의 잔액")
 
     verify_row = closing_row + 1
     label(verify_row, "", "검증  (기초 + 유입 − 유출 − 기말)")
-    na(verify_row, 3)
-    plus_last = opening_row + 4          # (+) 줄 넷: 부담금·이자수익·합병·전입
-    for column in "DE":
+    # (+) 줄이 몇 개인지는 표에서 센다. 줄을 하나 더 넣고 여기 숫자를 안 고치면
+    # 그 줄이 유출로 넘어가 검증이 두 배로 틀어진다.
+    plus_count = sum(1 for sign, *_r in MOVEMENT_ROWS if sign == "(+)")
+    plus_last = opening_row + plus_count
+    for column in "CDE":
         cell = ws.cell(verify_row, ord(column) - 64,
                        f"={column}{opening_row}"
                        f"+SUM({column}{opening_row + 1}:{column}{plus_last})"

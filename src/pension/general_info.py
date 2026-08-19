@@ -92,6 +92,12 @@ class PayoutRuleDraft:
 class ObligationMovement:
     """5-1) 퇴직급여추계액 변동내역. 증감표의 지급·전입 줄에 그대로 쓴다."""
 
+    opening: float = 0.0
+    """기초(전기말) 퇴직급여추계액. 전기말 명부의 추계액 합계다."""
+    closing: float = 0.0
+    """기말(결산일) 퇴직급여추계액. 결산일 명부의 추계액 합계다."""
+    accrual: float = 0.0
+    """당기 추계액 증가분. 근속이 쌓이고 임금이 오른 몫이다."""
     transfer_in: float = 0.0
     """계열사 전입 (받은 금액)."""
     merger_in: float = 0.0
@@ -111,10 +117,23 @@ class ObligationMovement:
 
     def is_empty(self) -> bool:
         return not any(
-            (self.transfer_in, self.merger_in, self.benefits_paid,
+            (self.opening, self.closing, self.accrual,
+             self.transfer_in, self.merger_in, self.benefits_paid,
              self.settlement_paid, self.dc_converted, self.other_paid,
              self.transfer_out, self.disposal)
         )
+
+    @property
+    def difference(self) -> float:
+        """기초 + 유입 − 유출 − 기말. 0 이 아니면 표 자체가 맞지 않는다."""
+        return (self.opening + self.accrual + self.merger_in + self.transfer_in
+                - self.benefits_paid - self.settlement_paid - self.dc_converted
+                - self.other_paid - self.transfer_out - self.disposal
+                - self.closing)
+
+    def has_ends(self) -> bool:
+        """기초·기말을 둘 다 적어 왔는지. 하나라도 없으면 검산이 안 된다."""
+        return bool(self.opening) and bool(self.closing)
 
 
 @dataclass(slots=True)
@@ -308,6 +327,9 @@ def _parse_rounding(formula: str, base_wage: str) -> tuple[int | None, str]:
 _OBLIGATION_LABELS: Final = (
     # '퇴직급여 지급액'(우리 양식)과 '퇴직금 지급액'(자료요청서) 둘 다 읽는다.
     ("퇴직급여 지급", "benefits_paid"),
+    ("당기 추계액 증가", "accrual"),
+    ("추계액 증가", "accrual"),
+    ("당기 증가", "accrual"),
     ("계열사 전입", "transfer_in"),
     ("합병", "merger_in"),
     ("퇴직금 지급액", "benefits_paid"),
@@ -446,6 +468,13 @@ def _read_obligation(ws) -> ObligationMovement:
     for row in range(head + 1, stop):
         label = _row_label(ws, row)
         if not label:
+            continue
+        # 기초·기말은 예치금과 한 줄을 나눠 쓴다. 추계액 열에서만 읽는다.
+        if "기초" in label and not result.opening:
+            result.opening = abs(_row_amount(ws, row, (money,)))
+            continue
+        if "기말" in label and not result.closing:
+            result.closing = abs(_row_amount(ws, row, (money,)))
             continue
         for needle, field_name in _OBLIGATION_LABELS:
             if needle in label:
