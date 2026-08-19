@@ -288,6 +288,7 @@ def load_inputs(
         _check_national_pension_against_roster(roster, general, log)
         _check_against_prior_sheet(roster, log)
         _check_payment_bases(roster, log)
+        _check_settlement_and_transfers(roster, config, general, log)
     finally:
         wb.close()
 
@@ -404,6 +405,68 @@ def _check_general_sheet(general, log: IssueLog) -> None:
 #: 단수 처리나 원 단위 반올림으로 몇 만 원이 남는 것은 흔하다. 사람 하나가
 #: 통째로 빠지면 보통 백만 원 단위로 벌어지므로, 그 사이에 문턱을 둔다.
 _ROSTER_GAP_LIMIT: Final = 1_000_000
+
+
+def _check_settlement_and_transfers(roster, config, general, log: IssueLog) -> None:
+    """중간정산자·계열사 전출입자를 **따로 세어** 증감표와 맞댄다.
+
+    이 사람들은 재직자·퇴직자 명부에 섞여 있다. 한 사람이 한 줄이라는 점에서는
+    그 편이 맞지만, 섞여 있으면 **그 해에 정산·전출입한 사람이 몇이고 얼마인지**
+    가 어디에도 드러나지 않는다. 증감표에는 줄이 따로 있는데 명부에는 없으니,
+    그 줄이 틀려도 맞대어 볼 상대가 없다.
+
+    셀 때는 **그 해에 일어난 것만** 센다. 재직자명부의 중간정산일·전입일은 몇
+    해 전 것도 그대로 남아 있어서, 통째로 더하면 옛 금액이 당기 증감표와
+    맞대어져 매번 틀렸다고 나온다.
+    """
+    if general is None or general.obligation.is_empty():
+        return
+    start = general.period_start
+    if start is None:
+        # 기간을 모르면 한 해로 본다. 결산기가 바뀐 회사는 화면에서 시작일을
+        # 넣으므로, 여기서 넘겨짚어도 그때 바로잡힌다.
+        start = config.base_date.replace(year=config.base_date.year - 1)
+
+    def within(when) -> bool:
+        return when is not None and start < when <= config.base_date
+
+    checks = (
+        ("중간정산금", general.obligation.settlement_paid,
+         sum(m.settlement_amount for m in roster.active
+             if within(m.settlement_date)),
+         "재직자명부에서 당기에 중간정산한 사람"),
+        ("계열사 전입", general.obligation.transfer_in,
+         sum(m.transfer_in_amount for m in roster.active
+             if within(m.transfer_in_date)),
+         "재직자명부의 전입액"),
+        ("계열사 전출", general.obligation.transfer_out,
+         sum(m.transfer_out_payment for m in roster.retired),
+         "퇴직자명부의 전출 지급액"),
+    )
+    for label, booked, counted, where in checks:
+        if not booked and not counted:
+            continue
+        if not counted:
+            # 증감표에는 있는데 명부 칸이 통째로 비었다. 사람별 금액을 안 적어
+            # 보내는 회사가 흔하므로 틀렸다고 하지 않는다 — 다만 **맞대어 볼
+            # 수가 없다** 는 사실은 남긴다. 그래야 검산이 돌았다고 오해하지 않는다.
+            log.info(
+                "GEN_MOVEMENT_NO_ROSTER",
+                f"[예치금] 증감표에 {label} {booked:,.0f}원이 있는데 "
+                f"{where} 칸이 비어 있어 맞대어 보지 못했습니다",
+                sheet="예치금",
+            )
+            continue
+        gap = booked - counted
+        if abs(gap) <= _ROSTER_GAP_LIMIT:
+            continue
+        log.warning(
+            "GEN_MOVEMENT_ROSTER_GAP",
+            f"[예치금] 증감표의 {label}({booked:,.0f}원)과 "
+            f"{where} 합계({counted:,.0f}원)가 {gap:,.0f}원 다릅니다",
+            sheet="예치금",
+            value=round(gap),
+        )
 
 
 def _check_payment_bases(roster, log: IssueLog) -> None:
