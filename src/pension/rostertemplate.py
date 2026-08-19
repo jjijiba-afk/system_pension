@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+from typing import Final
 
 from .workbook import save_workbook
 from pathlib import Path
@@ -255,6 +256,24 @@ EXTRA = [
 #: 그대로 읽으면 있지도 않은 정산이 잡혀 증감표가 그 금액만큼 틀린다 —
 #: 아무 말 없이 그럴듯한 숫자가 나오는 쪽이다. 그래서 예시를 보여 주되,
 #: 지우지 않고 보내도 조용히 빠지도록 표시를 심어 둔다.
+#: 보내기 전에 한 번 훑을 목록. 자료를 받아 열어 보면 같은 것이 매번 빠진다.
+#:
+#: 되묻고 다시 찾아보는 왕복이 결산 기간에는 며칠씩 걸린다. 앞장에 목록을 두면
+#: 그 왕복이 준다 — 채우는 사람이 마지막에 한 번 훑기만 하면 된다.
+CHECKLIST: tuple[str, ...] = (
+    "맨 윗줄의 인원수가 회사 인사자료의 재직 인원과 같은가",
+    "맨 윗줄의 30일 평균임금 합계가 급여자료와 같은가",
+    "추계액 합계가 회계장부의 퇴직급여충당부채와 같은가",
+    "기중에 퇴직한 사람이 [퇴직자명부] 에 빠짐없이 있는가 "
+    "(DC전환자·전출자도 여기에 적습니다)",
+    "성별이나 생년월일이 빈 사람이 없는가 "
+    "(주민등록번호 앞 7자리를 적었으면 비워도 됩니다)",
+    "[예치금] 증감표의 검증 줄이 모두 0 인가",
+    "중간정산·계열사 전출입이 있었다면 그 금액을 사람별로도 적었는가",
+    "축소·정산·사업결합·분할이 있었다면 [추가명부] 를 채웠는가",
+    "노란색 작성 예시 줄을 지웠는가",
+)
+
 EXAMPLE_MARK: str = "(예시)"
 
 #: 추가명부 작성 예시. 사건 네 가지 중 자주 쓰는 셋을 한 줄씩 보여 준다.
@@ -375,8 +394,8 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
     columns = list(columns) + [(EXTRA_BLOCK, label, "", "", "") for label in extras]
 
     ws = wb.create_sheet(name)
-    ws.cell(1, 1, f"{name} — 색이 진한 앞쪽 열이 필수입니다."
-                  + ("" if rows else " 노란 줄은 작성 예시이니 지우고 쓰세요."))
+    # 1행 오른쪽은 총계 줄이 쓴다. 안내는 짧게 — 길면 총계 칸에서 끊겨 보인다.
+    ws.cell(1, 1, "합계 →" if rows else "합계 →  (노란 줄은 예시)")
     ws.cell(1, 1).font = Font(name=FACE, size=9, italic=True, color="5B6478")
 
     def band(row: int, name_of, colors) -> None:
@@ -473,9 +492,43 @@ def _sheet(wb, name: str, columns: list, first_row: int = FIRST_DATA_ROW,
             cell.border = BORDER
             _as_money(cell, label)
 
+    _totals_strip(ws, columns)
     ws.row_dimensions[HEADER_ROW].height = 22
     ws.freeze_panes = ws.cell(FIRST_DATA_ROW, 1)
     return ws
+
+
+#: 총계 줄이 훑는 마지막 행. 명부가 이보다 길면 그 아래는 안 세어진다.
+TOTAL_LAST_ROW: Final = 5004
+
+
+def _totals_strip(ws, columns: list) -> None:
+    """맨 윗줄에 인원수와 금액 합계를 얹는다. **수식이다.**
+
+    작아 보이지만 값이 크다. 채우는 사람이 자기 숫자를 바로 본다 — 한 사람을
+    빠뜨리거나 임금에 0 을 하나 더 붙이면 그 자리에서 합계가 튄다. 우리도
+    '읽은 줄 수 × 합계' 로 대조할 수 있다.
+
+    박아 넣은 숫자로 두면 안 된다. 회사가 줄을 더하거나 고치는 순간 거짓말이
+    되고, 거짓말인지 아닌지는 보는 사람이 알 수가 없다. 수식이라야 따라 움직인다.
+
+    머리글 위(1행)에 둔다. 자료 아래에 두면 명부를 읽는 쪽이 그 줄을 사람으로
+    잘못 읽고, 옆에 두면 화면 밖으로 밀린다. 1행은 고정되어 있어 아무리
+    내려가도 눈에 남는다.
+    """
+    for index, (_block, label, *_rest) in enumerate(columns, start=1):
+        letter = get_column_letter(index)
+        span = f"{letter}{FIRST_DATA_ROW}:{letter}{TOTAL_LAST_ROW}"
+        if label == "사번":
+            cell = ws.cell(1, index, f"=COUNTA({span})")
+            cell.number_format = '#,##0"명"'
+        elif label in MONEY_COLUMNS:
+            cell = ws.cell(1, index, f"=SUM({span})")
+            cell.number_format = MONEY_FORMAT
+        else:
+            continue
+        cell.font = Font(name=FACE, size=9, bold=True, color="1F3864")
+        cell.alignment = Alignment(horizontal="right")
 
 
 def _guide(wb) -> None:
@@ -501,7 +554,25 @@ def _guide(wb) -> None:
                 "명부와 표는 줄을 얼마든지 늘려 쓰셔도 됩니다.")
     ws["A4"].font = Font(name=FACE, size=9, color="5B6478")
 
+    # ── 보내기 전 확인사항 ───────────────────────────────────────
+    # 자료를 받아 열어 보면 같은 것이 매번 빠져 있다. 다 채운 뒤 한 번 훑을
+    # 목록을 앞장에 두면, 우리가 되묻고 회사가 다시 찾아보는 왕복이 준다.
     row = 6
+    ws.cell(row, 1, "보내기 전 확인").font = Font(
+        name=FACE, size=11, bold=True, color="1F3864")
+    row += 1
+    _note(ws, row, 1,
+          "각 명부 시트 맨 윗줄에 인원수와 금액 합계가 자동으로 뜹니다. "
+          "채우신 뒤 그 숫자가 회사 자료와 같은지만 보시면 됩니다.", boxed=False)
+    row += 1
+    for item in CHECKLIST:
+        cell = ws.cell(row, 1, "☐")
+        cell.font = Font(name=FACE, size=11, color="1F3864")
+        cell.alignment = Alignment(horizontal="center")
+        _note(ws, row, 2, item, boxed=False)
+        row += 1
+    row += 1
+
     ws.cell(row, 1, "시트").font = Font(name=FACE, size=11, bold=True, color="1F3864")
     row += 1
     for name, what in (
@@ -1329,13 +1400,39 @@ def _embed_values(path: Path) -> None:
             return evaluate(ws, raw[1:], seen | {ref})
         return float(raw) if isinstance(raw, (int, float)) else 0.0
 
-    def span(ws, text, seen):
+    def bounds(ws, text):
+        """범위의 네 귀퉁이. 아래쪽은 **실제 쓰인 마지막 줄** 까지만 본다.
+
+        총계 줄이 `B5:B5004` 처럼 넉넉히 잡아 두는데, 그것을 곧이곧대로 훑으면
+        시트마다 오천 줄씩 헛돈다. 브라우저(Pyodide)에서는 그 헛걸음이 초 단위로
+        불어나 양식 만들기가 통째로 멎는다 — 실제로 그렇게 멎었다. 빈 줄은
+        합계에도 개수에도 보태는 것이 없으므로 잘라도 답이 같다.
+        """
         left, right = text.split(":")
         c1, r1, c2, r2 = range_boundaries(f"{left}:{right}")
+        return c1, r1, c2, min(r2, ws.max_row)
+
+    def span(ws, text, seen):
+        c1, r1, c2, r2 = bounds(ws, text)
         return [value_of(ws, ws.cell(r, c).coordinate, seen)
                 for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)]
 
+    def count_of(ws, text):
+        """COUNTA — 빈 칸이 아닌 것의 수.
+
+        :func:`span` 은 못 쓴다. 그쪽은 숫자로 바꾸므로 사번 같은 글자가 0 이
+        되어, 사람 수가 통째로 0 으로 나온다.
+        """
+        c1, r1, c2, r2 = bounds(ws, text)
+        return float(sum(
+            1 for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)
+            if ws.cell(r, c).value not in (None, "")))
+
     def evaluate(ws, expr, seen):
+        # 총계 줄의 인원수 — COUNTA(B5:B5004). 셀 참조로 바뀌기 전에 걷어낸다.
+        expr = re.sub(r"COUNTA\(([A-Z]+\d+:[A-Z]+\d+)\)",
+                      lambda m: "(" + repr(count_of(ws, m.group(1))) + ")",
+                      expr)
         # 명부 대조가 쓰는 다른 시트 합계 — SUM(퇴직자명부!M5:M5004).
         expr = re.sub(
             r"SUM\((?:'([^']+)'|([^'!()=]+))!([A-Z]+\d+:[A-Z]+\d+)\)",
