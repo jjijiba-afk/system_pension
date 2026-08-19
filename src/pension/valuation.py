@@ -192,6 +192,12 @@ class MemberValuation:
     1 이 아니면 이 사람의 급여가 그만큼만 채무로 잡혔다는 뜻이다. 결과만 보고는
     왜 절반인지 알 수 없으므로 적용값을 남긴다.
     """
+    mixed_service: float = 0.0
+    """혼합형에 가입한 시점까지의 근속연수. 0 이면 전 근속에 비중을 걸었다.
+
+    이 구간은 **전액 DB** 다. 비중이 어디부터 걸렸는지 보이지 않으면, 채무가
+    반쯤 깎여 나온 것이 맞는 처리인지 담당자가 가릴 수 없다.
+    """
 
     by_cause: dict[str, dict[str, float]] = field(default_factory=dict)
     """퇴직사유별 몫 — ``{사유: {"dbo": …, "service_cost": …, "benefit_pv": …,
@@ -543,6 +549,19 @@ def value_member(
     db_share = member.db_ratio if 0 < member.db_ratio <= 1 else 1.0
     result.db_ratio = db_share
 
+    # 혼합형에 **가입한 날** 이 있으면 그 전 근속은 전액 DB 다. 회사가 혼합형을
+    # 들이는 것은 보통 제도 개편 때이고, 그 이전 근속까지 DC 로 넘기려면 근로자
+    # 동의와 실제 이전이 필요하다 — 그렇게 넘긴 경우는 중간정산일로 온다.
+    #
+    # 비율만 받아 전 근속에 걸면 채무가 틀린다. 10년 일한 사람이 작년에
+    # `DB 50 / DC 50` 으로 바꿨다면 그 전 10년치의 절반이 통째로 사라진다.
+    mixed_service: float | None = None
+    if db_share < 1.0 and member.mixed_plan_start_date is not None:
+        mixed_service = max(0.0, apply_fraction(
+            covered(member.raw_service_years(member.mixed_plan_start_date)),
+            member.service_fraction))
+    result.mixed_service = mixed_service or 0.0
+
     causes = assumptions.exit_causes
 
     # 누진(호봉)제를 쓰다가 연봉제로 바꾼 회사는 전환 전 근속분의 누진 배수를
@@ -588,6 +607,21 @@ def value_member(
         )
         return frozen_service * frozen_rate + max(0.0, after)
 
+    def db_multiple(service: float, age: float, rule_name: str = "") -> float:
+        """확정급여로 남는 몫만 센 지급배수.
+
+        혼합형은 **가입한 날부터** DB 몫이 줄어든다. 그 전 근속은 전액 DB 이므로
+        배수를 두 토막으로 갈라, 뒤 토막에만 비중을 건다.
+
+        가입일이 없으면 전 구간에 같은 비중을 거는 것과 같다 — 그때는 귀속비율의
+        분자·분모에서 약분되므로 종전 값과 한 치도 달라지지 않는다.
+        """
+        total = multiple_at(service, age, rule_name)
+        if mixed_service is None:
+            return total * db_share
+        before = multiple_at(min(service, mixed_service), age, rule_name)
+        return before + max(0.0, total - before) * db_share
+
     def parts_at(
         cause: CauseBenefit, service: float, age: float, wage: float
     ) -> tuple[float, float]:
@@ -597,7 +631,7 @@ def value_member(
         내는 배수를 따라 쌓이고, 가산은 사유에 따라 즉시 귀속될 수 있다.
         """
         service = max(service, cause.min_service)
-        base = multiple_at(service, age, cause.benefit_rule) * wage
+        base = db_multiple(service, age, cause.benefit_rule) * wage
         extra = cause.extra_amount
         if cause.extra_rule:
             extra += multiple_at(service, age, cause.extra_rule) * wage
@@ -607,7 +641,9 @@ def value_member(
         # 두 경우에서 채무가 통째로 틀린다.
         if cause.roster_extra_multiple:
             extra += cause.roster_extra_multiple * extra_payment
-        return base * db_share, extra * db_share
+        # 기본 급여는 :func:`db_multiple` 에서 이미 DB 몫만 남았다. 여기서 또
+        # 곱하면 두 번 깎인다.
+        return base, extra * db_share
 
     def benefit_at(
         service: float, age: float, wage: float, cause: CauseBenefit = _NO_CAUSE
@@ -657,18 +693,20 @@ def value_member(
         if allocation == "근속비례":
             return min(1.0, past_service / denominator), 1.0 / denominator
 
-        total_multiple = multiple_at(
+        # DB 몫만 센 배수로 잰다. 혼합형에 중간에 가입한 사람은 앞 구간이
+        # 전액 DB 라, 전 구간에 같은 비중을 건 배수로 재면 귀속비율이 틀린다.
+        total_multiple = db_multiple(
             max(denominator, cause.min_service), age, cause.benefit_rule
         )
         if total_multiple <= 0:
             # 배수가 0 이거나 음수인 규정(가감 규정 등)은 근속비로 되돌린다.
             return min(1.0, past_service / total_service), 1.0 / total_service
 
-        earned = multiple_at(
+        earned = db_multiple(
             max(past_service, cause.min_service), age, cause.benefit_rule
         )
         # 당기 1년치는 '한 해 더 일했을 때 배수가 얼마나 느는가'.
-        next_year = multiple_at(
+        next_year = db_multiple(
             max(min(past_service + 1.0, denominator), cause.min_service),
             age, cause.benefit_rule,
         )

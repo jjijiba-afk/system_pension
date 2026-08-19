@@ -470,6 +470,37 @@ def validate_active(
                 value=member.db_ratio, **kw,
             )
 
+        if member.mixed_plan_start_date is not None:
+            start = member.settlement_date or member.hire_date
+            if member.db_ratio >= 1:
+                # 가입일만 있고 비중이 없다. 전액 DB 로 도는데 명부에는 혼합형
+                # 표시가 있으니, 둘 중 하나는 빠진 것이다.
+                log.warning(
+                    "JAE_MIXED_NO_RATIO",
+                    "혼합형 가입일을 적었는데 [DB비율] 이 비어 있습니다. "
+                    "전액 DB 로 계산했습니다 — 혼합형이면 비율을 적어 주십시오",
+                    column=_col(sheet, "db_ratio"), **kw,
+                )
+            elif start is not None and member.mixed_plan_start_date < start:
+                # 근속 기산일보다 이르면 그 전 근속이 없다는 뜻이라, 전 근속에
+                # 비중이 걸린다. 틀린 것은 아니지만 적은 사람의 뜻과 다를 수 있다.
+                log.info(
+                    "JAE_MIXED_BEFORE_HIRE",
+                    f"혼합형 가입일 {member.mixed_plan_start_date:%Y-%m-%d} 이 "
+                    "근속 기산일보다 이릅니다. 전 근속에 DB비율이 걸립니다",
+                    column=_col(sheet, "mixed_plan_start_date"),
+                    value=member.mixed_plan_start_date, **kw,
+                )
+            elif member.mixed_plan_start_date > config.base_date:
+                log.warning(
+                    "JAE_MIXED_FUTURE",
+                    f"혼합형 가입일 {member.mixed_plan_start_date:%Y-%m-%d} 이 "
+                    "산출기준일보다 늦습니다. 아직 가입 전이면 [DB비율] 을 비워 "
+                    "주십시오 — 지금은 전 근속이 확정급여로 잡힙니다",
+                    column=_col(sheet, "mixed_plan_start_date"),
+                    value=member.mixed_plan_start_date, **kw,
+                )
+
         if member.remaining_contract_years > 50:
             log.warning(
                 "JAE_CONTRACT_YEARS_RANGE",

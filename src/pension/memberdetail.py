@@ -139,6 +139,9 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
             )
     if result.db_ratio != 1.0:
         applied["DB 비중 (혼합형)"] = (
+            f"{result.db_ratio:.2f} — 가입 전 근속 {result.mixed_service:.1f}년은 "
+            "전액, 그 뒤 근속만 이 비중으로 잡습니다"
+            if result.mixed_service else
             f"{result.db_ratio:.2f} — 급여의 이만큼만 채무로 잡습니다"
         )
     if result.progressive_service:

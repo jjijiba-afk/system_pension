@@ -454,6 +454,11 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog,
                 )
         # DB비율은 `0.99` 로도 `99` 로도 온다. 1 을 넘으면 백분율로 본다 —
         # DB 비중이 1 배를 넘는 제도는 없다. 비어 있으면 전액 DB 다.
+        member.mixed_plan_start_date = _read_date(
+            get("mixed_plan_start_date"), config, log,
+            col=_col_of(cols, "mixed_plan_start_date"),
+            code="JAE_MIXED_PLAN_START", required=False, **kw,
+        )
         ratio = _number(get("db_ratio"))
         member.db_ratio = (ratio / 100 if ratio > 1 else ratio) if ratio > 0 else 1.0
         member.settlement_amount = _number(get("settlement_amount"))
