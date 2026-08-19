@@ -213,7 +213,12 @@ def relayout_roster(source: str | Path, target: str | Path) -> ExportReport:
     """
     from . import rostertemplate as tpl
     from .layout import ACTIVE_HEADER_ALIASES, RETIRED_HEADER_ALIASES
-    from .readers import ACTIVE_SHEET_ALIASES, RETIRED_SHEET_ALIASES
+    from .readers import (
+        ACTIVE_SHEET_ALIASES,
+        PRIOR_SHEET,
+        PRIOR_SHEET_ALIASES,
+        RETIRED_SHEET_ALIASES,
+    )
     from .workbook import find_sheet, open_workbook
 
     source, target = Path(source), Path(target)
@@ -232,6 +237,15 @@ def relayout_roster(source: str | Path, target: str | Path) -> ExportReport:
                 "재직자명부의 열 이름 줄(보통 3행)이 있는지 확인하세요"
             )
 
+        # 회사가 전년명부를 붙여 보냈으면 그것도 옮겨 담는다. 되받은 파일이 곧
+        # 다음 결산에 보낼 양식이라, 여기서 흘리면 회사는 자기가 채워 보낸
+        # 자료가 사라진 파일을 돌려받는다.
+        prior_ws = find_sheet(book, *PRIOR_SHEET_ALIASES)
+        prior: list[dict] = []
+        if prior_ws is not None:
+            prior, _extras, _report = _read_sheet(
+                prior_ws, tpl.ACTIVE, ACTIVE_HEADER_ALIASES, PRIOR_SHEET)
+
         basics, groups = _basics_of(book, len(actives))
     finally:
         book.close()
@@ -243,6 +257,7 @@ def relayout_roster(source: str | Path, target: str | Path) -> ExportReport:
         groups=groups or None,
         actives=actives,
         retirees=retirees,
+        prior=prior or None,
         active_extras=active_extras,
         retired_extras=retired_extras,
     )

@@ -20,7 +20,13 @@ from .normalize import BenefitPlan, RetirementReason
 from .planassets import PlanAssets, build_plan_assets
 from .projection import Projection, project_next_year
 from .events import EventOutcome, measure_events
-from .readers import ACTIVE_SHEET, read_extra_roster, read_roster
+from .readers import (
+    ACTIVE_SHEET,
+    PRIOR_SHEET,
+    read_extra_roster,
+    read_prior_roster,
+    read_roster,
+)
 from .rollforward import (
     LongTermRollForward,
     RollForward,
@@ -276,8 +282,10 @@ def load_inputs(
         _check_general_sheet(general, log)
         roster = read_roster(wb, config, log)
         roster.extra = read_extra_roster(wb, config, log)
+        roster.prior = read_prior_roster(wb, config, log)
         _check_roster_against_movement(roster, general, log)
         _check_national_pension_against_roster(roster, general, log)
+        _check_against_prior_sheet(roster, log)
     finally:
         wb.close()
 
@@ -394,6 +402,31 @@ def _check_general_sheet(general, log: IssueLog) -> None:
 #: 단수 처리나 원 단위 반올림으로 몇 만 원이 남는 것은 흔하다. 사람 하나가
 #: 통째로 빠지면 보통 백만 원 단위로 벌어지므로, 그 사이에 문턱을 둔다.
 _ROSTER_GAP_LIMIT: Final = 1_000_000
+
+
+def _check_against_prior_sheet(roster, log: IssueLog) -> None:
+    """[전년명부] 가 있으면 당기 명부와 사람 단위로 맞대어 본다.
+
+    전기 산출 결과가 있으면 화면에서 그것과 맞대지만, 첫 해에 맡은 회사는
+    맞댈 상대가 없다 — 당기 명부가 스스로 맞다고 말하는 것 외에 확인할 길이
+    없고, 사람이 통째로 빠져도 알 수 없다. 회사가 전년 명부를 함께 보내 주면
+    그 자리를 메운다.
+
+    여기서 나오는 것은 **경고이지 오류가 아니다.** 사람이 바뀌는 것은
+    정상이고, 우리가 볼 것은 '바뀐 사실이 명부에 제대로 적혔는가' 다.
+    """
+    if not roster.prior:
+        return
+    from .models import Roster
+    from .priorcheck import compare_rosters
+
+    found = compare_rosters(roster, Roster(active=list(roster.prior)))
+    for finding in found.serious:
+        log.warning("JAE_PRIOR_SHEET", finding.message,
+                    sheet=PRIOR_SHEET, employee_id=finding.employee_id)
+    for finding in found.notes:
+        log.info("JAE_PRIOR_SHEET_NOTE", finding.message,
+                 sheet=PRIOR_SHEET, employee_id=finding.employee_id)
 
 
 def _check_national_pension_against_roster(roster, general, log: IssueLog) -> None:

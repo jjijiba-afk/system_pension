@@ -394,6 +394,13 @@ class Roster:
 
     active: list[ActiveMember] = field(default_factory=list)
     retired: list[RetiredMember] = field(default_factory=list)
+    prior: list[ActiveMember] = field(default_factory=list)
+    """[전년명부] — 전기말 재직자. 있으면 당기 명부를 맞대어 본다.
+
+    전기 산출 결과가 있으면 그것과 맞대지만, 첫 해에 맡은 회사는 맞댈 상대가
+    없다. 이 시트가 그 자리를 메운다 — 신규·퇴사 인원을 회사 자료만으로
+    검증할 수 있다.
+    """
     extra: list[ActiveMember] = field(default_factory=list)
     """[추가명부] — 축소·정산·사업결합·분할로 기중에 드나든 사람들.
 

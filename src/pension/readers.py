@@ -39,10 +39,12 @@ __all__ = [
     "ACTIVE_FIRST_ROW",
     "ACTIVE_SHEET",
     "EXTRA_SHEET",
+    "PRIOR_SHEET",
     "RETIRED_FIRST_ROW",
     "RETIRED_SHEET",
     "read_active_roster",
     "read_extra_roster",
+    "read_prior_roster",
     "read_retired_roster",
     "read_roster",
 ]
@@ -52,10 +54,21 @@ RETIRED_SHEET: Final = "퇴직자명부"
 EXTRA_SHEET: Final = "추가명부"
 """축소·정산·사업결합·분할로 기중에 드나든 사람들. 결산일 명부에는 없다."""
 
+PRIOR_SHEET: Final = "전년명부"
+"""전기말 재직자. **우리가 전기 산출을 하지 않았을 때** 특히 값이 크다.
+
+전기 산출 결과가 있으면 그것과 맞대면 되지만, 첫 해에 맡은 회사나 다른 곳에서
+넘겨받은 회사는 맞댈 상대가 없다. 그러면 당기 명부가 스스로 맞다고 말하는 것
+외에 확인할 길이 없다 — 사람이 통째로 빠져도 명부만 보아서는 알 수 없다.
+
+전년 명부를 함께 받으면 신규·퇴사 인원을 **회사 자료만으로** 검증할 수 있다.
+"""
+
 #: 같은 명부인데 통합문서마다 시트 이름이 다르다.
 ACTIVE_SHEET_ALIASES: Final = (ACTIVE_SHEET, "2)재직자명부", "재직자")
 RETIRED_SHEET_ALIASES: Final = (RETIRED_SHEET, "퇴직자")
 EXTRA_SHEET_ALIASES: Final = (EXTRA_SHEET, "특수사건명부", "제도변동명부")
+PRIOR_SHEET_ALIASES: Final = (PRIOR_SHEET, "전기명부", "전기재직자명부", "전년재직자명부")
 
 #: 머리글 없는 옛 서식의 재직자명부 데이터 시작 행.
 ACTIVE_FIRST_ROW: Final = 26
@@ -292,6 +305,13 @@ def _resolve(workbook, aliases_key: str, log: IssueLog):
         aliases, base, required = ACTIVE_HEADER_ALIASES, ACTIVE_COLUMNS, REQUIRED_ACTIVE
         fallback_start = ACTIVE_FIRST_ROW
         label = ACTIVE_SHEET
+    elif aliases_key == "prior":
+        # 전기말 재직자. 열은 재직자명부와 똑같다 — 같은 사람들의 한 해 전
+        # 모습이라 필요한 항목이 다를 이유가 없다.
+        sheet = find_sheet(workbook, *PRIOR_SHEET_ALIASES)
+        aliases, base, required = ACTIVE_HEADER_ALIASES, ACTIVE_COLUMNS, REQUIRED_ACTIVE
+        fallback_start = ACTIVE_FIRST_ROW
+        label = PRIOR_SHEET
     elif aliases_key == "extra":
         # 재직자명부와 같은 열을 쓴다 — 사건 시점의 재직자로 다시 평가할
         # 사람들이라, 필요한 항목이 똑같다. 시트 이름만 다르다.
@@ -533,6 +553,19 @@ def read_active_roster(workbook, config: CalculationConfig, log: IssueLog,
         members.append(member)
 
     return members
+
+
+def read_prior_roster(workbook, config: CalculationConfig,
+                      log: IssueLog) -> list[ActiveMember]:
+    """``전년명부`` 를 읽는다. 시트가 없으면 빈 목록.
+
+    없어도 산출은 그대로 된다 — 있으면 한 겹 더 검산할 뿐이다. 그래서 시트가
+    없다고 경고하지 않는다.
+    """
+    try:
+        return read_active_roster(workbook, config, log, which="prior")
+    except KeyError:
+        return []
 
 
 def read_extra_roster(workbook, config: CalculationConfig,

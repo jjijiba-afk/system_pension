@@ -112,6 +112,7 @@ class TestTheInputSheet:
     def test_the_workbook_has_exactly_these_sheets(self, blank) -> None:
         assert blank.sheetnames == [
             "작성요령", "기초자료", "예치금", "재직자명부", "퇴직자명부", "추가명부",
+            "전년명부",
         ]
 
     def test_the_five_blocks_are_all_on_one_sheet(self, blank) -> None:

@@ -506,6 +506,8 @@ def _guide(wb) -> None:
         ("재직자명부", "기준일 현재 재직 중인 사람"),
         ("퇴직자명부", "기중에 퇴직·전출·DC전환한 사람"),
         ("추가명부", "축소·정산·사업결합·분할이 있었으면 그 사람들. 없으면 비워 두세요"),
+        ("전년명부", "전기말 재직자. 열은 재직자명부와 같습니다. 넣어 주시면 "
+                  "신규·퇴사 인원이 제대로 반영됐는지 맞대어 봅니다"),
     ):
         ws.cell(row, 1, name).font = Font(name=FACE, size=9, bold=True)
         ws.cell(row, 2, what).font = Font(name=FACE, size=9, color="5B6478")
@@ -1225,6 +1227,7 @@ def build_workbook(
     actives: list[dict] | None = None,
     retirees: list[dict] | None = None,
     events: list[dict] | None = None,
+    prior: list[dict] | None = None,
     active_extras: tuple[str, ...] = (),
     retired_extras: tuple[str, ...] = (),
 ):
@@ -1261,6 +1264,12 @@ def build_workbook(
     # 지우지 않고 보내도 산출에서 조용히 빠진다.
     _sheet(wb, "추가명부", EXTRA, rows=events,
            examples=None if events is not None else EXTRA_EXAMPLES)
+    # 전기말 재직자. 열은 재직자명부와 똑같다 — 같은 사람들의 한 해 전 모습이라
+    # 필요한 항목이 다를 이유가 없고, 회사도 작년 파일을 그대로 붙이면 된다.
+    #
+    # 작성 예시는 넣지 않는다. 이 시트는 회사가 가진 파일을 통째로 붙이는
+    # 자리라, 예시 줄이 남아 있으면 그 사람이 전기 재직자로 섞여 든다.
+    _sheet(wb, "전년명부", ACTIVE, rows=prior if prior is not None else [])
     return wb
 
 
