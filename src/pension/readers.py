@@ -656,6 +656,7 @@ def read_retired_roster(workbook, config: CalculationConfig, log: IssueLog) -> l
         member.total_payment = _number(get("total_payment"))
         member.fund_payment = _number(get("fund_payment"))
         member.national_pension_payment = _number(get("national_pension_payment"))
+        member.cash_payment = _number(get("cash_payment"))
         member.longterm_payment = _number(get("longterm_payment"))
         member.other_payment = _number(get("other_payment"))
         member.transfer_out_payment = _number(get("transfer_out_payment"))

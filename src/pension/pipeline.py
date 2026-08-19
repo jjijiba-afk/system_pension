@@ -23,6 +23,7 @@ from .events import EventOutcome, measure_events
 from .readers import (
     ACTIVE_SHEET,
     PRIOR_SHEET,
+    RETIRED_SHEET,
     read_extra_roster,
     read_prior_roster,
     read_roster,
@@ -286,6 +287,7 @@ def load_inputs(
         _check_roster_against_movement(roster, general, log)
         _check_national_pension_against_roster(roster, general, log)
         _check_against_prior_sheet(roster, log)
+        _check_payment_bases(roster, log)
     finally:
         wb.close()
 
@@ -402,6 +404,30 @@ def _check_general_sheet(general, log: IssueLog) -> None:
 #: 단수 처리나 원 단위 반올림으로 몇 만 원이 남는 것은 흔하다. 사람 하나가
 #: 통째로 빠지면 보통 백만 원 단위로 벌어지므로, 그 사이에 문턱을 둔다.
 _ROSTER_GAP_LIMIT: Final = 1_000_000
+
+
+def _check_payment_bases(roster, log: IssueLog) -> None:
+    """전표 기준과 실지급 기준이 갈리면 그 사실을 한 줄로 알린다.
+
+    **어느 쪽이 틀린 것이 아니다.** 12월 퇴직자의 돈이 1월에 나가면 전표는
+    당기, 현금은 차기다. 갈리는 것이 정상이고, 우리가 쓰는 것은 전표 기준이다.
+
+    그래도 알려야 한다 — 증감표가 안 맞을 때 회사가 어느 기준으로 적었는지
+    모르면 원인을 짚을 수가 없다. 사람마다 말하면 소음이므로 한 줄로 접는다.
+    """
+    split = [m for m in roster.retired
+             if m.cash_payment and abs(m.cash_payment - m.total_payment) > 1]
+    if not split:
+        return
+    booked = sum(m.total_payment for m in split)
+    paid = sum(m.cash_payment for m in split)
+    log.info(
+        "TOI_PAYMENT_BASIS",
+        f"{len(split)}명의 전표 기준과 실지급 기준이 다릅니다 "
+        f"(전표 {booked:,.0f}원 · 실지급 {paid:,.0f}원). "
+        "산출과 증감표는 **전표 기준** 을 씁니다",
+        sheet=RETIRED_SHEET,
+    )
 
 
 def _check_against_prior_sheet(roster, log: IssueLog) -> None:
