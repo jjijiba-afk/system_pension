@@ -1500,15 +1500,17 @@ def test_both_screens_have_the_same_tabs(page) -> None:
 def test_a_new_build_reaches_a_device_that_already_installed_the_app(
     browser, app_url, tmp_path
 ) -> None:
-    """앱을 이미 깔아 둔 기기에 **새 판이 실제로 닿는지.**
+    """앱을 이미 깔아 둔 기기에 **승인한 새 판이 실제로 닿는지.**
 
     이것이 안 되면 화면을 아무리 고쳐도 쓰는 사람에게는 아무 일도 일어나지
-    않는다. 실제로 휴대폰이 옛 화면을 계속 띄웠고, 원인은 화면 파일
-    (index.html·app.js·app.css)에 빌드 값이 붙어 있지 않은 채 캐시 우선으로
-    나가고 있었던 것이다 — 한 번 캐시에 들어가면 그 뒤로 네트워크를 보지 않는다.
+    않는다. 실제로 휴대폰이 옛 화면을 계속 띄운 적이 있다.
 
-    여기서는 서비스워커를 등록한 기기(=브라우저 컨텍스트)를 만들어 두고,
-    서버가 내주는 app.css 를 바꾼 뒤 다시 열어 **바뀐 것이 보이는지** 본다.
+    옆 시험(``..._arrives_only_when_someone_approves_it``)이 index.html 로 보는
+    것을 여기서는 **app.css** 로 본다. 화면 파일은 세 개(index.html·app.js·
+    app.css)이고, 그중 하나만 옛 창고에 남아도 화면과 엔진이 엇갈린다.
+
+    승인 절차도 함께 태운다 — 승인 전에는 닿지 않아야 하고, 승인하면 닿아야
+    한다. 둘 중 하나만 맞으면 고친 것이 아니다.
     """
     import functools
     import http.server
@@ -1537,19 +1539,50 @@ def test_a_new_build_reaches_a_device_that_already_installed_the_app(
             "() => navigator.serviceWorker.controller !== null", timeout=60_000)
         before = first.evaluate(
             "() => getComputedStyle(document.querySelector('nav.tabs button')).paddingTop")
+        stamp = first.inner_text("#build-stamp").strip()
         first.close()
 
-        # 새 판을 올린다 — 탭 위 여백만 눈에 띄게 바꾼다.
+        # 새 판을 올린다 — 탭 위 여백만 눈에 띄게 바꾼다. 빌드가 파일 하나만
+        # 고쳐도 sw.js 의 창고 이름이 함께 갈리므로, 여기서도 그렇게 만든다.
         css = served / "app.css"
         css.write_text(css.read_text(encoding="utf-8")
                        + "\nnav.tabs button { padding-top: 41px; }\n",
                        encoding="utf-8")
+        worker = served / "sw.js"
+        worker.write_text(worker.read_text(encoding="utf-8")
+                          .replace(stamp, "f" * len(stamp)), encoding="utf-8")
 
+        # 승인 전 — 다시 열어도 옛 화면이어야 한다.
         second = context.new_page()
         second.goto(url)
         second.wait_for_selector("#run:not([disabled])", timeout=120_000)
-        after = second.evaluate(
+        second.evaluate("""async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          await registration.update();
+          for (let n = 0; n < 80 && !registration.waiting; n += 1) {
+            await new Promise((done) => setTimeout(done, 250));
+          }
+        }""")
+        second.reload()
+        second.wait_for_selector("#run:not([disabled])", timeout=120_000)
+        held = second.evaluate(
             "() => getComputedStyle(document.querySelector('nav.tabs button')).paddingTop")
+
+        # 승인 — 비밀번호 대조는 다른 시험이 본다. 통과한 뒤에 가는 길만 태운다.
+        second.evaluate("""async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          (registration.waiting || registration.active)
+            .postMessage({type: "take-over"});
+        }""")
+        after = held
+        for _ in range(5):
+            second.wait_for_timeout(1_000)
+            second.goto(url)
+            second.wait_for_selector("#run:not([disabled])", timeout=120_000)
+            after = second.evaluate(
+                "() => getComputedStyle(document.querySelector('nav.tabs button')).paddingTop")
+            if after == "41px":
+                break
         second.close()
     finally:
         context.close()
@@ -1557,9 +1590,12 @@ def test_a_new_build_reaches_a_device_that_already_installed_the_app(
         server.server_close()
 
     assert before != "41px", "시작부터 41px 이면 이 시험이 아무것도 못 본다"
+    assert held == before, (
+        f"승인하지 않았는데 새 app.css 가 들어왔습니다 ({held}). "
+        "새로고침만으로 판이 갈리면 업데이트 비밀번호가 무의미해집니다."
+    )
     assert after == "41px", (
-        f"새로 올린 app.css 가 기기에 닿지 않았습니다 (그대로 {after}). "
-        "화면 파일은 네트워크를 먼저 봐야 합니다."
+        f"승인했는데도 새 app.css 가 기기에 닿지 않았습니다 (그대로 {after})."
     )
 
 
@@ -1647,13 +1683,22 @@ def test_it_runs_with_the_network_cut(browser, tmp_path) -> None:
             server.server_close()
 
 
-def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
-    """새 판을 올렸을 때 실제로 그 판이 뜨는지.
+def test_a_new_build_arrives_only_when_someone_approves_it(browser, tmp_path) -> None:
+    """새 판은 **승인해야만** 들어온다. 그리고 승인하면 반드시 들어온다.
 
-    실제로 겪은 일이다 — 두 판을 올렸는데 휴대폰은 그 전 판을 계속 띄웠다.
-    원인은 서비스워커가 설치 때 런타임까지(14MB) 한꺼번에 받게 되어 있어서,
-    그중 하나만 실패하면 새 일꾼이 통째로 설치되지 않고 옛 일꾼이 그대로 남는
-    것이었다. 여기서는 **새 판을 올린 상황을 그대로 만들어** 확인한다.
+    두 가지를 한 자리에서 본다. 둘 다 실제로 겪은 일이라서다.
+
+    들어오지 않아야 할 때
+        예전에는 화면 파일을 네트워크 먼저로 줬다. 그래서 **새로고침 한 번,
+        앱을 껐다 켜는 것만으로 새 판이 그냥 들어왔다** — 업데이트 창에서
+        비밀번호를 받아도 소용이 없었다. 산출이 도는 중에 판이 갈리면 그
+        산출은 사라진다.
+    들어와야 할 때
+        반대로 두 판을 올렸는데 휴대폰이 그 전 판을 계속 띄운 적도 있다.
+        서비스워커가 설치 때 런타임까지(14MB) 한꺼번에 받게 되어 있어서,
+        그중 하나만 실패하면 새 일꾼이 통째로 설치되지 않았다.
+
+    여기서는 **새 판을 올린 상황을 그대로 만들어** 양쪽을 확인한다.
     """
     import http.server
     import re
@@ -1691,15 +1736,46 @@ def test_a_new_build_replaces_the_old_one(browser, tmp_path) -> None:
         app.write_text(app.read_text(encoding="utf-8") + "\n// 새 판\n",
                        encoding="utf-8")
 
-        # 다시 열면 새 일꾼이 들어와 자리를 넘겨받아야 한다.
+        # 새 판을 **받아만 놓게** 한다. 여기까지는 브라우저가 알아서 하는 일이라
+        # 사람의 승인과 무관하다 — 받아 놓은 것이 화면까지 오면 안 된다.
+        staged = page.evaluate("""async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          await registration.update();
+          for (let n = 0; n < 80 && !registration.waiting; n += 1) {
+            await new Promise((done) => setTimeout(done, 250));
+          }
+          return (await caches.keys()).length;
+        }""")
+        assert staged >= 2, f"새 판을 받아 놓지도 못했다 (창고 {staged}개)"
+
+        # ① 승인하기 전에는 몇 번을 다시 열어도 옛 판이어야 한다. 예전에는 이
+        #    자리에서 새 판이 그냥 들어왔다 — 비밀번호를 받아도 소용이 없었다.
         for _ in range(3):
+            page.goto(url)
+            page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
+            page.wait_for_timeout(1_000)
+            assert page.inner_text("#build-stamp").strip() == before, (
+                "새로고침만으로 새 판이 들어왔다 — 비밀번호가 무의미해진다")
+
+        # ② 승인하면 들어와야 한다. 비밀번호 대조는 다른 시험이 보므로, 여기서는
+        #    통과한 뒤에 가는 길(``take-over``)만 그대로 태워 본다.
+        page.evaluate("""async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          await registration.update();
+          for (let n = 0; n < 80 && !registration.waiting; n += 1) {
+            await new Promise((done) => setTimeout(done, 250));
+          }
+          (registration.waiting || registration.active)
+            .postMessage({type: "take-over"});
+        }""")
+        for _ in range(5):
+            page.wait_for_timeout(1_000)
             page.goto(url)
             page.wait_for_selector("#build-stamp:not(:empty)", timeout=30_000)
             if page.inner_text("#build-stamp").strip() == after:
                 break
-            page.wait_for_timeout(1_000)
         assert page.inner_text("#build-stamp").strip() == after, (
-            f"옛 판이 그대로 뜬다: {page.inner_text('#build-stamp')}")
+            f"승인했는데도 옛 판이 그대로 뜬다: {page.inner_text('#build-stamp')}")
 
         # 새 일꾼이 무거운 것을 설치 때 받지 않는지 — 여기가 막히면 되풀이된다.
         worker = (site / "sw.js").read_text(encoding="utf-8")

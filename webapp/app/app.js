@@ -3768,9 +3768,14 @@ async function applyUpdate() {
   updating = true;                  // 떠나기 경고를 건너뛴다 — 이미 물어봤다
   try {
     const registration = await navigator.serviceWorker?.getRegistration();
-    // 기다리고 있는 새 일꾼이 있으면 이 순간에만 자리를 넘겨받게 한다.
-    if (registration?.waiting) {
-      registration.waiting.postMessage({ type: "take-over" });
+    if (registration) {
+      // 새 판을 아직 안 받아 왔을 수 있다 — 받아 올 때까지 잠깐 기다린다.
+      // 여기서 옛 일꾼에게 신호를 보내면 승인만 헛돌고 판은 그대로다.
+      await registration.update().catch(() => {});
+      const worker = (await waitForNewWorker(registration)) || registration.active;
+      // 이 신호가 **판을 옮기는 유일한 통로다.** 새로고침도 앱을 껐다 켜는
+      // 것도 판을 못 옮긴다 — 일꾼이 승인된 판만 내주기 때문이다.
+      worker?.postMessage({ type: "take-over" });
       await new Promise((done) => {
         navigator.serviceWorker.addEventListener("controllerchange", done, { once: true });
         setTimeout(done, 3000);     // 안 바뀌어도 새로고침은 한다
@@ -3780,6 +3785,19 @@ async function applyUpdate() {
     /* 일꾼이 없어도 새로고침만으로 새 화면을 받는다 */
   }
   location.reload();
+}
+
+/** 새 일꾼이 설치를 마치고 대기열에 설 때까지 기다린다. 없으면 ``null``. */
+function waitForNewWorker(registration, limit = 15_000) {
+  return new Promise((done) => {
+    const started = Date.now();
+    const look = () => {
+      if (registration.waiting) return done(registration.waiting);
+      if (Date.now() - started > limit) return done(null);
+      setTimeout(look, 250);
+    };
+    look();
+  });
 }
 
 $("update-open").addEventListener("click", showUpdate);
