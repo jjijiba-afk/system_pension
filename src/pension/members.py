@@ -69,6 +69,12 @@ class MemberRow:
     dbo_voluntary: float = 0.0
     """중도퇴직 몫의 확정급여채무."""
     dbo_death: float = 0.0
+    dbo_extra: float = 0.0
+    """위 셋 안에 들어 있는 **가산**(사망 위로금 등)의 몫.
+
+    규정에 가산 한 줄을 넣은 것이 채무를 얼마나 움직였는지, 합계만 보고는 알
+    수 없다. 따로 세워 두면 그 줄을 넣기 전 값과 그 자리에서 맞대어 볼 수 있다.
+    """
     """사망 몫의 확정급여채무. 셋의 합이 :attr:`dbo` 와 같다."""
     service_cost: float = 0.0
     interest_cost: float = 0.0
@@ -119,6 +125,7 @@ _COLUMNS: tuple[tuple[str, str, str, int], ...] = (
     ("DBO(정년)", "dbo_normal", _MONEY, 14),
     ("DBO(중도)", "dbo_voluntary", _MONEY, 14),
     ("DBO(사망)", "dbo_death", _MONEY, 14),
+    ("DBO(그중 가산)", "dbo_extra", _MONEY, 15),
     ("당기근무원가", "service_cost", _MONEY, 14),
     ("이자원가(차기)", "interest_cost", _MONEY, 14),
     ("듀레이션", "duration", _YEARS, 10),
@@ -168,6 +175,8 @@ def build_member_rows(run: PensionRun) -> list[MemberRow]:
             dbo_normal=member.by_cause.get(CAUSE_NORMAL, {}).get("dbo", 0.0),
             dbo_voluntary=member.by_cause.get(CAUSE_VOLUNTARY, {}).get("dbo", 0.0),
             dbo_death=member.by_cause.get(CAUSE_DEATH, {}).get("dbo", 0.0),
+            dbo_extra=sum(share.get("extra", 0.0)
+                          for share in member.by_cause.values()),
             service_cost=member.service_cost,
             interest_cost=member.interest_cost,
             duration=member.duration,

@@ -2355,15 +2355,21 @@ function drawDashGroups() {
     : "";
 
   const causes = d.causes || [];
+  // [그중 가산] 은 위로금처럼 규정이 얹어 준 몫이다. 확정급여채무 안에 이미
+  // 들어 있으므로 합계에 다시 더하지 않는다 — 규정에 한 줄 넣은 것이 채무를
+  // 얼마나 움직였는지 그 자리에서 보이려고 세운 열이다.
+  const sum = (key) => causes.reduce((s, c) => s + (c[key] || 0), 0);
   dataTable($("dash-causes"),
-    ["급부 (퇴직사유)", "확정급여채무", "당기근무원가", "급여 현가", "채무 비중"],
-    causes.map((c) => [c.name, won(c.dbo), won(c.sc), won(c.pv),
+    ["급부 (퇴직사유)", "확정급여채무", "그중 가산", "당기근무원가", "급여 현가",
+     "채무 비중"],
+    causes.map((c) => [c.name, won(c.dbo), won(c.extra || 0), won(c.sc), won(c.pv),
                        pctOf(t.dbo ? c.dbo / t.dbo : 0, 1)]),
     causes.length
       ? `<tr class="total"><td>합계</td>
-         <td class="num">${won(causes.reduce((s, c) => s + c.dbo, 0))}</td>
-         <td class="num">${won(causes.reduce((s, c) => s + c.sc, 0))}</td>
-         <td class="num">${won(causes.reduce((s, c) => s + c.pv, 0))}</td>
+         <td class="num">${won(sum("dbo"))}</td>
+         <td class="num">${won(sum("extra"))}</td>
+         <td class="num">${won(sum("sc"))}</td>
+         <td class="num">${won(sum("pv"))}</td>
          <td class="num">100.0%</td></tr>`
       : "");
 }
@@ -2633,6 +2639,7 @@ async function showDoc(name) {
     };
     $("print-download").onclick = () =>
       saveText(page, `${name}.html`, "text/html");
+    $("print-excel").hidden = true;
     const md = $("print-source");
     md.hidden = false;
     md.onclick = () => saveText(source, `${name}.md`, "text/markdown");
@@ -2661,6 +2668,7 @@ function showValuationReport(kind) {
     };
     $("print-download").onclick = () => download(path, filename, "text/html");
     $("print-source").hidden = true;      // 보고서에는 원본(.md) 이 없다
+    $("print-excel").hidden = true;
     $("print-dialog").showModal();
   } catch (error) {
     alert(error.message);
@@ -2757,10 +2765,14 @@ function longtermTraceTable(trace) {
       ...cells.map((c, i) => el("td", { class: i >= 3 ? "num" : "" }, String(c)))))));
 }
 
+// 방금 조회한 사번·출처. 엑셀로 다시 낼 때 **같은 자료** 를 부르려고 둔다.
+let lastMemberQuery = null;
+
 function showMemberDetail(args, sourceLabel) {
   let detail;
+  const query = { work: "/work", ...args };
   try {
-    detail = py("member_detail", { work: "/work", ...args });
+    detail = py("member_detail", query);
   } catch (error) {
     alert(error.message);
     return;
@@ -2828,6 +2840,7 @@ function showMemberDetail(args, sourceLabel) {
     body.append(el("h3", {}, "합계 (지급 구간 전체)"),
       kvTable(Object.entries(detail.total).map(([k, v]) => [k, won(v) + "원"])));
   }
+  lastMemberQuery = query;
   // 처음부터 보고서와 같은 문서 모양으로 띄운다. 감사인에게 그대로 건네는
   // 근거 자료라, 화면에서 보던 것과 인쇄물이 다르면 두 번 확인해야 한다.
   openMemberPage();
@@ -2883,6 +2896,22 @@ function openMemberPage() {
   };
   $("print-download").onclick = () => download(path, filename, "text/html");
   $("print-source").hidden = true;
+  // 받는 사람은 숫자를 자기 파일에 붙여 다시 계산해 본다. 표가 그림으로
+  // 굳어 있으면 한 줄씩 손으로 옮겨 적어야 하고, 옮기다 틀리면 그 값으로
+  // 우리 산출을 의심하게 된다. 화면과 **같은 자료** 를 엑셀로도 낸다.
+  const book = `/work/${filename.replace(/\.html$/, ".xlsx")}`;
+  $("print-excel").hidden = false;
+  $("print-excel").onclick = () => {
+    try {
+      status("엑셀을 만드는 중…");
+      py("member_detail", { ...lastMemberQuery, excel: book });
+      download(book, book.split("/").pop(),
+               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      status("개인별 산출 근거를 엑셀로 내려받았습니다.");
+    } catch (error) {
+      status("엑셀을 만들지 못했습니다 — " + (error.message || error));
+    }
+  };
   $("print-dialog").showModal();
 }
 

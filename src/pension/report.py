@@ -252,7 +252,7 @@ def _summary_sheet(wb, run: PensionRun) -> None:
         # 알아챈다. 합은 위 확정급여채무와 원 단위까지 같다.
         section("퇴직사유별 (급부별) 금액")
         for column, title in ((2, "퇴직사유"), (3, "확정급여채무"),
-                              (4, "당기근무원가"), (5, "비중")):
+                              (4, "당기근무원가"), (5, "그중 가산"), (6, "비중")):
             cell = ws.cell(row, column, title)
             cell.font = st["header"]
             cell.fill = st["header_fill"]
@@ -263,17 +263,21 @@ def _summary_sheet(wb, run: PensionRun) -> None:
             ws.cell(row, 2, name)
             ws.cell(row, 3, share["dbo"]).number_format = _MONEY
             ws.cell(row, 4, share["service_cost"]).number_format = _MONEY
+            # 가산(위로금 등)이 만든 몫. 채무 안에 이미 들어 있는 값이라 합계에
+            # 더하지 않는다 — 규정 한 줄이 얼마를 만들었는지 보이려고 세운 열이다.
+            ws.cell(row, 5, share.get("extra", 0.0)).number_format = _MONEY
             # 합계는 수식으로 둔다. 박아 넣은 숫자는 감사인이 눌러 봐도 무엇을
             # 더한 것인지 알 수 없다.
-            ws.cell(row, 5, f"=C{row}/$C${first_cause + len(causes)}"
+            ws.cell(row, 6, f"=C{row}/$C${first_cause + len(causes)}"
                     ).number_format = "0.0%"
-            for column in range(2, 6):
+            for column in range(2, 7):
                 ws.cell(row, column).border = st["border"]
             row += 1
         ws.cell(row, 2, "합계 (= 확정급여채무)").font = st["total"]
         ws.cell(row, 3, f"=SUM(C{first_cause}:C{row - 1})").number_format = _MONEY
         ws.cell(row, 4, f"=SUM(D{first_cause}:D{row - 1})").number_format = _MONEY
-        for column in range(2, 6):
+        ws.cell(row, 5, f"=SUM(E{first_cause}:E{row - 1})").number_format = _MONEY
+        for column in range(2, 7):
             ws.cell(row, column).border = st["border"]
             ws.cell(row, column).font = st["total"]
             ws.cell(row, column).fill = st["total_fill"]

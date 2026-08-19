@@ -194,7 +194,9 @@ class MemberValuation:
     """
 
     by_cause: dict[str, dict[str, float]] = field(default_factory=dict)
-    """퇴직사유별 몫 — ``{사유: {"dbo": …, "service_cost": …, "benefit_pv": …}}``.
+    """퇴직사유별 몫 — ``{사유: {"dbo": …, "service_cost": …, "benefit_pv": …,
+    "extra": …}}``. ``extra`` 는 그 사유의 채무 중 **가산이 만든 몫** 이며
+    ``dbo`` 안에 이미 들어 있다.
 
     사유마다 지급률이 다른 규정에서는 합계만으로는 검산이 안 된다. 어느 사유가
     채무를 얼마나 만들었는지 보이지 않으면, 지급률 한 칸을 잘못 넣어도 총액이
@@ -265,10 +267,12 @@ class ValuationResult:
         for member in self.members:
             for cause, share in member.by_cause.items():
                 into = found.setdefault(
-                    cause, {"dbo": 0.0, "service_cost": 0.0, "benefit_pv": 0.0, "n": 0})
+                    cause, {"dbo": 0.0, "service_cost": 0.0, "benefit_pv": 0.0,
+                            "extra": 0.0, "n": 0})
                 into["dbo"] += share["dbo"]
                 into["service_cost"] += share["service_cost"]
                 into["benefit_pv"] += share["benefit_pv"]
+                into["extra"] += share.get("extra", 0.0)
                 into["n"] += 1
         # 정년 → 중도 → 사망 차례. 산출표를 볼 때 늘 이 순서로 읽는다.
         order = {CAUSE_NORMAL: 0, CAUSE_VOLUNTARY: 1, CAUSE_DEATH: 2}
@@ -676,27 +680,32 @@ def value_member(
     def weigh(
         cause_name: str, total_service: float, exit_age: float, wage: float,
         basis: float | None = None,
-    ) -> tuple[float, float]:
-        """``(귀속된 급여, 당기 1년치 급여)``. 확률·할인 전 금액이다.
+    ) -> tuple[float, float, float]:
+        """``(귀속된 급여, 당기 1년치 급여, 그중 가산 몫)``. 확률·할인 전이다.
 
         기본 급여와 가산 급여를 따로 귀속한 뒤 합친다. 반올림은 실제 지급액에
         거는 것이므로, 합계에 한 번 걸고 그 비율만큼 두 몫을 함께 조정한다.
+
+        가산 몫을 **따로 돌려주는** 이유는, 사망 위로금 같은 것이 채무의 얼마를
+        만들었는지 합계만 보고는 알 수 없기 때문이다. 규정에 한 줄 넣은 것이
+        총액을 얼마나 움직였는지 그 자리에서 보여야 검산이 된다.
         """
         cause = causes.get(rule, cause_name)
         service = max(total_service, cause.min_service)
         if minimum > 0 and service < minimum:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
 
         base, extra = parts_at(cause, total_service, exit_age, wage)
         raw = base + extra
         if raw <= 0:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
         paid = round_amount(raw, rounding_unit, rounding_mode)
         scale = paid / raw
 
         share, unit_share = attribution_at(total_service, exit_age, cause, basis)
         attributed = base * share
         unit = base * unit_share
+        extra_part = 0.0
 
         if extra:
             if cause.attribution_basis(cause_name) == ATTRIB_IMMEDIATE:
@@ -712,11 +721,13 @@ def value_member(
                 earned = min(earned, extra)
                 attributed += earned
                 unit += max(0.0, min(next_year, extra) - earned)
+                extra_part = earned
             else:
                 attributed += extra * share
                 unit += extra * unit_share
+                extra_part = extra * share
 
-        return attributed * scale, unit * scale
+        return attributed * scale, unit * scale, extra_part * scale
 
     # 기준일 현재 즉시 퇴직 시 지급액. 귀속비율 1.0 에 해당한다.
     # 추계액은 '지금 자발적으로 나가면 얼마' 이므로 중도퇴직 규정으로 잰다.
@@ -839,7 +850,7 @@ def value_member(
                 pay_wage, basis = wage, total_service
             else:
                 pay_wage, basis = opening_wage, service_at(t - 1.0)
-            attributed, unit = weigh(
+            attributed, unit, extra_share = weigh(
                 cause_name, total_service, exit_age, pay_wage, basis)
             cause_spec = causes.get(rule, cause_name)
             benefit = benefit_at(total_service, exit_age, pay_wage, cause_spec)
@@ -852,11 +863,17 @@ def value_member(
             benefit_pv += part_pv
 
             # 사유별 몫을 따로 쌓아 둔다. 합은 위의 총액과 같다.
+            #
+            # `extra` 는 그중 **가산이 만든 몫** 이다(사망 위로금 등). 규정에
+            # 한 줄 넣은 것이 채무를 얼마나 움직였는지 합계만 보고는 알 수
+            # 없어서, 같은 자리에 따로 담아 둔다. `dbo` 안에 이미 포함돼 있다.
             share = result.by_cause.setdefault(
-                cause_name, {"dbo": 0.0, "service_cost": 0.0, "benefit_pv": 0.0})
+                cause_name,
+                {"dbo": 0.0, "service_cost": 0.0, "benefit_pv": 0.0, "extra": 0.0})
             share["dbo"] += part_dbo
             share["service_cost"] += part_cost
             share["benefit_pv"] += part_pv
+            share["extra"] += extra_share * exit_probability * discount
             weighted_time += attributed * exit_probability * discount * timing
             # 할인 전 현금흐름. 단일할인율 역산과 만기분석 공시에 쓴다.
             flow = attributed * exit_probability

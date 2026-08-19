@@ -848,6 +848,30 @@ def test_member_lookup_and_reports(page, tmp_path) -> None:
     # 반영됐는지 볼 수 없다.
     service = re.search(r"기준일 근속\s*([\d.]+)", body)
     assert service and "." in service.group(1), body[:400]
+    # 엑셀로도 받을 수 있어야 한다. 받는 사람은 숫자를 자기 파일에 붙여 다시
+    # 계산해 보는데, 표가 그림으로 굳어 있으면 한 줄씩 손으로 옮겨 적게 된다.
+    with page.expect_download(timeout=120_000) as got:
+        page.click("#print-excel")
+    made = got.value
+    assert made.suggested_filename.endswith(".xlsx"), made.suggested_filename
+    book = tmp_path / made.suggested_filename
+    made.save_as(str(book))
+
+    import openpyxl
+
+    wb = openpyxl.load_workbook(book)
+    assert "산출근거" in wb.sheetnames, wb.sheetnames
+    assert any("연차별" in name for name in wb.sheetnames), wb.sheetnames
+    labels = {str(wb["산출근거"].cell(r, 2).value)
+              for r in range(1, wb["산출근거"].max_row + 1)}
+    assert "확정급여채무 (DBO)" in labels, sorted(labels)
+    assert "DBO — 정년" in labels and "DBO — 사망" in labels, sorted(labels)
+    # 연차별 근거의 줄 합계가 곧 그 사람의 채무다 — 수식으로 두어야 검산이 된다.
+    trace = wb[next(n for n in wb.sheetnames if "연차별" in n)]
+    formulas = [trace.cell(trace.max_row, c).value
+                for c in range(1, trace.max_column + 1)]
+    assert any(isinstance(v, str) and v.startswith("=SUM(") for v in formulas), formulas
+
     page.click("#print-dialog .toolbar button:last-child")
     page.wait_for_selector("#print-dialog[open]", state="detached", timeout=10_000)
 

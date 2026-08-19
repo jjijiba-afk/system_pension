@@ -162,6 +162,10 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
             "DBO — 정년": result.by_cause.get(CAUSE_NORMAL, {}).get("dbo", 0.0),
             "DBO — 중도": result.by_cause.get(CAUSE_VOLUNTARY, {}).get("dbo", 0.0),
             "DBO — 사망": result.by_cause.get(CAUSE_DEATH, {}).get("dbo", 0.0),
+            # 위 셋 안에 이미 들어 있는 가산(위로금 등)의 몫. 규정에 한 줄
+            # 넣은 것이 채무를 얼마나 움직였는지 합계만 보고는 알 수 없다.
+            "DBO — 그중 가산": sum(
+                share.get("extra", 0.0) for share in result.by_cause.values()),
             "당기근무원가": result.service_cost,
             "이자원가 (차기)": result.interest_cost,
             "지급률 (누적 배수)": result.accrued_multiple,
@@ -169,9 +173,11 @@ def _active_block(member: Any, config: Any, assumptions: Any) -> dict[str, Any]:
             "듀레이션 (년)": result.duration,
         },
         # 사유별로 갈라 놓은 몫. 합은 위의 채무·근무원가와 같다.
+        # ``extra`` 는 그중 가산(위로금 등)이 만든 몫이며 ``dbo`` 에 이미 들어 있다.
         "by_cause": [
             {"cause": cause, "dbo": share["dbo"],
-             "service_cost": share["service_cost"], "benefit_pv": share["benefit_pv"]}
+             "service_cost": share["service_cost"], "benefit_pv": share["benefit_pv"],
+             "extra": share.get("extra", 0.0)}
             for cause, share in result.by_cause.items()
         ],
         "trace": trace,

@@ -916,10 +916,19 @@ def _member_detail(request: dict) -> dict[str, Any]:
             raise ValueError("먼저 산출을 실행하거나 저장된 산출을 선택하십시오")
         base_date = _as_date(request.get("base_date") or last.get("base_date"))
 
-    return lookup(
+    detail = lookup(
         roster_path, assumptions_path, text(request.get("employee_id")),
         base_date=base_date,
     )
+    # 엑셀로도 받겠다고 하면 같은 자료를 그대로 한 부 써 둔다. 다시 계산하지
+    # 않으므로 화면 숫자와 파일 숫자가 어긋날 길이 없다.
+    target = text(request.get("excel"))
+    if target:
+        from .memberbook import write_member_book
+
+        write_member_book(detail, target)
+        detail["excel"] = target
+    return detail
 
 
 # ── 분석 화면 ────────────────────────────────────────────────────

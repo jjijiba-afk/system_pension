@@ -158,8 +158,10 @@ def build(run: Any, employee_id: str = "") -> dict[str, Any]:
                    for n, (c, d, s) in val.by_job_group().items()],
         # 퇴직사유별 몫. 사유마다 지급률이 다른 규정에서는 합계만으로 검산이
         # 안 된다 — 한 칸을 잘못 넣어도 총액은 조금 움직일 뿐이다.
+        # ``extra`` 는 그 사유의 채무 중 가산(위로금 등)이 만든 몫이다.
+        # ``dbo`` 안에 이미 들어 있으므로 합계에 다시 더하지 않는다.
         "causes": [{"name": name, "dbo": share["dbo"], "sc": share["service_cost"],
-                    "pv": share["benefit_pv"]}
+                    "pv": share["benefit_pv"], "extra": share.get("extra", 0.0)}
                    for name, share in val.by_cause().items()],
         "excluded": val.exclusion_summary(),
         "rollforward": [[k, a] for k, a in roll.as_rows()] if roll else [],
